@@ -560,19 +560,63 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return False
 
 
+# Unique-id fragments of the entities that ship disabled from v3 onwards.
+# entity_registry_enabled_default only applies the first time an entity is
+# registered, so an install that predates that change keeps them switched on;
+# the v3 migration below turns them off once.
+_OFF_BY_DEFAULT_UNIQUE_ID_PATTERNS: tuple[str, ...] = (
+    "_cover_sunroof",            # cover.py _key = "sunroof"
+    "_cover_sunshade",           # cover.py _key = "sunshade"
+    "_cover_windows",            # cover.py _key = "windows"
+    "_sw_window_ventilation",    # switch.py
+)
+
+
+def _disable_off_by_default_entities(hass: HomeAssistant, entry: ConfigEntry) -> int:
+    """Switch off the entities that are created disabled from v3 onwards.
+
+    Only ever disables - the user can turn any of them back on, and nothing is
+    removed, so no history is lost."""
+    registry = er.async_get(hass)
+    disabled = 0
+    for reg_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
+        if reg_entry.disabled_by is not None:
+            continue
+        if not any(p in reg_entry.unique_id for p in _OFF_BY_DEFAULT_UNIQUE_ID_PATTERNS):
+            continue
+        registry.async_update_entity(
+            reg_entry.entity_id, disabled_by=er.RegistryEntryDisabler.INTEGRATION
+        )
+        disabled += 1
+    if disabled:
+        _LOGGER.info(
+            "Disabled %d window/sunroof entities that now ship off by default; "
+            "re-enable any you want under Settings -> Devices & Services -> "
+            "Geely Connect -> Entities", disabled,
+        )
+    return disabled
+
+
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Migrate v1 entries (no idfa/idfv, no vehicle metadata) to v2.
-    Old entries keep working - missing fields just fall back to safe
-    defaults; the only behavioral change is that fresh per-install idfa/
-    idfv pairs are generated so future logins don't kick the iPhone."""
-    if entry.version >= 2:
+    """Migrate older entries forward.
+
+    v1 -> v2: generate per-install idfa/idfv so future logins don't kick the
+    iPhone off. v2 -> v3: switch off the window, sunroof, sunshade and
+    window-ventilation entities, which now ship disabled because opening them
+    by accident from a dashboard leaves the car exposed. Everything else keeps
+    working; missing fields fall back to safe defaults."""
+    if entry.version >= 3:
         return True
-    from .api import make_install_fingerprint
+
     new_data = dict(entry.data)
-    if not new_data.get("device_idfa"):
-        idfa, idfv = make_install_fingerprint()
-        new_data["device_idfa"] = idfa
-        new_data["device_idfv"] = idfv
-    hass.config_entries.async_update_entry(entry, data=new_data, version=2)
-    _LOGGER.info("Migrated geely_connect entry %s to v2", entry.entry_id)
+    if entry.version < 2:
+        from .api import make_install_fingerprint
+        if not new_data.get("device_idfa"):
+            idfa, idfv = make_install_fingerprint()
+            new_data["device_idfa"] = idfa
+            new_data["device_idfv"] = idfv
+
+    _disable_off_by_default_entities(hass, entry)
+    hass.config_entries.async_update_entry(entry, data=new_data, version=3)
+    _LOGGER.info("Migrated geely_connect entry %s to v3", entry.entry_id)
     return True
