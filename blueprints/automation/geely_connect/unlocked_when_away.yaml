@@ -1,0 +1,48 @@
+blueprint:
+  name: Geely Connect — Left unlocked away from home
+  description: Alert (or auto-lock) if the car is unlocked while not at home.
+  domain: automation
+  input:
+    lock_entity:
+      name: Car lock
+      selector: { entity: { domain: lock } }
+    car_tracker:
+      name: Car device tracker
+      selector: { entity: { domain: device_tracker } }
+    grace_minutes:
+      name: Grace period (minutes)
+      default: 5
+      selector: { number: { min: 1, max: 60, step: 1, unit_of_measurement: min } }
+    auto_lock:
+      name: Auto-lock instead of just notifying
+      default: false
+      selector: { boolean: {} }
+    notify_target:
+      name: Notify service
+      default: notify.notify
+      selector: { text: {} }
+trigger:
+  - platform: state
+    entity_id: !input lock_entity
+    to: "unlocked"
+    for:
+      minutes: !input grace_minutes
+condition:
+  - condition: template
+    value_template: "{{ not is_state(car_tracker, 'home') }}"
+    variables:
+      car_tracker: !input car_tracker
+action:
+  - choose:
+      - conditions: "{{ auto_lock }}"
+        sequence:
+          - service: lock.lock
+            target: { entity_id: !input lock_entity }
+          - service: !input notify_target
+            data: { title: "🔒 Geely — auto-locked", message: "Car was unlocked away from home; locked it." }
+    default:
+      - service: !input notify_target
+        data: { title: "🔓 Geely — unlocked away", message: "Your car is unlocked and not at home." }
+    variables:
+      auto_lock: !input auto_lock
+mode: single

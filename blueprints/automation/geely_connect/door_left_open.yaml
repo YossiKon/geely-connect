@@ -1,0 +1,31 @@
+blueprint:
+  name: Geely Connect — Door/trunk left open
+  description: Alert if a door, the trunk or the hood stays open for a while.
+  domain: automation
+  input:
+    opening_sensor:
+      name: Opening binary sensor (door/trunk/hood)
+      selector:
+        entity: { domain: binary_sensor }
+    open_minutes:
+      name: Minutes open before alerting
+      default: 3
+      selector:
+        number: { min: 1, max: 60, step: 1, unit_of_measurement: min }
+    notify_target:
+      name: Notify service
+      default: notify.notify
+      selector:
+        text:
+trigger:
+  - platform: state
+    entity_id: !input opening_sensor
+    to: "on"
+    for:
+      minutes: !input open_minutes
+action:
+  - service: !input notify_target
+    data:
+      title: "⚠️ Geely — left open"
+      message: "{{ state_attr(trigger.entity_id,'friendly_name') or trigger.entity_id }} has been open for a while."
+mode: single

@@ -1,0 +1,1113 @@
+"""Self-contained Geely TSP / mTLS API client.
+
+Bundles the proven HMAC-SHA1 7-field signer + raw-socket mTLS helper from
+poc/geely_mtls.py so this integration has no external poc/ dependency at
+runtime.
+
+All public methods are sync - HA wraps them with async_add_executor_job.
+"""
+# -----------------------------------------------------------------------------
+# Portions of this file — the reverse-engineered Geely protocol / field mappings
+# (the parts that required protocol research) — are derived from
+# nitaybz/geely-global-ha, used under the MIT License. See NOTICE.txt.
+# Original framework, security hardening and transport are our own work.
+# -----------------------------------------------------------------------------
+from __future__ import annotations
+
+import base64
+import hashlib
+import hmac
+import json
+import logging
+import os
+import socket
+import ssl
+import time
+import uuid
+from typing import Any
+from urllib.parse import parse_qsl, quote, urlparse
+
+_LOGGER = logging.getLogger(__name__)
+
+
+class GeelyAuthError(Exception):
+    """Raised when the Geely server rejects our credentials.
+
+    Caused by: cidpsso token revoked (e.g. iPhone re-login kicked us out,
+    or token aged out), or apis.ecloudeu JWT permanently invalid. The
+    coordinator should catch this and surface a re-auth flow."""
+
+
+class GeelyControlError(Exception):
+    """Raised when the Geely server rejects a control command.
+
+    Common causes:
+      - code "8070" 'The last request has not yet been executed'
+        (rate-limit; previous command still pending)
+      - code "failure" 'Operation failed' (wrong serviceId/params for
+        this trim)
+      - code 1404/1405 (feature unavailable / vehicle in wrong state)
+    Entities should catch this and re-raise as HomeAssistantError so
+    the user sees a toast notification.
+    """
+
+    def __init__(self, code: Any, message: str | None) -> None:
+        self.code = code
+        self.message = message or f"Geely server returned code={code!r}"
+        super().__init__(self.message)
+
+
+# Error codes the Geely gateway returns when our session is invalid.
+# Distilled from observed responses + poc/geely_client.py.
+_AUTH_FAILURE_CODES: set = {
+    # cidpsso/cidpcar token rejected
+    60000000, 60000001, 60000110,
+    "60000000", "60000001", "60000110",
+    # apis.ecloudeu JWT invalid / expired beyond auto-refresh
+    1402, "1402",
+}
+
+# Codes we treat as "command accepted by the server".
+_CONTROL_SUCCESS_CODES: set = {1000, "1000"}
+
+
+# Keys whose values are secrets and must never reach logs or exception text.
+# Values compared after normalizing the key with lower() + stripping "-"/"_",
+# so every entry here must be in that separator-free form.
+_SECRET_KEYS: set = {
+    "token", "accesstoken", "accesscode", "authcode", "refreshtoken",
+    "cert", "csr", "key", "privatekey", "password",
+    "passtoken", "captchaoutput", "sessionid",
+    "cidpssotoken", "jwt", "secret", "appsecret",
+}
+
+
+def _no_crlf(value: str, what: str) -> str:
+    """Guard against HTTP request-line / header injection. The VIN and user_id
+    originate from the Geely backend JSON and are interpolated into a hand-built
+    raw HTTP request; a CR/LF there would allow header injection / request
+    smuggling. Reject rather than sanitize."""
+    if "\r" in value or "\n" in value:
+        raise ValueError(f"illegal CR/LF in {what}")
+    return value
+
+
+def _redact(obj: Any):
+    """Return a copy of a server response / dict with secret values masked.
+
+    Used anywhere a raw response is folded into a log line or exception
+    message. Prevents tokens, JWTs, and certificate material from being
+    written to Home Assistant's log file, which is often shared when a
+    user asks for help.
+    """
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            if isinstance(k, str) and k.lower().replace("-", "").replace("_", "") in _SECRET_KEYS:
+                out[k] = "***redacted***"
+            else:
+                out[k] = _redact(v)
+        return out
+    if isinstance(obj, (list, tuple)):
+        return [_redact(v) for v in obj]
+    return obj
+
+
+def _is_auth_failure(resp: dict) -> bool:
+    return resp.get("code") in _AUTH_FAILURE_CODES
+
+
+def _check_control_resp(resp: dict) -> dict:
+    """Raise GeelyControlError if the response is not a success.
+
+    Note: a successful response (`code=1000, success=True`) means the
+    GATEWAY accepted the command - not that the car physically executed
+    it. Status-field diff is the only way to verify execution. But this
+    check at least catches obvious failures (wrong params, rate limit,
+    unsupported feature).
+    """
+    if _is_auth_failure(resp):
+        raise GeelyAuthError(f"control rejected: {resp.get('code')}")
+    code = resp.get("code")
+    if code in _CONTROL_SUCCESS_CODES and resp.get("success") in (True, "true"):
+        return resp
+    raise GeelyControlError(code, resp.get("message"))
+
+
+# ---------- HMAC signer (proven bit-exact against iOS framework) ----------
+
+def _percent_encode_value(s: str) -> str:
+    enc = quote(s, safe="!*'();@&=+$?#[]")
+    return enc.replace("/", "%2F").replace(":", "%3A").replace(",", "%2C")
+
+
+def _build_sign_string(*, method, path, query, accept, nonce, sig_version,
+                       timestamp_ms, body) -> str:
+    accept = accept or "application/json;responseformat=3"
+    sh = {
+        "x-api-signature-nonce": nonce,
+        "x-api-signature-version": sig_version,
+    }
+    canonical_headers = "".join(f"{k}:{sh[k]}\n" for k in sorted(sh.keys()))
+    qis = sorted(parse_qsl(query, keep_blank_values=True), key=lambda kv: kv[0])
+    canonical_query = ""
+    for k, v in qis:
+        canonical_query += f"{k}={_percent_encode_value(v)}&"
+    if len(canonical_query) >= 2:
+        canonical_query = canonical_query[:-1]
+    md5_b64 = base64.b64encode(hashlib.md5(body).digest()).decode()
+    return "\n".join([accept, canonical_headers, canonical_query, md5_b64,
+                      f"{timestamp_ms}", method.upper(), path])
+
+
+def _make_nonce() -> str:
+    """Mimic Android's nonce format: 3hex-12hex 7alnum 13ts."""
+    import random, string
+    a = ''.join(random.choices('0123456789abcdef', k=3))
+    b = ''.join(random.choices('0123456789abcdef', k=12))
+    c = ''.join(random.choices(string.ascii_uppercase + string.digits, k=7))
+    return f"{a}-{b}{c}{int(time.time()*1000)}"
+
+
+# ---------- Raw-socket mTLS sender ----------
+
+def _parse_chunked(body: bytes) -> bytes:
+    out = b''
+    pos = 0
+    while pos < len(body):
+        end = body.find(b'\r\n', pos)
+        if end < 0:
+            break
+        try:
+            sz = int(body[pos:end], 16)
+        except ValueError:
+            break
+        if sz == 0:
+            break
+        pos = end + 2
+        out += body[pos:pos + sz]
+        pos += sz + 2
+    return out
+
+
+class GeelyTLSPinError(Exception):
+    """Raised when a server's public key does not match the stored pin.
+
+    A mismatch means the certificate the server presented is NOT the one we
+    recorded on first contact - i.e. a possible man-in-the-middle. We fail
+    the connection closed rather than sending any credentials."""
+
+
+# ---------------------------------------------------------------------------
+# Secure transport
+# ---------------------------------------------------------------------------
+# The upstream project connected with `check_hostname = False` +
+# `verify_mode = CERT_NONE`, i.e. it trusted ANY certificate any server
+# presented, on EVERY request - including the ones carrying the cidpsso
+# token, the rotating JWT, and the mTLS client key. That makes a
+# man-in-the-middle (rogue Wi-Fi, DNS spoof, compromised router) able to
+# impersonate `apis.ecloudeu.com`, capture those credentials and then
+# lock/unlock or climate-control the car.
+#
+# We replace that with a two-tier, always-fail-closed strategy:
+#
+#   1. Try a STRICT connection: full chain + hostname validation against
+#      the OS trust store (public CAs). If Geely uses public certificates
+#      this Just Works with zero config and is the strongest option.
+#
+#   2. If (and only if) strict validation fails because the chain isn't
+#      publicly trusted (Geely fronts some gateways with a private/self-
+#      signed CA - the real reason the original author disabled checks),
+#      fall back to PUBLIC-KEY PINNING: on the very first contact we record
+#      the server's SubjectPublicKeyInfo SHA-256 (trust-on-first-use, like
+#      SSH known_hosts), and on every subsequent call we REQUIRE an exact
+#      match. A MITM presenting a different key is rejected.
+#
+# At no point do we silently accept an arbitrary certificate on an ongoing
+# session, which is the property the original code lacked. (Do the initial
+# setup on a network you trust so the first-use pin is captured cleanly.)
+
+_TLS_LEGACY_RENEG = 0x4   # OP_LEGACY_SERVER_CONNECT - old handshake mode only
+
+
+def _strict_ctx() -> ssl.SSLContext:
+    """Verifying TLS context: OS trust store + certifi, hostname checked."""
+    ctx = ssl.create_default_context()
+    try:
+        import certifi
+        ctx.load_verify_locations(cafile=certifi.where())
+    except Exception:  # noqa: BLE001 - certifi optional; OS store still loaded
+        pass
+    ctx.options |= _TLS_LEGACY_RENEG
+    ctx.check_hostname = True
+    ctx.verify_mode = ssl.CERT_REQUIRED
+    return ctx
+
+
+def _pinning_ctx() -> ssl.SSLContext:
+    """Context used ONLY for the pinning fallback. Verification is done
+    manually against the stored pin after the handshake, so the context
+    itself does not chain-validate - but we never trust the result unless
+    the pin matches."""
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.options |= _TLS_LEGACY_RENEG
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+
+# Back-compat alias (older references to the private ctx helper).
+_legacy_ctx = _strict_ctx
+
+
+def _spki_sha256_b64(der_cert: bytes) -> str:
+    """SHA-256 of the certificate's SubjectPublicKeyInfo, base64. This is a
+    key pin, not a cert pin, so it survives routine certificate renewals
+    that keep the same key pair."""
+    from cryptography import x509
+    from cryptography.hazmat.primitives import serialization
+    cert = x509.load_der_x509_certificate(der_cert)
+    spki = cert.public_key().public_bytes(
+        serialization.Encoding.DER,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    return base64.b64encode(hashlib.sha256(spki).digest()).decode()
+
+
+def _load_pins(pin_path: str | None) -> dict:
+    if not pin_path or not os.path.exists(pin_path):
+        return {}
+    try:
+        with open(pin_path, "r") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except Exception:  # noqa: BLE001 - corrupt pin file: treat as empty
+        return {}
+
+
+def _save_pins(pin_path: str, pins: dict) -> None:
+    os.makedirs(os.path.dirname(pin_path), mode=0o700, exist_ok=True)
+    fd = os.open(pin_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as fh:
+        json.dump(pins, fh, indent=2, sort_keys=True)
+    try:
+        os.chmod(pin_path, 0o600)
+    except OSError:
+        pass
+
+
+def _secure_tls_connect(host: str, port: int, *, pin_path: str | None,
+                        client_cert: str | None = None,
+                        client_key: str | None = None,
+                        timeout: int = 30) -> ssl.SSLSocket:
+    """Open a TLS connection to (host, port), fail-closed.
+
+    Strategy: strict public-CA validation first; on a *verification*
+    failure only, fall back to trust-on-first-use public-key pinning. Any
+    other error (or a pin mismatch) propagates and no data is sent."""
+    # --- Tier 1: strict public-CA validation ---
+    strict = _strict_ctx()
+    if client_cert:
+        strict.load_cert_chain(client_cert, client_key)
+    raw = socket.create_connection((host, port), timeout=timeout)
+    try:
+        return strict.wrap_socket(raw, server_hostname=host)
+    except ssl.SSLCertVerificationError:
+        try:
+            raw.close()
+        except OSError:
+            pass
+    except Exception:
+        try:
+            raw.close()
+        except OSError:
+            pass
+        raise
+
+    # --- Tier 2: public-key pinning (private/self-signed CA) ---
+    pins = _load_pins(pin_path)
+    ctx = _pinning_ctx()
+    if client_cert:
+        ctx.load_cert_chain(client_cert, client_key)
+    raw = socket.create_connection((host, port), timeout=timeout)
+    try:
+        ssock = ctx.wrap_socket(raw, server_hostname=host)
+    except Exception:
+        try:
+            raw.close()
+        except OSError:
+            pass
+        raise
+
+    der = ssock.getpeercert(binary_form=True)   # available even under CERT_NONE
+    if not der:
+        ssock.close()
+        raise GeelyTLSPinError(f"{host}: server sent no certificate")
+    spki = _spki_sha256_b64(der)
+    known = pins.get(host)
+
+    if known:
+        if spki in known:
+            return ssock                          # pin matches → trusted
+        ssock.close()
+        raise GeelyTLSPinError(
+            f"{host}: server key {spki} does not match pinned key(s) - "
+            "possible man-in-the-middle; refusing to send credentials"
+        )
+
+    # First contact with a privately-signed host: record the pin (TOFU).
+    if pin_path:
+        pins[host] = [spki]
+        try:
+            _save_pins(pin_path, pins)
+        except Exception as e:  # noqa: BLE001 - non-fatal; just won't persist
+            _LOGGER.warning("could not persist TLS pin for %s: %s", host, e)
+    _LOGGER.warning(
+        "%s is not publicly-trusted; pinned its public key on first use "
+        "(TOFU): %s. Future connections require this exact key.", host, spki,
+    )
+    return ssock
+
+
+def _raw_https(host: str, method: str, path: str, headers: dict, body: bytes,
+               *, pin_path: str | None, client_cert: str | None = None,
+               client_key: str | None = None, timeout: int = 20) -> bytes:
+    """Minimal HTTP/1.1 request over the verified/pinned transport. Returns
+    the response body bytes. Used for the non-mTLS token calls so they get
+    the same MITM protection as the main data path (the upstream project
+    sent these over an unverified `urllib` connection)."""
+    _no_crlf(path, "request path")
+    _no_crlf(host, "host")
+    h = dict(headers)
+    h["Host"] = host
+    h["Connection"] = "close"
+    h["Content-Length"] = str(len(body))
+    for _hk, _hv in h.items():
+        _no_crlf(str(_hk), "header name")
+        _no_crlf(str(_hv), "header value")
+    head_lines = [f"{method} {path} HTTP/1.1"] + [f"{k}: {v}" for k, v in h.items()]
+    req_bytes = ("\r\n".join(head_lines) + "\r\n\r\n").encode() + body
+    ssock = _secure_tls_connect(host, 443, pin_path=pin_path,
+                                client_cert=client_cert, client_key=client_key,
+                                timeout=timeout)
+    try:
+        ssock.send(req_bytes)
+        data = b""
+        while True:
+            c = ssock.recv(4096)
+            if not c:
+                break
+            data += c
+            if len(data) > 200_000:
+                break
+    finally:
+        ssock.close()
+    head_part, _, body_part = data.partition(b"\r\n\r\n")
+    if b"chunked" in head_part.lower():
+        body_part = _parse_chunked(body_part)
+    return body_part
+
+
+# ---------- API client ----------
+
+class GeelyApi:
+    """Holds the long-lived cidpsso token + per-vehicle cert/key, plus a
+    rotating JWT for apis.ecloudeu.com calls."""
+
+    def __init__(
+        self,
+        *,
+        app_id: str,
+        app_secret: str,
+        user_id: str,
+        vin: str,
+        cidpsso_token: str,
+        client_id: str,
+        vehicle_series: str,
+        vehicle_model: str,
+        device_id: str,
+        cert_path: str,
+        key_path: str,
+    ) -> None:
+        self.app_id = app_id
+        self.app_secret = app_secret
+        self.user_id = user_id
+        self.vin = vin
+        self.cidpsso_token = cidpsso_token
+        self.client_id = client_id
+        self.vehicle_series = vehicle_series
+        self.vehicle_model = vehicle_model
+        self.device_id = device_id
+        self.cert_path = cert_path
+        self.key_path = key_path
+        # Server-key pin store lives next to the mTLS material for this VIN.
+        self.pin_path = os.path.join(os.path.dirname(cert_path), "server_pins.json") \
+            if cert_path else None
+        # JWT cache
+        self._jwt: str | None = None
+        self._jwt_uid: str | None = None
+        self._jwt_exp: int = 0   # unix ms
+
+    # ---- low-level helpers ----
+
+    def _sign_headers(self, method: str, url: str, body: bytes) -> dict:
+        p = urlparse(url)
+        nonce = _make_nonce()
+        ts_ms = int(time.time() * 1000)
+        accept = "application/json;responseformat=3"
+        ss = _build_sign_string(
+            method=method, path=p.path, query=p.query, accept=accept,
+            nonce=nonce, sig_version="1.0", timestamp_ms=ts_ms, body=body,
+        )
+        sig = base64.b64encode(
+            hmac.new(self.app_secret.encode(), ss.encode(), hashlib.sha1).digest()
+        ).decode()
+        return {
+            "X-APP-ID": self.app_id,
+            "Accept": accept,
+            "X-AGENT-TYPE": "android",
+            "X-DEVICE-TYPE": "mobile",
+            "X-OPERATOR-CODE": "geely",
+            "X-DEVICE-IDENTIFIER": self.device_id,
+            "X-ENV-TYPE": "production",
+            "X-VERSION": "geelyNew",
+            "X-TIMEZONE": "UTC",
+            "Accept-Language": "en_US",
+            "Content-Type": "application/json; charset=utf-8",
+            "X-api-signature-version": "1.0",
+            "X-api-signature-nonce": nonce,
+            "X-timestamp": str(ts_ms),
+            "X-signature": sig,
+            "user-agent": "okhttp/4.11.0",
+        }
+
+    def _mtls_send(self, host: str, method: str, path: str, body: bytes,
+                   extra_headers: dict | None = None) -> tuple[int, bytes]:
+        _no_crlf(path, "request path")
+        _no_crlf(host, "host")
+        headers = self._sign_headers(method, f"https://{host}{path}", body)
+        headers["Host"] = host
+        headers["connection"] = "close"
+        headers["content-length"] = str(len(body))
+        if extra_headers:
+            headers.update(extra_headers)
+        head_lines = [f"{method} {path} HTTP/1.1"] + [f"{k}: {v}" for k, v in headers.items()]
+        req_bytes = ("\r\n".join(head_lines) + "\r\n\r\n").encode() + body
+
+        ssock = _secure_tls_connect(
+            host, 443, pin_path=self.pin_path,
+            client_cert=self.cert_path, client_key=self.key_path, timeout=30,
+        )
+        try:
+            ssock.send(req_bytes)
+            data = b''
+            while True:
+                c = ssock.recv(4096)
+                if not c:
+                    break
+                data += c
+                if len(data) > 200_000:
+                    break
+        finally:
+            ssock.close()
+        head_part, _, body_part = data.partition(b'\r\n\r\n')
+        head_str = head_part.decode('utf-8', errors='replace')
+        status_line = head_str.split('\r\n', 1)[0]
+        try:
+            status = int(status_line.split(' ')[1])
+        except Exception:
+            status = 0
+        if 'chunked' in head_str.lower():
+            body_part = _parse_chunked(body_part)
+        return status, body_part
+
+    # ---- high-level operations ----
+
+    def _get_access_code(self) -> str:
+        """1-time accessCode from cidpsso (used to fetch apis JWT)."""
+        body = json.dumps({"state": str(uuid.uuid4())}).encode()
+        resp_bytes = _raw_https(
+            "m-lcmsam-eu.geely.com", "POST",
+            "/cidpsso/oauth2/v1/getCode",
+            {
+                "token": self.cidpsso_token,
+                "user-agent": "okhttp/4.11.0",
+                "content-type": "application/json; charset=utf-8",
+            },
+            body, pin_path=self.pin_path, timeout=15,
+        )
+        j = json.loads(resp_bytes)
+        if _is_auth_failure(j):
+            raise GeelyAuthError(f"cidpsso token rejected: {_redact(j)}")
+        if j.get("code") != 10000000:
+            raise RuntimeError(f"getCode failed: {_redact(j)}")
+        return j["data"]["accessCode"]
+
+    def refresh_jwt(self) -> dict:
+        """Exchange a cidpsso accessCode for an apis.ecloudeu.com JWT."""
+        ac = self._get_access_code()
+        body = json.dumps({"authCode": ac}).encode()
+        status, resp = self._mtls_send(
+            "apis.ecloudeu.com", "POST",
+            "/auth/account/session/secure?identity_type=geelyos",
+            body,
+        )
+        j = json.loads(resp)
+        if _is_auth_failure(j):
+            raise GeelyAuthError(f"session/secure rejected our auth: {_redact(j)}")
+        if j.get("code") not in (1000, "1000"):
+            raise RuntimeError(f"session/secure failed: {_redact(j)}")
+        d = j["data"]
+        self._jwt = d["accessToken"]
+        self._jwt_uid = d["userId"]
+        self._jwt_exp = int(time.time()) + int(d.get("expiresIn", 7200))
+        return d
+
+    def _ensure_jwt(self) -> str:
+        if not self._jwt or time.time() > self._jwt_exp - 60:
+            self.refresh_jwt()
+        return self._jwt   # type: ignore[return-value]
+
+    def _headers_with_jwt(self) -> dict:
+        return {
+            "Authorization": self._ensure_jwt(),
+            "X-CLIENT-ID": self.client_id,
+            "X-VEHICLE-SERIES": self.vehicle_series,
+            "X-VEHICLE-MODEL": self.vehicle_model,
+            "X-Vehicle-IDENTIFIER": self.vin,
+        }
+
+    # ---- READ ----
+
+    def _authed_apis_call(self, method: str, path: str, body: bytes) -> dict:
+        """Call apis.ecloudeu.com with JWT. On code 1402 (JWT invalidated -
+        most commonly because another client like the iOS app just logged
+        in), auto-refresh the JWT once and retry. Only escalates to
+        GeelyAuthError when the cidpsso token itself has been revoked."""
+        status, resp = self._mtls_send(
+            "apis.ecloudeu.com", method, path, body,
+            extra_headers=self._headers_with_jwt(),
+        )
+        j = json.loads(resp)
+        if j.get("code") in {1402, "1402"}:
+            _LOGGER.info("JWT invalidated mid-call (likely another client "
+                         "logged in); refreshing and retrying once")
+            self._jwt = None
+            self._jwt_exp = 0
+            try:
+                self.refresh_jwt()
+            except GeelyAuthError:
+                # cidpsso token also dead - needs reauth
+                raise
+            status, resp = self._mtls_send(
+                "apis.ecloudeu.com", method, path, body,
+                extra_headers=self._headers_with_jwt(),
+            )
+            j = json.loads(resp)
+        if _is_auth_failure(j):
+            raise GeelyAuthError(f"{method} {path} auth-rejected: {_redact(j)}")
+        return j
+
+    def vehicle_status(self) -> dict:
+        """GET full vehicle status with the same query the Geely app uses on
+        map-view open: `?userId=&latest=&target=`. The empty `latest=` and
+        `target=` flags signal the cloud to return the most recently uploaded
+        snapshot (incl. fresh GPS if the car just pushed it). Without those
+        flags the gateway serves an older cached snapshot for the position
+        field. AVD-Frida confirmed (2026-05-03)."""
+        path = (f"/remote-control/vehicle/status/{self.vin}"
+                f"?userId={self.user_id}&latest=&target=")
+        return self._authed_apis_call("GET", path, b"")
+
+    def request_position_refresh(self) -> dict:
+        """Fire PAI/operation:4/pai:1 — the Geely app fires this every time the
+        map view opens to wake the car and request a fresh GPS upload. After
+        the cloud ACKs (code=1000), wait a few seconds then re-fetch
+        vehicle_status with `?...&latest=&target=` to read the new position.
+        AVD-Frida confirmed (2026-05-03)."""
+        body = {
+            "command": "start",
+            "creator": "tc",
+            "latest": True,
+            "serviceId": "PAI",
+            "serviceParameters": [
+                {"key": "operation", "value": "4"},
+                {"key": "pai", "value": "1"},
+            ],
+            "timestamp": str(int(time.time() * 1000)),
+            "userId": str(self.user_id),
+        }
+        path = f"/remote-control/vehicle/telematics/{self.vin}"
+        status, resp = self._mtls_send(
+            "apis.ecloudeu.com", "PUT", path, json.dumps(body).encode(),
+            extra_headers=self._headers_with_jwt(),
+        )
+        return json.loads(resp)
+
+    def vehicle_status_state(self) -> dict:
+        path = f"/remote-control/vehicle/status/state/{self.vin}"
+        status, resp = self._mtls_send(
+            "apis.ecloudeu.com", "GET", path, b"",
+            extra_headers=self._headers_with_jwt(),
+        )
+        return json.loads(resp)
+
+    def charging_reservation(self) -> dict:
+        path = f"/remote-control/charging/reservation/{self.vin}"
+        status, resp = self._mtls_send(
+            "apis.ecloudeu.com", "GET", path, b"",
+            extra_headers=self._headers_with_jwt(),
+        )
+        return json.loads(resp)
+
+    def charge_server_get(self, biz_type: str) -> dict:
+        """GET /charge-server/ecarx_charge_set/{VIN}?bizType=N.
+
+        Reads schedules for charge-server features:
+          - bizType=4 → Parking Comfort schedule
+          - bizType=6 → Scheduled Charging (rbcStartTime/rbcEndTime/rbcTarget/bcCycleActive)
+          - bizType=7 → Rapid (write-only; GET returns nothing useful)
+        Returns the full response dict ({"code":"1000","data":{...}}).
+        """
+        path = f"/charge-server/ecarx_charge_set/{self.vin}?bizType={biz_type}"
+        status, resp = self._mtls_send(
+            "apis.ecloudeu.com", "GET", path, b"",
+            extra_headers=self._headers_with_jwt(),
+        )
+        return json.loads(resp)
+
+    def scheduled_charging_set(self, *, command: str, start_time: str,
+                                end_time: str, rbc_target: str = "2",
+                                rbc: str = "2", charge_model: str = "0") -> dict:
+        """Set scheduled charging. command="start" enables, "stop" disables.
+
+        Body shape for bizType=6 (charge-server). The charge-model write key
+        is `chargeModel` - NOT `rbcModel`. `rbcModel` is only the read-only
+        echo the GET returns; sending it as the write key puts the server in
+        a branch that rejects a populated window with
+        `illegal request parameter: rbcStartTime must be empty`. With
+        `chargeModel` present, `rbcStartTime`/`rbcEndTime` are the *writable*
+        schedule window and must be populated (sending them empty then fails
+        with `rbcEndTime is missing`). The same body shape serves both
+        start (enable + arm at the window) and stop (disable); `command`
+        selects the forwarded operation (1/0). Verified live 2026-05-31:
+        start -> op=1 + forwarded rbc.startTime, stop -> op=0.
+        """
+        body = {
+            "bizType": "6",
+            "command": command,
+            "chargeModel": charge_model,
+            "endTime": "",
+            "pin": self.vin,
+            "rbc": rbc,
+            "rbcEndTime": end_time,
+            "rbcStartTime": start_time,
+            "rbcTarget": rbc_target,
+            "scheduledTime": "",
+            "sessionId": "",
+            "vin": self.vin,
+        }
+        body_bytes = json.dumps(body, separators=(",", ":")).encode()
+        path = f"/charge-server/ecarx_charge_set/{self.vin}"
+        status, resp = self._mtls_send(
+            "apis.ecloudeu.com", "POST", path, body_bytes,
+            extra_headers=self._headers_with_jwt(),
+        )
+        j = json.loads(resp)
+        return _check_control_resp(j)
+
+    # ---- WRITE (control) ----
+
+    def control(self, service_id: str, parameters: list[dict] | None = None,
+                command: str = "start", duration: int = 0) -> dict:
+        """Fire a control command via PUT /remote-control/vehicle/telematics/{VIN}.
+
+        `duration` is the value put into operationScheduling.duration. The
+        AVD-captured Geely app uses 90 for seat features, 180 for AC,
+        6 for G-clean, and 0 for stop commands. Default 0 (legacy behaviour).
+        """
+        body_dict = {
+            "command": command,
+            "creator": "tc",
+            "operationScheduling": {
+                "duration": duration, "interval": 0, "occurs": 1, "recurrentOperation": False,
+            },
+            "serviceId": service_id,
+            "serviceParameters": parameters or [],
+            "timestamp": str(int(time.time() * 1000)),
+            "userId": self._jwt_uid or self.user_id,
+        }
+        body = json.dumps(body_dict, separators=(",", ":")).encode()
+        path = f"/remote-control/vehicle/telematics/{self.vin}"
+        status, resp = self._mtls_send(
+            "apis.ecloudeu.com", "PUT", path, body,
+            extra_headers=self._headers_with_jwt(),
+        )
+        j = json.loads(resp)
+        return _check_control_resp(j)
+
+    # ---- Compound rapid warm/cool (different endpoint) ----
+
+    def rapid_climate(self, *, ac: bool, temp: str, heat_seats: list[str] | None,
+                      vent_seats: list[str] | None, vlt: bool,
+                      duration: str = "180", vlt_duration: str = "60",
+                      vlt_pos: str = "12") -> dict:
+        """Fire compound climate command via POST /charge-server/ecarx_charge_set.
+
+        Captured from the Android app's "rapid warming" / "rapid cooling"
+        buttons (bizType=7). Bundles AC + seat heat OR vent + window vent
+        in a single shot.
+
+        seats: numeric Zeekr-style positions - 11=driver, 19=passenger.
+        """
+        body: dict = {
+            "ac": "true" if ac else "false",
+            "bizType": "7",
+            "command": "immediately",
+            "duration": duration,
+            "paa": "0",
+            "temp": temp,
+            "timestamp": str(int(time.time() * 1000)),
+            "vlt": "true" if vlt else "false",
+            "vltDuration": vlt_duration,
+            "vltPos": vlt_pos,
+        }
+        if heat_seats:
+            body["heat"] = [{"level": "3", "pos": p} for p in heat_seats]
+        if vent_seats:
+            body["ventilation"] = [{"level": "3", "pos": p} for p in vent_seats]
+        body_bytes = json.dumps(body, separators=(",", ":")).encode()
+        path = f"/charge-server/ecarx_charge_set/{self.vin}"
+        status, resp = self._mtls_send(
+            "apis.ecloudeu.com", "POST", path, body_bytes,
+            extra_headers=self._headers_with_jwt(),
+        )
+        j = json.loads(resp)
+        return _check_control_resp(j)
+
+    # ---- Capability discovery ----
+
+    def fetch_capabilities(self) -> list[dict]:
+        """Fetch the per-vehicle feature catalog. Returns the data.list array.
+
+        Used at coordinator setup to decide which entities to expose. The
+        catalog returns one entry per `functionId` (e.g. `remote_climate_control_2`,
+        `combined_climate_control`, `remote_purification`, `temperature_2`,
+        plus battery/door/etc. status fields). Each entry has `valueEnable`,
+        `paramsJson`, `valueRange`, `valueEnum`. See docs/AVD_CAPTURE_GUIDE.md
+        for the full schema.
+        """
+        path = (
+            f"/geelyTCAccess/tcservices/capability/{self.vin}"
+            "?pageSize=2000&pageIndex=1&vehicleType=0&sortField=&direction="
+        )
+        status, resp = self._mtls_send(
+            "apis.ecloudeu.com", "GET", path, b"",
+            extra_headers=self._headers_with_jwt(),
+        )
+        try:
+            j = json.loads(resp)
+            return (j.get("data") or {}).get("list", []) or []
+        except Exception:
+            return []
+
+
+# ---------- Cert provisioning (one-time during config_flow) ----------
+
+def _sign_request_for_api_ecloudeu(app_id: str, app_secret: str,
+                                    method: str, url: str, body: bytes) -> dict:
+    """Standalone signer for /auth/cert/* on api.ecloudeu.com (no mTLS)."""
+    p = urlparse(url)
+    nonce = _make_nonce()
+    ts_ms = int(time.time() * 1000)
+    ss = _build_sign_string(
+        method=method, path=p.path, query=p.query, accept="application/json;responseformat=3",
+        nonce=nonce, sig_version="1.0", timestamp_ms=ts_ms, body=body,
+    )
+    sig = base64.b64encode(
+        hmac.new(app_secret.encode(), ss.encode(), hashlib.sha1).digest()
+    ).decode()
+    return {
+        "X-APP-ID": app_id,
+        "Accept": "application/json;responseformat=3",
+        "X-AGENT-TYPE": "android",
+        "X-DEVICE-TYPE": "mobile",
+        "X-OPERATOR-CODE": "geely",
+        "X-ENV-TYPE": "production",
+        "X-VERSION": "geelyNew",
+        "Content-Type": "application/json; charset=utf-8",
+        "X-api-signature-version": "1.0",
+        "X-api-signature-nonce": nonce,
+        "X-timestamp": str(ts_ms),
+        "X-signature": sig,
+        "user-agent": "okhttp/4.11.0",
+    }
+
+
+def provision_user_cert(*, app_id: str, app_secret: str, user_id: str,
+                         cidpsso_token: str, cert_out_path: str,
+                         key_out_path: str) -> tuple[str, str]:
+    """Generate EC P-256 keypair + CSR, send through /auth/cert/info + /file,
+    save signed cert + key. Returns (cert_path, key_path)."""
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.x509.oid import NameOID
+    from cryptography import x509
+
+    # Pin store lives alongside the cert we're about to write.
+    pin_path = os.path.join(os.path.dirname(cert_out_path), "server_pins.json")
+
+    # 1. Generate keypair
+    priv = ec.generate_private_key(ec.SECP256R1())
+    cn_short = hashlib.sha256(user_id.encode()).hexdigest()[:8]
+    csr = (
+        x509.CertificateSigningRequestBuilder()
+        .subject_name(x509.Name([
+            x509.NameAttribute(NameOID.COUNTRY_NAME, "CN"),
+            x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "ZheJiang"),
+            x509.NameAttribute(NameOID.LOCALITY_NAME, "Hangzhou"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "ECARX"),
+            x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, "CloudDept"),
+            x509.NameAttribute(NameOID.COMMON_NAME, cn_short),
+        ]))
+        .sign(priv, hashes.SHA256())
+    )
+    csr_pem = csr.public_bytes(serialization.Encoding.PEM).decode()
+
+    # 2. POST /auth/cert/info → checkCode
+    body = json.dumps({"checkValue": user_id}, separators=(',', ':')).encode()
+    headers = _sign_request_for_api_ecloudeu(
+        app_id, app_secret, "POST",
+        "https://api.ecloudeu.com/auth/cert/info", body)
+    resp_bytes = _raw_https("api.ecloudeu.com", "POST", "/auth/cert/info",
+                            headers, body, pin_path=pin_path, timeout=20)
+    j = json.loads(resp_bytes)
+    if j.get("code") != 1000:
+        raise RuntimeError(f"cert/info failed: {_redact(j)}")
+    check_code = j["data"]["checkCode"]
+
+    # 3. POST /auth/cert/file → signed cert
+    device_for_cert = hashlib.sha256(f"{user_id}_geely_ex5_ha".encode()).hexdigest()
+    body = json.dumps({
+        "csr": csr_pem,
+        "identityType": "geelyos",
+        "accessToken": cidpsso_token,
+        "deviceId": device_for_cert,
+        "checkCode": check_code,
+    }, separators=(',', ':')).encode()
+    headers = _sign_request_for_api_ecloudeu(
+        app_id, app_secret, "POST",
+        "https://api.ecloudeu.com/auth/cert/file", body)
+    resp_bytes = _raw_https("api.ecloudeu.com", "POST", "/auth/cert/file",
+                            headers, body, pin_path=pin_path, timeout=30)
+    j = json.loads(resp_bytes)
+    if j.get("code") != 1000:
+        raise RuntimeError(f"cert/file failed: {_redact(j)}")
+    cert_pem = j["data"]["cert"]
+
+    # 4. Save to disk with owner-only permissions.
+    #    SECURITY: the private key authenticates HA to Geely as this vehicle's
+    #    controller. Anyone who can read key.pem + cert.pem can lock/unlock and
+    #    drive the climate remotely, so the directory is 0700 and the key is
+    #    0600. We open the key via os.open with mode 0600 to avoid a brief
+    #    world-readable window between create and chmod.
+    key_bytes = priv.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    os.makedirs(os.path.dirname(cert_out_path), mode=0o700, exist_ok=True)
+    try:
+        os.chmod(os.path.dirname(cert_out_path), 0o700)
+    except OSError:
+        pass
+    with open(cert_out_path, "w") as fh:
+        fh.write(cert_pem)
+    try:
+        os.chmod(cert_out_path, 0o600)
+    except OSError:
+        pass
+    key_fd = os.open(key_out_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(key_fd, "wb") as fh:
+        fh.write(key_bytes)
+    try:
+        os.chmod(key_out_path, 0o600)
+    except OSError:
+        pass
+    return cert_out_path, key_out_path
+
+
+# ---------- cidpsso login (for config_flow) ----------
+
+LOGIN_HOST = "https://access-app-global.geely.com"
+APP_HOST   = "https://m-lcmsam-eu.geely.com"
+
+
+def _ios_headers(token: str | None = None, user_id: str | None = None,
+                 country_code: str = "IL", *,
+                 idfa: str | None = None, idfv: str | None = None) -> dict:
+    """Mimic the Geely iOS app's headers verbatim - required for both cidpsso
+    and cidpcar gateway calls.
+
+    `idfa` and `idfv` should be passed from the per-install fingerprint so
+    HA's session is distinguishable from the user's iPhone/Android session.
+    Only used as a fallback when omitted (mostly during initial setup).
+    """
+    import secrets as _secrets
+    rt = int(time.time() * 1000)
+    h = {
+        "Content-Type":  "application/json",
+        "User-Agent":    "geely/1.9.8 (iPhone; iOS 26.3.1; Scale/3.00)",
+        "version":       "1.9.8",
+        "devicename":    "Home Assistant",
+        "model":         "iPhone",
+        "system-flag":   "1",
+        "systemversion": "26.3.1",
+        "countrycode":   country_code,
+        "accept-language": "en-GB",
+        "lang":          "en-GB",
+        "accept":        "*/*",
+        "devicehardwareidfa": (idfa or str(uuid.uuid4()).upper()),
+        "devicehardwareidfv": (idfv or str(uuid.uuid4()).upper()),
+        "requesttime":   str(rt),
+        "requestid":     f"{rt}{_secrets.token_hex(6)}",
+    }
+    if token:
+        h["token"] = token
+    if user_id:
+        h["userid"] = user_id
+    return h
+
+
+def make_install_fingerprint() -> tuple[str, str]:
+    """Generate a (idfa, idfv) pair for this HA install. Persist these in
+    the ConfigEntry data and pass them to every cidpsso/cidpcar call so the
+    server treats HA as a distinct device from the user's phone."""
+    return (str(uuid.uuid4()).upper(), str(uuid.uuid4()).upper())
+
+
+def _legacy_session():
+    """`requests` session with OpenSSL legacy-renegotiation enabled - Geely's
+    login/captcha gateway needs it on Python 3.12+.
+
+    SECURITY: certificate verification is left ENABLED (CERT_REQUIRED +
+    hostname check) and we explicitly load a CA trust store into the custom
+    context, so the login/OTP/vehicle-list calls - which carry the e-mail,
+    the OTP code and the freshly issued cidpsso token - are validated
+    against public CAs. The legacy-renegotiation option (0x4) only relaxes
+    the handshake mode, not the trust decision."""
+    import requests
+    from urllib3.util.ssl_ import create_urllib3_context
+
+    def _build_ctx():
+        ctx = create_urllib3_context()
+        ctx.options |= 0x4
+        # Guarantee a trust store is present (a bare urllib3 context has none).
+        try:
+            import certifi
+            ctx.load_verify_locations(cafile=certifi.where())
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            ctx.load_default_certs()
+        except Exception:  # noqa: BLE001
+            pass
+        ctx.check_hostname = True
+        ctx.verify_mode = ssl.CERT_REQUIRED
+        return ctx
+
+    class _Adapter(requests.adapters.HTTPAdapter):
+        def init_poolmanager(self, *a, **kw):
+            kw["ssl_context"] = _build_ctx()
+            return super().init_poolmanager(*a, **kw)
+
+    s = requests.Session()
+    s.mount("https://", _Adapter())
+    return s
+
+
+def cidpsso_send_otp(email: str, country_code: str = "IL", *,
+                     max_attempts: int = 5,
+                     idfa: str | None = None, idfv: str | None = None) -> dict:
+    """Solve the Geely GeeTest captcha + trigger OTP email send.
+
+    The captcha solver is image-based and ~85% accurate, so we retry up to
+    `max_attempts` times. Returns the first successful /getCaptcha response,
+    or the last response/error encountered.
+    """
+    from . import geetest_solver
+
+    last_response: dict | None = None
+    last_error: str | None = None
+    s = _legacy_session()
+    headers = _ios_headers(country_code=country_code, idfa=idfa, idfv=idfv)
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            captcha = geetest_solver.solve(verbose=False)
+        except Exception as e:  # noqa: BLE001
+            last_error = f"captcha solve threw: {e}"
+            _LOGGER.debug("captcha attempt %d threw: %s", attempt, e)
+            continue
+        if not (captcha.get("status") == "success"
+                and captcha.get("data", {}).get("result") == "success"):
+            last_error = f"captcha solve rejected by /verify: {_redact(captcha)}"
+            _LOGGER.debug("captcha attempt %d rejected: %s", attempt, _redact(captcha))
+            continue
+        v = captcha["data"]
+        body = {
+            "captchaType":   "2",
+            "passToken":     v["pass_token"],
+            "platform":      "ios-login",
+            "lotNumber":     v["lot_number"],
+            "captchaOutput": v["captcha_output"],
+            "genTime":       str(v["gen_time"]),
+            "email":         email,
+            "captchaScene":  "101",
+        }
+        r = s.post(f"{LOGIN_HOST}/cidpsso/captcha/v3/getCaptcha",
+                   headers=headers, json=body, timeout=20)
+        resp = r.json()
+        last_response = resp
+        if resp.get("success") or resp.get("code") == 10000000:
+            return resp
+        _LOGGER.debug("getCaptcha attempt %d server-rejected: %s", attempt, _redact(resp))
+
+    if last_response is not None:
+        return last_response
+    raise RuntimeError(f"captcha solver failed all {max_attempts} attempts: {last_error}")
+
+
+def cidpsso_login(email: str, otp: str, country_code: str = "IL", *,
+                  idfa: str | None = None, idfv: str | None = None) -> dict:
+    """Exchange OTP code for cidpsso session token. Returns server response.
+    Token is in data.token; userId is data.userId."""
+    body = {
+        "countryCode":    country_code,
+        "account":        email,
+        "code":           otp,
+        "registerSource": 102,
+        "loginType":      3,    # 3 = email-code
+        "accountType":    2,    # 2 = email
+    }
+    s = _legacy_session()
+    r = s.post(f"{LOGIN_HOST}/cidpsso/user/v3/login",
+               headers=_ios_headers(country_code=country_code,
+                                    idfa=idfa, idfv=idfv),
+               json=body, timeout=20)
+    return r.json()
+
+
+def list_vehicles(cidpsso_token: str, user_id: str | None = None,
+                  country_code: str = "IL", *,
+                  idfa: str | None = None, idfv: str | None = None) -> list[dict]:
+    """List vehicles for the logged-in account. Returns the `data` list
+    from /cidpcar/vehicleOwner/v2/controlCars."""
+    s = _legacy_session()
+    r = s.get(f"{APP_HOST}/cidpcar/vehicleOwner/v2/controlCars",
+              headers=_ios_headers(token=cidpsso_token, user_id=user_id,
+                                   country_code=country_code,
+                                   idfa=idfa, idfv=idfv),
+              timeout=20)
+    j = r.json()
+    return j.get("data") or []

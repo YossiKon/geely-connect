@@ -1,0 +1,26 @@
+blueprint:
+  name: Geely Connect — Low battery alert
+  description: Notify when the car battery drops below a threshold.
+  domain: automation
+  input:
+    battery_sensor:
+      name: Battery sensor
+      selector: { entity: { domain: sensor, device_class: battery } }
+    threshold:
+      name: Alert below (%)
+      default: 20
+      selector: { number: { min: 5, max: 60, step: 1, unit_of_measurement: "%" } }
+    notify_target:
+      name: Notify service
+      default: notify.notify
+      selector: { text: {} }
+trigger:
+  - platform: numeric_state
+    entity_id: !input battery_sensor
+    below: !input threshold
+action:
+  - service: !input notify_target
+    data:
+      title: "🔋 Geely — low battery"
+      message: "Battery is at {{ states(trigger.entity_id) }}%. Time to charge."
+mode: single

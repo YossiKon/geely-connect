@@ -1,0 +1,45 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Geely Connect (Unofficial)",
+        "description": "Unofficial community integration — not affiliated with Geely. Enter your Geely account email and pick your country, and we'll send a 6-digit code to your inbox.",
+        "data": {
+          "email": "Email",
+          "country_code": "Country",
+          "pressure_unit": "Tire pressure unit",
+          "language": "Language",
+          "poll_mode": "Polling mode"
+        }
+      },
+      "code": {
+        "title": "Enter the code from your inbox",
+        "description": "We sent a 6-digit code to {email}. Paste it here.",
+        "data": {
+          "code": "6-digit code"
+        }
+      },
+      "pick_vehicle": {
+        "title": "Pick a vehicle",
+        "description": "Your Geely account has multiple vehicles. Pick the one to add. Already-configured vehicles are not shown.",
+        "data": {
+          "vin": "Vehicle"
+        }
+      }
+    },
+    "error": {
+      "send_code_failed": "Failed to send the email code. Try again in a minute.",
+      "captcha_failed": "Captcha solver hit an error - please retry.",
+      "invalid_code": "That code wasn't accepted. It may have expired (codes are single-use).",
+      "no_vehicles": "Login succeeded but no vehicles were found on this account.",
+      "unknown": "Something went wrong. Check the logs."
+    },
+    "abort": {
+      "already_configured": "This Geely vehicle is already set up.",
+      "all_configured": "All vehicles on this account are already configured.",
+      "cert_failed": "Failed to provision the per-device mTLS certificate. Check the logs.",
+      "reauth_successful": "Re-authenticated. Token refreshed.",
+      "unknown": "Something went wrong. Check the logs."
+    }
+  }
+}

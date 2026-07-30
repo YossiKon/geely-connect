@@ -1,0 +1,168 @@
+"""Lock entity for the Geely vehicle.
+
+State source: vehicleStatus.additionalVehicleStatus.drivingSafetyStatus.centralLockingStatus
+Lock action  : RDL_2 with door=all
+Unlock action: RDU_2 with door=all
+
+UX:
+  * Optimistic state - the entity flips to the requested state immediately
+    so HA's lock-card animation is responsive (HA defaults are slow when a
+    command takes 5–10 s to round-trip).
+  * Transitional state - `is_locking` / `is_unlocking` are True while we
+    wait for the next poll to confirm. HA shows a spinner during this.
+  * On polling refresh (~8 s after fire) we drop the optimistic flag and
+    show whatever the server actually reports.
+"""
+# -----------------------------------------------------------------------------
+# Portions of this file — the reverse-engineered Geely protocol / field mappings
+# (the parts that required protocol research) — are derived from
+# nitaybz/geely-global-ha, used under the MIT License. See NOTICE.txt.
+# Original framework, security hardening and transport are our own work.
+# -----------------------------------------------------------------------------
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+from typing import Any
+
+from homeassistant.components.lock import LockEntity
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
+from .api import GeelyControlError
+
+from .const import (
+    DOMAIN,
+    SERVICE_LOCK,
+    SERVICE_LOCK_PARAMS,
+    SERVICE_UNLOCK,
+)
+
+SERVICE_UNLOCK_PARAMS = SERVICE_LOCK_PARAMS
+
+_LOGGER = logging.getLogger(__name__)
+
+_LOCK_STATE_PATH = (
+    "vehicleStatus", "additionalVehicleStatus", "drivingSafetyStatus",
+    "centralLockingStatus",
+)
+
+# How long to show the locking/unlocking spinner before falling back to
+# whatever the server reports. Slightly longer than our poll-after-fire
+# delay so the spinner stays until at least one fresh poll lands.
+_TRANSITION_TIMEOUT_S = 12.0
+
+
+def _walk(d: Any, path: tuple[str, ...]) -> Any:
+    cur = d
+    for key in path:
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(key)
+        if cur is None:
+            return None
+    return cur
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entities: AddEntitiesCallback) -> None:
+    bundle = hass.data[DOMAIN][entry.entry_id]
+    add_entities([GeelyLock(hass, bundle)])
+
+
+class GeelyLock(CoordinatorEntity, LockEntity):
+    _attr_has_entity_name = True
+
+    def __init__(self, hass: HomeAssistant, bundle: dict) -> None:
+        super().__init__(bundle["coordinator"])
+        self._hass = hass
+        self._api = bundle["api"]
+        self._vin = bundle["vin"]
+        self._attr_unique_id = f"geely_{self._vin}_lock"
+        self._attr_name = "Doors"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, self._vin)},
+            manufacturer="Geely",
+            name=bundle.get("device_name") or f"Geely ({self._vin})",
+        )
+        # Optimistic state: target lock state and the timestamp when we
+        # started the operation. While `time.time() < _started + timeout`,
+        # HA shows the spinner via is_locking/is_unlocking and reports the
+        # target as is_locked.
+        self._pending_target_locked: bool | None = None
+        self._pending_started_at: float = 0.0
+
+    # ---- helpers ----
+
+    def _api_is_locked(self) -> bool | None:
+        v = _walk(self.coordinator.data or {}, _LOCK_STATE_PATH)
+        if v is None:
+            return None
+        # 1 / 2 = locked (2 occasionally seen for double-locked); 0 = unlocked
+        return v in ("1", 1, "2", 2)
+
+    def _is_in_transition(self) -> bool:
+        if self._pending_target_locked is None:
+            return False
+        if time.time() - self._pending_started_at > _TRANSITION_TIMEOUT_S:
+            return False
+        # Still in transition unless the API has already caught up.
+        api = self._api_is_locked()
+        if api is None:
+            return True
+        return api != self._pending_target_locked
+
+    # ---- HA properties ----
+
+    @property
+    def is_locked(self) -> bool | None:
+        if self._is_in_transition():
+            return self._pending_target_locked
+        return self._api_is_locked()
+
+    @property
+    def is_locking(self) -> bool:
+        return self._is_in_transition() and self._pending_target_locked is True
+
+    @property
+    def is_unlocking(self) -> bool:
+        return self._is_in_transition() and self._pending_target_locked is False
+
+    # ---- writes ----
+
+    async def async_lock(self, **_: Any) -> None:
+        await self._fire(SERVICE_LOCK, SERVICE_LOCK_PARAMS, target_locked=True)
+
+    async def async_unlock(self, **_: Any) -> None:
+        await self._fire(SERVICE_UNLOCK, SERVICE_UNLOCK_PARAMS, target_locked=False)
+
+    async def _fire(self, service_id: str, params: list[dict], *,
+                    target_locked: bool) -> None:
+        # Fire FIRST. Only set the optimistic transition if the server
+        # accepts - otherwise the user gets a misleading "locking…" spinner
+        # for a command that was actually rejected.
+        try:
+            resp = await self._hass.async_add_executor_job(
+                self._api.control, service_id, params,
+            )
+        except GeelyControlError as e:
+            raise HomeAssistantError(f"Geely {service_id}: {e.message}") from e
+        except Exception as e:
+            _LOGGER.exception("lock %s failed", service_id)
+            raise HomeAssistantError(f"Geely {service_id} failure: {e}") from e
+        _LOGGER.debug("Geely lock %s response: %s", service_id, resp)
+        self._pending_target_locked = target_locked
+        self._pending_started_at = time.time()
+        self.async_write_ha_state()
+        # Refresh after the server has had time to update telemetry.
+        async def delayed_refresh():
+            await asyncio.sleep(8)
+            await self.coordinator.async_request_refresh()
+            # Drop the optimistic flag once the real state should be in.
+            self._pending_target_locked = None
+            self.async_write_ha_state()
+        self._hass.async_create_task(delayed_refresh())

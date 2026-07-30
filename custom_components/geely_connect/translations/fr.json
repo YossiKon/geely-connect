@@ -1,0 +1,43 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Geely Connect (non officiel)",
+        "description": "Intégration communautaire non officielle — non affiliée à Geely. Saisissez l'email du compte Geely, choisissez le pays, l'unité de pression des pneus et la langue. Un code à 6 chiffres sera envoyé.",
+        "data": {
+          "email": "Email",
+          "country_code": "Pays",
+          "pressure_unit": "Unité de pression des pneus",
+          "language": "Langue",
+          "poll_mode": "Mode d'interrogation"
+        }
+      },
+      "code": {
+        "title": "Saisissez le code reçu",
+        "description": "Un code à 6 chiffres a été envoyé à {email}.",
+        "data": {
+          "code": "Code à 6 chiffres"
+        }
+      },
+      "pick_vehicle": {
+        "title": "Choisir un véhicule",
+        "data": {
+          "vin": "Véhicule"
+        }
+      }
+    },
+    "error": {
+      "send_code_failed": "Échec de l'envoi du code. Réessayez.",
+      "invalid_code": "Code refusé (code à usage unique).",
+      "no_vehicles": "Connexion réussie mais aucun véhicule trouvé.",
+      "unknown": "Une erreur s'est produite. Consultez les journaux."
+    },
+    "abort": {
+      "already_configured": "Ce véhicule est déjà configuré.",
+      "all_configured": "Tous les véhicules du compte sont déjà configurés.",
+      "cert_failed": "Échec de l'émission du certificat mTLS.",
+      "reauth_successful": "Ré-authentification réussie.",
+      "unknown": "Une erreur s'est produite."
+    }
+  }
+}

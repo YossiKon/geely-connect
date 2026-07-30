@@ -1,0 +1,40 @@
+fire_control:
+  name: Fire control command
+  description: >
+    Send a raw control command to the vehicle. For diagnostic and
+    development use. Lets you fire any serviceId + parameters via the
+    standard PUT /remote-control/vehicle/telematics endpoint.
+  fields:
+    service_id:
+      name: Service ID
+      description: The Geely serviceId to fire (e.g. RDL_2, RCE_2, RCC_2, RCS).
+      required: true
+      example: RCE_2
+      selector:
+        text:
+    command:
+      name: Command
+      description: HTTP command verb sent to the gateway.
+      required: false
+      default: start
+      example: start
+      selector:
+        select:
+          options:
+            - start
+            - stop
+    params:
+      name: Parameters
+      description: List of {key, value} pairs sent as serviceParameters.
+      required: false
+      default: []
+      example: '[{"key": "rce.conditioner", "value": "1"}, {"key": "rce.temp", "value": "22.0"}]'
+      selector:
+        object:
+    vin:
+      name: VIN
+      description: VIN of the target vehicle. Optional if you have only one vehicle configured.
+      required: false
+      example: L6T00000000000000
+      selector:
+        text:

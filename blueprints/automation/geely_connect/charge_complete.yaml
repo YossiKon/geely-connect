@@ -1,0 +1,29 @@
+blueprint:
+  name: Geely Connect — Charging complete notification
+  description: Notify when the car finishes charging (battery reaches a target %).
+  domain: automation
+  input:
+    battery_sensor:
+      name: Battery sensor
+      selector:
+        entity: { domain: sensor, device_class: battery }
+    target_level:
+      name: Target level (%)
+      default: 80
+      selector:
+        number: { min: 50, max: 100, step: 1, unit_of_measurement: "%" }
+    notify_target:
+      name: Notify service
+      default: notify.notify
+      selector:
+        text:
+trigger:
+  - platform: numeric_state
+    entity_id: !input battery_sensor
+    above: !input target_level
+action:
+  - service: !input notify_target
+    data:
+      title: "🔋 Geely — charging done"
+      message: "Battery reached {{ states(trigger.entity_id) }}%."
+mode: single

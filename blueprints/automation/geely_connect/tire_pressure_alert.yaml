@@ -1,0 +1,33 @@
+blueprint:
+  name: Geely Connect — Tire pressure out of range
+  description: Alert when any tire pressure goes below/above safe limits.
+  domain: automation
+  input:
+    tire_sensor:
+      name: Tire pressure sensor
+      selector: { entity: { domain: sensor, device_class: pressure } }
+    low_limit:
+      name: Low limit
+      default: 32
+      selector: { number: { min: 10, max: 60, step: 0.5 } }
+    high_limit:
+      name: High limit
+      default: 42
+      selector: { number: { min: 20, max: 80, step: 0.5 } }
+    notify_target:
+      name: Notify service
+      default: notify.notify
+      selector: { text: {} }
+trigger:
+  - platform: numeric_state
+    entity_id: !input tire_sensor
+    below: !input low_limit
+  - platform: numeric_state
+    entity_id: !input tire_sensor
+    above: !input high_limit
+action:
+  - service: !input notify_target
+    data:
+      title: "⚠️ Geely — tire pressure"
+      message: "{{ state_attr(trigger.entity_id,'friendly_name') or trigger.entity_id }} is {{ states(trigger.entity_id) }}."
+mode: single

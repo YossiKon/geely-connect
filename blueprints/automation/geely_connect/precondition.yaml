@@ -1,0 +1,41 @@
+blueprint:
+  name: Geely Connect — Pre-condition climate before departure
+  description: Turn on the car climate at a set time on selected days.
+  domain: automation
+  input:
+    climate_entity:
+      name: Climate entity
+      selector:
+        entity: { domain: climate }
+    departure_time:
+      name: Start time
+      selector:
+        time: {}
+    days:
+      name: Days
+      default: [mon, tue, wed, thu, fri]
+      selector:
+        select:
+          multiple: true
+          options: [mon, tue, wed, thu, fri, sat, sun]
+    target_temp:
+      name: Target temperature (°C)
+      default: 22
+      selector:
+        number: { min: 15.5, max: 28.5, step: 0.5, unit_of_measurement: "°C" }
+variables:
+  allowed_days: !input days
+trigger:
+  - platform: time
+    at: !input departure_time
+condition:
+  - condition: template
+    value_template: "{{ now().strftime('%a').lower() in allowed_days }}"
+action:
+  - service: climate.set_temperature
+    target: { entity_id: !input climate_entity }
+    data: { temperature: !input target_temp }
+  - service: climate.set_hvac_mode
+    target: { entity_id: !input climate_entity }
+    data: { hvac_mode: heat_cool }
+mode: single
