@@ -41,6 +41,17 @@ class GeelyAuthError(Exception):
     coordinator should catch this and surface a re-auth flow."""
 
 
+class GeelyRegionError(Exception):
+    """Raised when the account is not served by the EU/International cloud.
+
+    Geely runs separate backends per region (EU, APAC, NA, SA), each with its
+    own app credentials, and the region is a property of the account rather
+    than of the country picked at setup. An account registered elsewhere gets
+    code 1501 'geelyos verify error' from the EU cert endpoint - the login and
+    the OTP succeed first, which is what makes it look like a bug rather than
+    an unsupported region."""
+
+
 class GeelyControlError(Exception):
     """Raised when the Geely server rejects a control command.
 
@@ -72,6 +83,12 @@ _AUTH_FAILURE_CODES: set = {
 
 # Codes we treat as "command accepted by the server".
 _CONTROL_SUCCESS_CODES: set = {1000, "1000"}
+
+# Cert-provisioning codes that mean "wrong regional backend for this account",
+# not "something went wrong". 1501 is the EU server declining to verify a
+# GeelyOS token issued by another region; 1445 is the signature check failing,
+# which is what a different region's app credentials produce.
+_REGION_MISMATCH_CODES: set = {"1501", "1445"}
 
 
 # Keys whose values are secrets and must never reach logs or exception text.
@@ -1021,6 +1038,14 @@ def provision_user_cert(*, app_id: str, app_secret: str, user_id: str,
                             headers, body, pin_path=pin_path, timeout=20)
     j = json.loads(resp_bytes)
     if j.get("code") != 1000:
+        if str(j.get("code")) in _REGION_MISMATCH_CODES:
+            raise GeelyRegionError(
+                "Geely's EU cert server rejected this account "
+                f"(code {j.get('code')}: {j.get('hint') or j.get('message')}). "
+                "The account is registered with another regional backend "
+                "(APAC, North America or South America), which needs its own "
+                "app credentials this integration does not have."
+            )
         raise RuntimeError(f"cert/info failed: {_redact(j)}")
     check_code = j["data"]["checkCode"]
 
@@ -1040,6 +1065,17 @@ def provision_user_cert(*, app_id: str, app_secret: str, user_id: str,
                             headers, body, pin_path=pin_path, timeout=30)
     j = json.loads(resp_bytes)
     if j.get("code") != 1000:
+        # 1501 'geelyos verify error' is the EU cert server refusing to verify a
+        # token that belongs to another region's GeelyOS. Everything before this
+        # point succeeds, so say what it means instead of dumping the response.
+        if str(j.get("code")) in _REGION_MISMATCH_CODES:
+            raise GeelyRegionError(
+                "Geely's EU cert server rejected this account "
+                f"(code {j.get('code')}: {j.get('hint') or j.get('message')}). "
+                "The account is registered with another regional backend "
+                "(APAC, North America or South America), which needs its own "
+                "app credentials this integration does not have."
+            )
         raise RuntimeError(f"cert/file failed: {_redact(j)}")
     cert_pem = j["data"]["cert"]
 

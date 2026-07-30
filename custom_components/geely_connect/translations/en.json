@@ -38,6 +38,7 @@
       "already_configured": "This Geely vehicle is already set up.",
       "all_configured": "All vehicles on this account are already configured.",
       "cert_failed": "Failed to provision the per-device mTLS certificate. Check the logs.",
+      "wrong_region": "This Geely account is not served by the EU/International cloud. Geely runs separate backends for APAC, North America and South America, each needing its own app credentials, so this integration currently supports EU/International accounts only.",
       "reauth_successful": "Re-authenticated. Token refreshed.",
       "unknown": "Something went wrong. Check the logs."
     }

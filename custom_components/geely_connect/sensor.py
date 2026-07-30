@@ -46,11 +46,21 @@ from .const import (
 _TIRE_KEYS = {"tire_pressure_fl", "tire_pressure_fr", "tire_pressure_rl", "tire_pressure_rr"}
 
 # Long-term statistics: measurement for live values, total_increasing for odo.
+# Anything not listed here records no statistics at all, so a sensor that holds
+# a number belongs in one of these sets. The enum-valued ones (engine_state,
+# park_brake, charger_connected) correctly have neither.
 _MEASUREMENT_KEYS = {
     "battery", "range", "interior_temp", "exterior_temp", "speed",
     "12v_battery", "12v_voltage", "avg_consumption", "avg_speed",
     "tire_pressure_fl", "tire_pressure_fr", "tire_pressure_rl", "tire_pressure_rr",
     "time_to_full_min",
+    # Both count DOWN towards the next service, so they are measurements -
+    # total_increasing would read every service reset as a counter rollover.
+    "days_to_service", "distance_to_service",
+    # Resettable by the driver. Measurement rather than a total: without a
+    # last_reset HA would fold the reset into the sum as a negative delta, and
+    # total_mileage below already provides the cumulative distance statistic.
+    "trip_meter",
 }
 _TOTAL_INCREASING_KEYS = {"total_mileage"}
 

@@ -317,6 +317,23 @@ Tip: press the **Refresh Data** button (or call `button.press` on
 
 ---
 
+## 🌍 Supported regions
+
+Geely runs a separate backend per region — EU/International, APAC, North
+America and South America — and **each one needs its own app credentials**.
+This integration ships the EU/International credentials, so the country
+dropdown lists only countries on that cloud.
+
+The region belongs to your **account**, not to the country you pick at setup,
+so an account registered on another backend fails even if you choose an EU
+country. It fails specifically at the certificate step, after the email code
+has already been accepted, and the setup then stops with "this Geely account is
+not served by the EU/International cloud". Adding a region means capturing that
+region's app id and secret, which is why AU, BR, TH and US accounts are not
+supported yet.
+
+---
+
 ## ⚠️ Known limitation — one session per account
 When Home Assistant logs in, the phone app is signed out, and vice-versa. If it
 happens, HA shows a **Reconfigure** prompt — request a fresh code and

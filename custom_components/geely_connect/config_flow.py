@@ -304,6 +304,9 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     key_out_path=key_path,
                 )
             )
+        except geely_api.GeelyRegionError as e:
+            _LOGGER.error("cert provisioning refused: %s", e)
+            return self.async_abort(reason="wrong_region")
         except Exception:
             _LOGGER.exception("cert provisioning failed")
             return self.async_abort(reason="cert_failed")
