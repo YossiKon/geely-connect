@@ -175,17 +175,27 @@ _CURATED_PATHS: set[str] = {".".join(spec[2]) for spec in SENSOR_SPECS}
 _SKIP_TOP_KEYS: set[str] = set()
 
 
-def _flatten(obj: Any, prefix: str = "") -> dict[str, Any]:
+_MAX_FLATTEN_DEPTH = 12   # deeper than any real status payload nests
+_MAX_LIST_ITEMS = 64      # indexed list entries kept per list
+
+
+def _flatten(obj: Any, prefix: str = "", depth: int = 0) -> dict[str, Any]:
     """Flatten a nested status dict into {dotted.path: scalar}. Lists are
-    indexed. Only scalar leaves (str/int/float/bool) are kept."""
+    indexed. Only scalar leaves (str/int/float/bool) are kept.
+
+    Bounded on purpose: the payload is server JSON, and a few KB of nesting is
+    enough to blow CPython's recursion limit. Since this runs during platform
+    setup, an unbounded recurse would take every sensor down with it."""
     out: dict[str, Any] = {}
+    if depth > _MAX_FLATTEN_DEPTH:
+        return out
     if isinstance(obj, dict):
         for k, v in obj.items():
             key = f"{prefix}.{k}" if prefix else str(k)
-            out.update(_flatten(v, key))
+            out.update(_flatten(v, key, depth + 1))
     elif isinstance(obj, (list, tuple)):
-        for i, v in enumerate(obj):
-            out.update(_flatten(v, f"{prefix}.{i}"))
+        for i, v in enumerate(obj[:_MAX_LIST_ITEMS]):
+            out.update(_flatten(v, f"{prefix}.{i}", depth + 1))
     else:
         if obj is not None and obj != "":
             out[prefix] = obj

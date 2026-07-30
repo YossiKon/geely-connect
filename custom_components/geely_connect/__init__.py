@@ -10,13 +10,17 @@ import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.exceptions import (
+    ConfigEntryAuthFailed,
+    HomeAssistantError,
+    ServiceValidationError,
+)
 from homeassistant.helpers import config_validation as cv, device_registry as dr, entity_registry as er
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
 from . import api as geely_api
-from .api import GeelyApi, GeelyAuthError
+from .api import GeelyApi, GeelyAuthError, GeelyControlError
 from .const import (
     APP_ID,
     APP_SECRET,
@@ -478,28 +482,44 @@ def _register_debug_service(hass: HomeAssistant) -> None:
         params = call.data.get("params") or []
         target_vin = call.data.get("vin")
 
-        # Find the matching API; if `vin` not given, use the first entry.
-        bundles = list((hass.data.get(DOMAIN) or {}).values())
-        if not bundles:
-            _LOGGER.warning("fire_control: no Geely entry loaded")
-            return
+        # Find the matching API. Omitting `vin` is only unambiguous with a
+        # single vehicle configured - hass.data order is entry-setup order, so
+        # picking the first would send a lock or window command to whichever
+        # car happened to load first, and that can change across restarts.
+        loaded = list((hass.data.get(DOMAIN) or {}).items())
+        if not loaded:
+            raise ServiceValidationError("No Geely Connect vehicle is loaded")
         if target_vin:
-            match = next((b for b in bundles if b.get("vin") == target_vin), None)
-            if match is None:
-                _LOGGER.warning("fire_control: VIN %s not found", target_vin)
-                return
-            api = match["api"]
+            chosen = next((kv for kv in loaded if kv[1].get("vin") == target_vin), None)
+            if chosen is None:
+                raise ServiceValidationError(
+                    f"No configured Geely vehicle with VIN {target_vin}"
+                )
+        elif len(loaded) > 1:
+            raise ServiceValidationError(
+                "vin is required when more than one vehicle is configured"
+            )
         else:
-            api = bundles[0]["api"]
+            chosen = loaded[0]
+        entry_id, bundle = chosen
+        api = bundle["api"]
 
+        # Surface failures the way every entity does. Swallowing them here made
+        # a rejected command look successful, and hid an expired session from
+        # the reauth flow.
         try:
             resp = await hass.async_add_executor_job(api.control, sid, params, cmd)
-        except Exception:
-            _LOGGER.exception("fire_control %s failed", sid)
-            return
-        _LOGGER.warning(
-            "fire_control %s %s params=%s → response=%s",
-            sid, cmd, params, resp,
+        except GeelyControlError as e:
+            raise HomeAssistantError(e.message) from e
+        except GeelyAuthError as e:
+            entry = hass.config_entries.async_get_entry(entry_id)
+            if entry:
+                entry.async_start_reauth(hass)
+            raise HomeAssistantError(f"Geely session expired: {e}") from e
+        except Exception as e:
+            raise HomeAssistantError(f"fire_control {sid} failed: {e}") from e
+        _LOGGER.debug(
+            "fire_control %s %s params=%s → response=%s", sid, cmd, params, resp,
         )
 
     hass.services.async_register(DOMAIN, "fire_control", _handle, schema=schema)
