@@ -1126,7 +1126,7 @@ APP_HOST   = "https://m-lcmsam-eu.geely.com"
 
 
 def _ios_headers(token: str | None = None, user_id: str | None = None,
-                 country_code: str = "IL", *,
+                 country_code: str = "GB", *,
                  idfa: str | None = None, idfv: str | None = None) -> dict:
     """Mimic the Geely iOS app's headers verbatim - required for both cidpsso
     and cidpcar gateway calls.
@@ -1207,7 +1207,7 @@ def _legacy_session():
     return s
 
 
-def cidpsso_send_otp(email: str, country_code: str = "IL", *,
+def cidpsso_send_otp(email: str, country_code: str = "GB", *,
                      max_attempts: int = 5,
                      idfa: str | None = None, idfv: str | None = None) -> dict:
     """Solve the Geely GeeTest captcha + trigger OTP email send.
@@ -1259,7 +1259,7 @@ def cidpsso_send_otp(email: str, country_code: str = "IL", *,
     raise RuntimeError(f"captcha solver failed all {max_attempts} attempts: {last_error}")
 
 
-def cidpsso_login(email: str, otp: str, country_code: str = "IL", *,
+def cidpsso_login(email: str, otp: str, country_code: str = "GB", *,
                   idfa: str | None = None, idfv: str | None = None) -> dict:
     """Exchange OTP code for cidpsso session token. Returns server response.
     Token is in data.token; userId is data.userId."""
@@ -1280,7 +1280,7 @@ def cidpsso_login(email: str, otp: str, country_code: str = "IL", *,
 
 
 def list_vehicles(cidpsso_token: str, user_id: str | None = None,
-                  country_code: str = "IL", *,
+                  country_code: str = "GB", *,
                   idfa: str | None = None, idfv: str | None = None) -> list[dict]:
     """List vehicles for the logged-in account. Returns the `data` list
     from /cidpcar/vehicleOwner/v2/controlCars."""

@@ -34,6 +34,7 @@ from .const import (
     CONF_VEHICLE_NICKNAME,
     CONF_VEHICLE_SERIES,
     CONF_VIN,
+    DEFAULT_COUNTRY_CODE,
     DEFAULT_POLL_MODE,
     DOMAIN,
     POLL_PROFILES,
@@ -146,7 +147,7 @@ async def _maybe_refetch_vehicle_metadata(hass: HomeAssistant, entry: ConfigEntr
             geely_api.list_vehicles,
             entry.data.get(CONF_CIDPSSO_TOKEN),
             entry.data.get(CONF_USER_ID),
-            entry.data.get("country_code", "IL"),
+            entry.data.get(CONF_COUNTRY_CODE, DEFAULT_COUNTRY_CODE),
         )
     except Exception as e:  # noqa: BLE001
         _LOGGER.debug("metadata refetch failed (non-fatal): %s", e)

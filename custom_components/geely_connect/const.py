@@ -110,19 +110,15 @@ POLL_MODES: dict[str, str] = {
 }
 DEFAULT_POLL_MODE = "normal"
 
-DEFAULT_COUNTRY_CODE = "IL"
+DEFAULT_COUNTRY_CODE = "GB"
 
-# Tire-pressure display units. Values are the factor to multiply the raw kPa
-# reading by. Rendered as a dropdown in the config flow.
+# Tire-pressure display units, rendered as a dropdown in the config flow. The
+# sensors report the car's native kPa and Home Assistant does the conversion,
+# so these are display choices only - no conversion factors live here.
 PRESSURE_UNITS: dict[str, str] = {
     "psi": "PSI",
     "bar": "bar",
     "kPa": "kPa",
-}
-PRESSURE_FACTORS: dict[str, float] = {
-    "psi": 0.1450377,   # kPa -> psi
-    "bar": 0.01,        # kPa -> bar
-    "kPa": 1.0,
 }
 DEFAULT_PRESSURE_UNIT = "psi"
 
@@ -139,45 +135,47 @@ DEFAULT_LANGUAGE = "auto"
 # label. The vehicle's actual area still comes from the login response, so a
 # country here is a starting point, not a guarantee.
 SUPPORTED_COUNTRIES: dict[str, str] = {
-    "IL": "🇮🇱 Israel (IL)",
-    "GB": "🇬🇧 United Kingdom (GB)",
-    "DE": "🇩🇪 Germany (DE)",
-    "FR": "🇫🇷 France (FR)",
-    "ES": "🇪🇸 Spain (ES)",
-    "IT": "🇮🇹 Italy (IT)",
-    "PT": "🇵🇹 Portugal (PT)",
-    "NL": "🇳🇱 Netherlands (NL)",
-    "BE": "🇧🇪 Belgium (BE)",
-    "LU": "🇱🇺 Luxembourg (LU)",
-    "IE": "🇮🇪 Ireland (IE)",
+    # EU / International backend, alphabetical by country name.
     "AT": "🇦🇹 Austria (AT)",
-    "CH": "🇨🇭 Switzerland (CH)",
-    "PL": "🇵🇱 Poland (PL)",
-    "CZ": "🇨🇿 Czechia (CZ)",
-    "SK": "🇸🇰 Slovakia (SK)",
-    "HU": "🇭🇺 Hungary (HU)",
-    "RO": "🇷🇴 Romania (RO)",
+    "BE": "🇧🇪 Belgium (BE)",
     "BG": "🇧🇬 Bulgaria (BG)",
-    "GR": "🇬🇷 Greece (GR)",
     "HR": "🇭🇷 Croatia (HR)",
-    "SI": "🇸🇮 Slovenia (SI)",
-    "SE": "🇸🇪 Sweden (SE)",
-    "NO": "🇳🇴 Norway (NO)",
+    "CY": "🇨🇾 Cyprus (CY)",
+    "CZ": "🇨🇿 Czechia (CZ)",
     "DK": "🇩🇰 Denmark (DK)",
-    "FI": "🇫🇮 Finland (FI)",
-    "IS": "🇮🇸 Iceland (IS)",
     "EE": "🇪🇪 Estonia (EE)",
+    "FI": "🇫🇮 Finland (FI)",
+    "FR": "🇫🇷 France (FR)",
+    "DE": "🇩🇪 Germany (DE)",
+    "GR": "🇬🇷 Greece (GR)",
+    "HU": "🇭🇺 Hungary (HU)",
+    "IS": "🇮🇸 Iceland (IS)",
+    "IE": "🇮🇪 Ireland (IE)",
+    "IL": "🇮🇱 Israel (IL)",
+    "IT": "🇮🇹 Italy (IT)",
     "LV": "🇱🇻 Latvia (LV)",
     "LT": "🇱🇹 Lithuania (LT)",
-    "CY": "🇨🇾 Cyprus (CY)",
+    "LU": "🇱🇺 Luxembourg (LU)",
     "MT": "🇲🇹 Malta (MT)",
+    "NL": "🇳🇱 Netherlands (NL)",
+    "NO": "🇳🇴 Norway (NO)",
+    "PL": "🇵🇱 Poland (PL)",
+    "PT": "🇵🇹 Portugal (PT)",
+    "RO": "🇷🇴 Romania (RO)",
+    "SK": "🇸🇰 Slovakia (SK)",
+    "SI": "🇸🇮 Slovenia (SI)",
+    "ES": "🇪🇸 Spain (ES)",
+    "SE": "🇸🇪 Sweden (SE)",
+    "CH": "🇨🇭 Switzerland (CH)",
+    "GB": "🇬🇧 United Kingdom (GB)",
     # North-American backend (api.ecloudus.com). Brazilian accounts have been
     # reported to resolve to this area too, despite the SA hosts existing.
-    "US": "🇺🇸 United States (US)",
+    "BR": "🇧🇷 Brazil (BR)",
     "CA": "🇨🇦 Canada (CA)",
     "MX": "🇲🇽 Mexico (MX)",
-    "BR": "🇧🇷 Brazil (BR)",
+    "US": "🇺🇸 United States (US)",
 }
+
 
 def region_config(region: str | None) -> dict[str, str]:
     """Resolve an area code to its backend config.
