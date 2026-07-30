@@ -256,6 +256,13 @@ _BUNDLED_TLS_PINS: dict[str, tuple[str, ...]] = {
     "apis.ecloudeu.com": ("Hm0olBoClunXgMp4wFvdrr8SC5iSt+LX6iyB4N828C8=",),
 }
 
+# OpenSSL verify codes that mean "the chain is fine, we just don't have this
+# CA": 18 self-signed leaf, 19 self-signed root in chain, 20 issuer not found
+# locally (what apis.ecloudeu.com actually returns, since it sends no
+# intermediate). An expired certificate or a hostname mismatch is a bad
+# certificate no matter who issued it, so those never reach the fallback.
+_PRIVATE_CA_VERIFY_CODES: frozenset = frozenset({18, 19, 20})
+
 
 def _strict_ctx() -> ssl.SSLContext:
     """Verifying TLS context: OS trust store + certifi, hostname checked."""
@@ -427,6 +434,14 @@ def _secure_tls_connect(host: str, port: int, *, pin_path: str | None,
             f"({strict_error.verify_message or strict_error}) and this host is "
             "not one that uses Geely's private CA, so key pinning does not "
             "apply. Refusing to connect."
+        ) from strict_error
+    if getattr(strict_error, "verify_code", None) not in _PRIVATE_CA_VERIFY_CODES:
+        raise GeelyTLSPinError(
+            f"{host}: certificate validation failed with "
+            f"{strict_error.verify_message or strict_error}, which is not a "
+            "private-CA condition - an expired certificate or a hostname "
+            "mismatch is a bad certificate however it was issued. Refusing to "
+            "fall back to key pinning."
         ) from strict_error
 
     ctx = _pinning_ctx()

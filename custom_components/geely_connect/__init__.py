@@ -20,7 +20,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from . import api as geely_api
-from .api import GeelyApi, GeelyAuthError, GeelyControlError
+from .api import GeelyApi, GeelyAuthError, GeelyControlError, GeelyTLSPinError
 from .const import (
     APP_ID,
     APP_SECRET,
@@ -340,6 +340,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 await _call_with_retry(api.request_position_refresh)
             except GeelyAuthError as e:
                 raise ConfigEntryAuthFailed(str(e)) from e
+            except GeelyTLSPinError as e:
+                # A pin failure means the server key changed - an active
+                # MITM or a legitimate rotation. Never hide it at DEBUG.
+                _LOGGER.error("position refresh: TLS pin check failed: %s", e)
             except Exception as e:  # noqa: BLE001
                 _LOGGER.debug("position-refresh PAI non-fatal failure: %s", e)
 
@@ -381,12 +385,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     data["_state"] = state_resp["data"]
             except GeelyAuthError as e:
                 raise ConfigEntryAuthFailed(str(e)) from e
+            except GeelyTLSPinError as e:
+                # A pin failure means the server key changed - an active
+                # MITM or a legitimate rotation. Never hide it at DEBUG.
+                _LOGGER.error("vehicle state fetch: TLS pin check failed: %s", e)
             except Exception as e:  # noqa: BLE001
                 _LOGGER.debug("vehicle_status_state non-fatal failure: %s", e)
             try:
                 sc = await _call_with_retry(api.charge_server_get, "6")
                 if sc.get("code") in _SUCCESS_CODES and isinstance(sc.get("data"), dict):
                     data["_scheduled_charging"] = sc["data"]
+            except GeelyTLSPinError as e:
+                # A pin failure means the server key changed - an active
+                # MITM or a legitimate rotation. Never hide it at DEBUG.
+                _LOGGER.error("scheduled-charging fetch: TLS pin check failed: %s", e)
             except Exception as e:  # noqa: BLE001
                 _LOGGER.debug("scheduled-charging fetch non-fatal failure: %s", e)
         else:
