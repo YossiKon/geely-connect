@@ -135,11 +135,22 @@ climate before departure).
 
 ## 🔒 Security
 
-Security was a first-class goal of this build: TLS is verified against public
-CAs, with public-key pinning for the one Geely gateway that uses Geely's own
-private CA; credentials are stored with owner-only access, secrets are masked in
-logs and in the diagnostics report, and all traffic goes only to Geely's own
-servers — no telemetry, no third parties.
+Security was a first-class goal of this build. Every connection is validated
+against the public CAs; the one Geely gateway that uses Geely's own private CA
+(`apis.ecloudeu.com`) is verified against a public-key pin that ships with the
+integration, so it is checked from the very first connection and a
+man-in-the-middle is refused rather than trusted. No other host may use that
+fallback, and a host that has validated publicly once can never be pushed onto
+it. Credentials are stored with owner-only access, secrets are masked in logs
+and in the diagnostics report, and all traffic goes only to Geely's own servers
+— no telemetry, no third parties.
+
+If Geely ever rotates that gateway's key you will see a `GeelyTLSPinError`
+naming the host and the key it presented. That is the pin doing its job: please
+[open an issue](https://github.com/YossiKon/geely-connect/issues) so a new pin
+can ship. To unblock yourself in the meantime, add the reported key to the
+`pins` list for that host in
+`.storage/geely_connect/<VIN>/server_pins.json` and restart.
 
 ---
 

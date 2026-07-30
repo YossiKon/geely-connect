@@ -42,6 +42,7 @@ import binascii
 import json
 import os
 import random
+import re
 import secrets
 import sys
 import time
@@ -332,9 +333,32 @@ def fetch_load(s: requests.Session, captcha_id: str, *, client_type: str = "web"
     )
 
 
+_CAPTCHA_HOST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.\-]{0,252}$")
+_CAPTCHA_HOST_SUFFIXES = (".geely.com", ".geetest.com")
+
+_FALLBACK_CAPTCHA_HOST = "captcha4.geely.com"
+
+
+def _allowed_captcha_hosts(static_servers: list[str]) -> list[str]:
+    """Filter the CDN hosts the captcha /load response asks us to use.
+
+    The list is server-supplied and gets interpolated straight into a URL
+    authority, so without a check the response could point Home Assistant at
+    any host, port or userinfo it liked. Accept only bare hostnames under the
+    expected domains; port 443 is implied because ':' is rejected."""
+    hosts = []
+    for host in static_servers:
+        if not isinstance(host, str) or not _CAPTCHA_HOST_RE.match(host):
+            continue
+        if not host.lower().endswith(_CAPTCHA_HOST_SUFFIXES):
+            continue
+        hosts.append(host)
+    return hosts
+
+
 def fetch_image(s: requests.Session, static_servers: list[str], path: str) -> bytes:
     last_err: Exception | None = None
-    for host in static_servers + ["captcha4.geely.com"]:
+    for host in _allowed_captcha_hosts(static_servers) + [_FALLBACK_CAPTCHA_HOST]:
         url = f"https://{host}/{path.lstrip('/')}"
         try:
             r = s.get(url, timeout=15)

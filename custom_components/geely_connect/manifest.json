@@ -13,7 +13,10 @@
   "requirements": [
     "cryptography>=41.0.0",
     "pycryptodome>=3.18.0",
-    "certifi>=2023.7.22"
+    "certifi>=2023.7.22",
+    "numpy>=1.26.0",
+    "Pillow>=10.0.1",
+    "scipy>=1.11.0"
   ],
   "version": "1.0.0"
 }

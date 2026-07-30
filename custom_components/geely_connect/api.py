@@ -215,19 +215,36 @@ class GeelyTLSPinError(Exception):
 #      the OS trust store (public CAs). If Geely uses public certificates
 #      this Just Works with zero config and is the strongest option.
 #
-#   2. If (and only if) strict validation fails because the chain isn't
-#      publicly trusted (Geely fronts some gateways with a private/self-
-#      signed CA - the real reason the original author disabled checks),
-#      fall back to PUBLIC-KEY PINNING: on the very first contact we record
-#      the server's SubjectPublicKeyInfo SHA-256 (trust-on-first-use, like
-#      SSH known_hosts), and on every subsequent call we REQUIRE an exact
-#      match. A MITM presenting a different key is rejected.
+#   2. If (and only if) strict validation fails, fall back to PUBLIC-KEY
+#      PINNING - but only for the one host that provably cannot chain to a
+#      public root, and only against a pin we already know. The pinned key
+#      ships with the integration (_BUNDLED_TLS_PINS), so even the very
+#      first connection is checked instead of trusting whatever answers.
 #
-# At no point do we silently accept an arbitrary certificate on an ongoing
-# session, which is the property the original code lacked. (Do the initial
-# setup on a network you trust so the first-use pin is captured cleanly.)
+# Two rules keep the fallback from becoming a downgrade attack, which is the
+# mistake an audit found in the first version of this file: a host must be
+# on the private-PKI allowlist to use it at all, and a host that has ever
+# validated strictly is remembered and can never use it afterwards. Without
+# those, an attacker could present any self-signed certificate on any
+# connection, force the fallback, and be trusted on first use.
 
 _TLS_LEGACY_RENEG = 0x4   # OP_LEGACY_SERVER_CONNECT - old handshake mode only
+
+# Hosts that legitimately cannot validate against a public CA. Only
+# apis.ecloudeu.com qualifies: it serves a leaf issued by Geely's own PKI
+# ("Geely Trust Center / External Services Issuing EU-CA", valid 2022-2032)
+# and sends no intermediate. Every other Geely host answers with a normal
+# GlobalSign or Amazon chain and so must validate strictly.
+_PRIVATE_PKI_HOSTS: frozenset = frozenset({"apis.ecloudeu.com"})
+
+# SubjectPublicKeyInfo SHA-256 pins (base64) for those hosts. Captured
+# 2026-07-30 and cross-checked against all three published A records and two
+# independent DoH resolvers, so a single poisoned network path could not have
+# produced them. Because a pin is present here, the host below never uses
+# trust-on-first-use - it is verified from the first connection onwards.
+_BUNDLED_TLS_PINS: dict[str, tuple[str, ...]] = {
+    "apis.ecloudeu.com": ("Hm0olBoClunXgMp4wFvdrr8SC5iSt+LX6iyB4N828C8=",),
+}
 
 
 def _strict_ctx() -> ssl.SSLContext:
@@ -274,26 +291,69 @@ def _spki_sha256_b64(der_cert: bytes) -> str:
     return base64.b64encode(hashlib.sha256(spki).digest()).decode()
 
 
-def _load_pins(pin_path: str | None) -> dict:
+def _close_quietly(sock: socket.socket) -> None:
+    try:
+        sock.close()
+    except OSError:
+        pass
+
+
+def _load_pin_store(pin_path: str | None) -> dict[str, dict]:
+    """Read server_pins.json as {host: {"pins": [...], "strict": bool}}.
+
+    Fails closed on purpose: a file that exists but cannot be read or parsed
+    raises instead of returning an empty store, because an empty store is
+    what re-opens trust-on-first-use for that host.
+
+    Pin files written by 0.9.x stored a bare list per host; those are migrated
+    in memory and rewritten on the next successful connection."""
     if not pin_path or not os.path.exists(pin_path):
         return {}
     try:
         with open(pin_path, "r") as fh:
-            data = json.load(fh)
-        return data if isinstance(data, dict) else {}
-    except Exception:  # noqa: BLE001 - corrupt pin file: treat as empty
-        return {}
+            raw = json.load(fh)
+    except (OSError, ValueError) as e:
+        raise GeelyTLSPinError(
+            f"{pin_path} exists but could not be read ({e}). Refusing to "
+            "continue without the pins it should contain - fix or delete it."
+        ) from e
+    if not isinstance(raw, dict):
+        raise GeelyTLSPinError(f"{pin_path} is not a JSON object; refusing to use it")
+
+    store: dict[str, dict] = {}
+    for host, entry in raw.items():
+        if isinstance(entry, list):
+            pins, strict = entry, False
+        elif isinstance(entry, dict):
+            pins, strict = entry.get("pins") or [], bool(entry.get("strict"))
+        else:
+            raise GeelyTLSPinError(f"{pin_path}: malformed entry for {host}")
+        store[host] = {
+            "pins": [p for p in pins if isinstance(p, str)],
+            "strict": strict,
+        }
+    return store
 
 
-def _save_pins(pin_path: str, pins: dict) -> None:
+def _save_pin_store(pin_path: str, store: dict) -> None:
+    """Write the pin store atomically, so an interrupted write cannot leave a
+    truncated file that _load_pin_store would then refuse (or, worse, that an
+    older parser would read as 'no pins known')."""
     os.makedirs(os.path.dirname(pin_path), mode=0o700, exist_ok=True)
-    fd = os.open(pin_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as fh:
-        json.dump(pins, fh, indent=2, sort_keys=True)
+    tmp_path = f"{pin_path}.tmp"
+    fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
-        os.chmod(pin_path, 0o600)
-    except OSError:
-        pass
+        with os.fdopen(fd, "w") as fh:
+            json.dump(store, fh, indent=2, sort_keys=True)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_path, pin_path)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 def _secure_tls_connect(host: str, port: int, *, pin_path: str | None,
@@ -302,30 +362,63 @@ def _secure_tls_connect(host: str, port: int, *, pin_path: str | None,
                         timeout: int = 30) -> ssl.SSLSocket:
     """Open a TLS connection to (host, port), fail-closed.
 
-    Strategy: strict public-CA validation first; on a *verification*
-    failure only, fall back to trust-on-first-use public-key pinning. Any
-    other error (or a pin mismatch) propagates and no data is sent."""
+    Strict public-CA validation first. Only a *verification* failure, on a
+    host that is both on the private-PKI allowlist and has never validated
+    strictly before, may fall back to public-key pinning; anything else
+    propagates and no data is sent.
+
+    One residual exposure in the fallback: the mTLS client certificate is
+    offered during the handshake, so a pin mismatch is detected only after
+    an impostor has seen that certificate. It is a public certificate - the
+    private key never leaves the host and the handshake signature is not
+    replayable - so this leaks the vehicle's certificate to an attacker who
+    is already on the path, not the ability to use it."""
+    store = _load_pin_store(pin_path)
+    entry = store.get(host) or {}
+    accepted = set(_BUNDLED_TLS_PINS.get(host, ())) | set(entry.get("pins") or ())
+
     # --- Tier 1: strict public-CA validation ---
     strict = _strict_ctx()
     if client_cert:
         strict.load_cert_chain(client_cert, client_key)
     raw = socket.create_connection((host, port), timeout=timeout)
     try:
-        return strict.wrap_socket(raw, server_hostname=host)
-    except ssl.SSLCertVerificationError:
-        try:
-            raw.close()
-        except OSError:
-            pass
+        ssock = strict.wrap_socket(raw, server_hostname=host)
+    except ssl.SSLCertVerificationError as e:
+        _close_quietly(raw)
+        strict_error = e
     except Exception:
-        try:
-            raw.close()
-        except OSError:
-            pass
+        _close_quietly(raw)
         raise
+    else:
+        # Remember that this host validates publicly, so no later connection
+        # can be pushed into the pinning fallback by a bad certificate.
+        if pin_path and not entry.get("strict"):
+            store[host] = {"pins": sorted(entry.get("pins") or []), "strict": True}
+            try:
+                _save_pin_store(pin_path, store)
+            except OSError as e:
+                _LOGGER.warning(
+                    "could not record that %s validates publicly (%s); the "
+                    "host allowlist still blocks a pinning downgrade", host, e,
+                )
+        return ssock
 
-    # --- Tier 2: public-key pinning (private/self-signed CA) ---
-    pins = _load_pins(pin_path)
+    # --- Tier 2: public-key pinning, for Geely's private-PKI gateway only ---
+    if entry.get("strict"):
+        raise GeelyTLSPinError(
+            f"{host} has presented a publicly-trusted certificate before but "
+            f"now fails validation ({strict_error.verify_message or strict_error}). "
+            "Refusing to downgrade to key pinning - possible man-in-the-middle."
+        )
+    if host not in _PRIVATE_PKI_HOSTS:
+        raise GeelyTLSPinError(
+            f"{host}: certificate validation failed "
+            f"({strict_error.verify_message or strict_error}) and this host is "
+            "not one that uses Geely's private CA, so key pinning does not "
+            "apply. Refusing to connect."
+        ) from strict_error
+
     ctx = _pinning_ctx()
     if client_cert:
         ctx.load_cert_chain(client_cert, client_key)
@@ -333,10 +426,7 @@ def _secure_tls_connect(host: str, port: int, *, pin_path: str | None,
     try:
         ssock = ctx.wrap_socket(raw, server_hostname=host)
     except Exception:
-        try:
-            raw.close()
-        except OSError:
-            pass
+        _close_quietly(raw)
         raise
 
     der = ssock.getpeercert(binary_form=True)   # available even under CERT_NONE
@@ -344,27 +434,42 @@ def _secure_tls_connect(host: str, port: int, *, pin_path: str | None,
         ssock.close()
         raise GeelyTLSPinError(f"{host}: server sent no certificate")
     spki = _spki_sha256_b64(der)
-    known = pins.get(host)
 
-    if known:
-        if spki in known:
+    if accepted:
+        if spki in accepted:
             return ssock                          # pin matches → trusted
         ssock.close()
         raise GeelyTLSPinError(
-            f"{host}: server key {spki} does not match pinned key(s) - "
-            "possible man-in-the-middle; refusing to send credentials"
+            f"{host}: server key {spki} does not match the expected key(s) "
+            f"{sorted(accepted)} - possible man-in-the-middle; refusing to "
+            "send credentials. If Geely has legitimately rotated this key, "
+            f"add the new one to {pin_path or 'server_pins.json'} and open an "
+            "issue so it can ship as the bundled pin."
         )
 
-    # First contact with a privately-signed host: record the pin (TOFU).
-    if pin_path:
-        pins[host] = [spki]
-        try:
-            _save_pins(pin_path, pins)
-        except Exception as e:  # noqa: BLE001 - non-fatal; just won't persist
-            _LOGGER.warning("could not persist TLS pin for %s: %s", host, e)
+    # No bundled pin and nothing stored: first contact with a private-PKI
+    # host we do not ship a pin for. Record what it presented (TOFU) and treat
+    # a failure to persist as fatal - a pin that is not written means the next
+    # connection would trust a different key just as readily.
+    if not pin_path:
+        ssock.close()
+        raise GeelyTLSPinError(
+            f"{host}: no pin store available, so its key cannot be remembered; "
+            "refusing to trust it for a single connection."
+        )
+    store[host] = {"pins": [spki], "strict": False}
+    try:
+        _save_pin_store(pin_path, store)
+    except OSError as e:
+        ssock.close()
+        raise GeelyTLSPinError(
+            f"{host}: could not persist the first-use pin to {pin_path} ({e}); "
+            "refusing to continue unverified."
+        ) from e
     _LOGGER.warning(
-        "%s is not publicly-trusted; pinned its public key on first use "
-        "(TOFU): %s. Future connections require this exact key.", host, spki,
+        "%s is not publicly-trusted and ships no bundled pin; recorded its "
+        "public key on first use: %s. Later connections require this exact "
+        "key.", host, spki,
     )
     return ssock
 
@@ -491,6 +596,14 @@ class GeelyApi:
         headers["content-length"] = str(len(body))
         if extra_headers:
             headers.update(extra_headers)
+        # The JWT and the vehicle series/model headers come from server JSON, so
+        # they get the same CR/LF check _raw_https applies - a newline in one of
+        # them would otherwise terminate the header block and smuggle a second
+        # request onto the socket. Checked after the update() so the merged-in
+        # values are covered too.
+        for _hk, _hv in headers.items():
+            _no_crlf(str(_hk), "header name")
+            _no_crlf(str(_hv), "header value")
         head_lines = [f"{method} {path} HTTP/1.1"] + [f"{k}: {v}" for k, v in headers.items()]
         req_bytes = ("\r\n".join(head_lines) + "\r\n\r\n").encode() + body
 

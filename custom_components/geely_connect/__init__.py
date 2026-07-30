@@ -156,8 +156,10 @@ async def _maybe_refetch_vehicle_metadata(hass: HomeAssistant, entry: ConfigEntr
     new_data[CONF_VEHICLE_SERIES] = match.get("series") or ""
     new_data[CONF_VEHICLE_MODEL_CODE] = match.get("modelCode") or match.get("seriesCode") or ""
     hass.config_entries.async_update_entry(entry, data=new_data)
-    _LOGGER.info("Refreshed vehicle metadata for %s: %s",
-                 target_vin, new_data[CONF_VEHICLE_NICKNAME])
+    # Last 4 VIN characters only, matching _resolve_device_name, so a shared
+    # log or screenshot does not reveal the full VIN.
+    _LOGGER.info("Refreshed vehicle metadata for ...%s: %s",
+                 (target_vin or "")[-4:], new_data[CONF_VEHICLE_NICKNAME])
 
 
 def _purge_obsolete_entities(hass: HomeAssistant, entry: ConfigEntry) -> int:
