@@ -1,20 +1,19 @@
 {
   "domain": "geely_connect",
-  "name": "Geely Connect (Unofficial)",
+  "name": "Geely Connect",
   "codeowners": [
-    "@nitaybz"
+    "@YossiKon"
   ],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://github.com/nitaybz/geely-global-ha",
+  "documentation": "https://github.com/YossiKon/geely-connect",
   "integration_type": "device",
   "iot_class": "cloud_polling",
-  "issue_tracker": "https://github.com/nitaybz/geely-global-ha/issues",
-  "quality_scale": "silver",
+  "issue_tracker": "https://github.com/YossiKon/geely-connect/issues",
   "requirements": [
     "cryptography>=41.0.0",
     "pycryptodome>=3.18.0",
     "certifi>=2023.7.22"
   ],
-  "version": "0.9.2"
+  "version": "1.0.0"
 }

@@ -7,7 +7,7 @@
 #             (לסקשן הצמיגים; אם אין — מחק את בלוק ה-picture-elements)
 #
 #  לפני הדבקה: החלף בכל הקובץ  my_geely_ex5  בסיומת שלך
-#  (Settings → Devices & Services → Geely Global → הרכב → entity_id)
+#  (Settings → Devices & Services → Geely Connect → הרכב → entity_id)
 # ==================================================================
 
 type: custom:stack-in-card

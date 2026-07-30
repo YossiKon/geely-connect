@@ -2,7 +2,7 @@
   "config": {
     "step": {
       "user": {
-        "title": "Geely Connect (non officiel)",
+        "title": "Geely Connect",
         "description": "Intégration communautaire non officielle — non affiliée à Geely. Saisissez l'email du compte Geely, choisissez le pays, l'unité de pression des pneus et la langue. Un code à 6 chiffres sera envoyé.",
         "data": {
           "email": "Email",
@@ -21,6 +21,7 @@
       },
       "pick_vehicle": {
         "title": "Choisir un véhicule",
+        "description": "Votre compte Geely contient plusieurs véhicules. Choisissez celui à ajouter. Les véhicules déjà configurés ne sont pas affichés.",
         "data": {
           "vin": "Véhicule"
         }
@@ -28,6 +29,7 @@
     },
     "error": {
       "send_code_failed": "Échec de l'envoi du code. Réessayez.",
+      "captcha_failed": "Erreur du résolveur de captcha — veuillez réessayer.",
       "invalid_code": "Code refusé (code à usage unique).",
       "no_vehicles": "Connexion réussie mais aucun véhicule trouvé.",
       "unknown": "Une erreur s'est produite. Consultez les journaux."

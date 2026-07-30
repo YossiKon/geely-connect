@@ -1,4 +1,9 @@
-# Geely Connect (Unofficial)
+# Geely Connect
+
+[![Add to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=YossiKon&repository=geely-connect&category=integration)
+[![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz/docs/faq/custom_repositories)
+[![GitHub Release](https://img.shields.io/github/v/release/YossiKon/geely-connect?include_prereleases)](https://github.com/YossiKon/geely-connect/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 > ⚠️ **Unofficial, community-built integration.** Not affiliated with, endorsed
 > by, or supported by Geely. Use at your own risk.
@@ -17,8 +22,7 @@ polished setup on top.
 
 ## ✨ Highlights
 
-- 🔒 **Security-first** — TLS enforced and fail-closed, MITM-resistant (details
-  below).
+- 🔒 **Security-first** — verified TLS plus public-key pinning.
 - 📊 **Full data exposure** — every field the server returns can be shown, not
   just a curated subset.
 - 🔋 **Efficient polling** with selectable modes (Eco / Normal / Live).
@@ -129,42 +133,42 @@ climate before departure).
 
 ---
 
-## 🔒 Security posture (high level)
+## 🔒 Security
 
-Security was a first-class goal of this build. Without giving away details that
-would help an attacker, here is the posture:
-
-- **Encrypted, authenticated connections only.** Traffic to the vehicle cloud is
-  protected end-to-end and the server's identity is verified on every request.
-  The connection is **fail-closed** — if the server can't be verified, no
-  credentials are ever sent.
-- **Man-in-the-middle resistant.** A tampered or impersonated server is detected
-  and the connection refused before any sensitive data leaves Home Assistant.
-- **Credentials protected at rest.** Vehicle security material is stored with
-  owner-only access on disk.
-- **No secrets in logs.** Tokens, certificates and other sensitive values are
-  masked in logs and in the one-click diagnostics report, so it's safe to share
-  for support.
-- **Input hardening.** Data received from the backend is strictly validated
-  before use, closing common classes of injection/traversal issues.
-- **Nothing phones home.** All traffic goes only to the vehicle manufacturer's
-  own servers — no telemetry, no third parties, no analytics.
-
-> For safety this README deliberately does **not** describe the specific
-> algorithms, keys or internal mechanisms — that detail is kept out of public
-> docs so it can't be used as a roadmap for abuse.
+Security was a first-class goal of this build: TLS is verified against public
+CAs, with public-key pinning for the one Geely gateway that uses Geely's own
+private CA; credentials are stored with owner-only access, secrets are masked in
+logs and in the diagnostics report, and all traffic goes only to Geely's own
+servers — no telemetry, no third parties.
 
 ---
 
 ## 📥 Installation (HACS)
 
-1. HACS → ⋮ → **Custom repositories** → add this repo URL, category
-   **Integration**
-2. Search **Geely Connect**, download, then **restart Home Assistant**
-3. Settings → Devices & Services → **Add Integration** → **Geely Connect
-   (Unofficial)**
+**One-click:** [![Add to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=YossiKon&repository=geely-connect&category=integration)
+
+Or manually:
+
+1. HACS → ⋮ (top-right) → **Custom repositories** → paste
+   `https://github.com/YossiKon/geely-connect`, category **Integration** → **Add**
+2. In HACS, search **Geely Connect**, open it and press **Download**, then
+   **restart Home Assistant**
+3. Settings → Devices & Services → **Add Integration** → **Geely Connect**
 4. Enter your email, pick **country / tire-pressure unit / language / polling
    mode**, then enter the 6-digit code sent to your inbox
+
+### The repository doesn't show up in HACS?
+
+- Make sure you picked category **Integration** when adding the custom
+  repository.
+- After adding it, it does **not** appear automatically — type "Geely Connect"
+  in the HACS search box (and clear any active filters).
+- If you added the repository **before** the integration files were pushed,
+  HACS may have cached the old state: remove the custom repository
+  (HACS → ⋮ → Custom repositories → 🗑), restart Home Assistant, then add it
+  again.
+- A GitHub API rate-limit can delay new repositories — wait a few minutes and
+  try again.
 
 ### Manual installation
 Copy `custom_components/geely_connect/` into `config/custom_components/` and
@@ -310,13 +314,28 @@ re-authenticate. Tip: run the first setup on a network you trust.
 
 ---
 
+## 📁 Repository structure
+
+```
+custom_components/geely_connect/   the integration itself (what HACS installs)
+├── translations/                  UI translations (en, he, ar, fr, ru)
+├── manifest.json                  integration metadata
+└── *.py                           platforms, API client, config flow, …
+blueprints/automation/             ready-made automation blueprints
+cards/                             single Lovelace cards (paste as "Manual card")
+dashboards/                        full dashboards (paste in Raw config editor)
+brands/geely_connect/              icon/logo assets (for home-assistant/brands)
+hacs.json                          HACS metadata
+```
+
+---
+
 ## 📜 License & credits
 
 MIT for the original parts (framework, hardening, transport, packaging) — see
 `LICENSE`. The reverse-engineered Geely protocol and vehicle field mappings are
 derived from [`nitaybz/geely-global-ha`](https://github.com/nitaybz/geely-global-ha)
-under the MIT License; that credit and license text are in `NOTICE.txt`. Replace
-"YOUR NAME" in `LICENSE` before publishing.
+under the MIT License; that credit and license text are in `NOTICE.txt`.
 
 Unofficial, provided "as is" with no warranty. Not affiliated with Geely or
 ECARX. Remote commands are used at your own risk.

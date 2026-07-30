@@ -1,5 +1,5 @@
-THIRD-PARTY NOTICES — Geely Connect (Unofficial)
-================================================
+THIRD-PARTY NOTICES — Geely Connect
+===================================
 
 This project's own framework, security hardening and TLS transport are
 original work. The reverse-engineered Geely protocol implementation and

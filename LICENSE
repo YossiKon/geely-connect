@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2026 YOUR NAME (Geely Connect - original framework, hardening, transport)
+Copyright (c) 2026 Yossi Koncha (Geely Connect - original framework, hardening, transport)
 
 Portions of this software (the reverse-engineered Geely protocol and vehicle
 field mappings) are derived from nitaybz/geely-global-ha and are also under the
