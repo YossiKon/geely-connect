@@ -1,0 +1,279 @@
+# =====================================================================
+#  Geely Connect — dashboard using ONLY built-in Home Assistant cards.
+#  No HACS / custom cards needed. Copy-paste and it works.
+#
+#  HOW TO USE:
+#   1. Find your entity suffix: Settings → Devices & Services → Geely
+#      Connect → your car. IDs look like sensor.my_geely_ex5_battery
+#      → your suffix is  my_geely_ex5
+#   2. If yours differs, search-replace  my_geely_ex5  in this file.
+#   3. Settings → Dashboards → Add dashboard → New dashboard from scratch
+#      → open it → ⋮ → Edit → ⋮ → Raw configuration editor →
+#      paste everything below → Save.
+#
+#  Any entity your car doesn't have shows as "unavailable" — just delete
+#  that card.
+# =====================================================================
+title: Geely
+views:
+  - title: Geely
+    path: geely
+    icon: mdi:car-electric
+    type: sections
+    max_columns: 2
+    sections:
+
+      # ============ Battery & charging ============
+      - type: grid
+        cards:
+          - type: heading
+            heading: Battery & charging
+            heading_style: title
+          - type: tile
+            entity: sensor.my_geely_ex5_battery
+            name: Battery
+            color: green
+            grid_options: {columns: 6}
+          - type: tile
+            entity: sensor.my_geely_ex5_electric_range
+            name: Range
+            color: blue
+            grid_options: {columns: 6}
+          - type: tile
+            entity: sensor.my_geely_ex5_charger_connection
+            name: Charger
+            grid_options: {columns: 6}
+          - type: tile
+            entity: sensor.my_geely_ex5_time_to_full_charge
+            name: Time to full
+            grid_options: {columns: 6}
+          - type: tile
+            entity: switch.my_geely_ex5_charging
+            name: Charging
+            grid_options: {columns: 6}
+          - type: tile
+            entity: sensor.my_geely_ex5_efficiency
+            name: Efficiency
+            grid_options: {columns: 6}
+          - type: tile
+            entity: switch.my_geely_ex5_scheduled_charging
+            name: Scheduled charging
+            grid_options: {columns: 4}
+          - type: tile
+            entity: time.my_geely_ex5_scheduled_charging_start
+            name: Start
+            grid_options: {columns: 4}
+          - type: tile
+            entity: time.my_geely_ex5_scheduled_charging_end
+            name: End
+            grid_options: {columns: 4}
+
+      # ============ Quick actions ============
+      - type: grid
+        cards:
+          - type: heading
+            heading: Quick actions
+            heading_style: title
+          - type: tile
+            entity: lock.my_geely_ex5_doors
+            name: Doors
+            features:
+              - type: lock-commands
+            grid_options: {columns: 12}
+          - type: tile
+            entity: button.my_geely_ex5_find_car
+            name: Find car
+            icon: mdi:car-search
+            tap_action: {action: toggle}
+            grid_options: {columns: 4}
+          - type: tile
+            entity: button.my_geely_ex5_unlock_trunk
+            name: Trunk
+            icon: mdi:car-back
+            tap_action: {action: toggle}
+            grid_options: {columns: 4}
+          - type: tile
+            entity: button.my_geely_ex5_refresh_data
+            name: Refresh
+            icon: mdi:refresh
+            tap_action: {action: toggle}
+            grid_options: {columns: 4}
+
+      # ============ Climate ============
+      - type: grid
+        cards:
+          - type: heading
+            heading: Climate
+            heading_style: title
+          - type: thermostat
+            entity: climate.my_geely_ex5_climate
+            name: Climate
+            features:
+              - type: climate-hvac-modes
+                hvac_modes: [heat_cool, "off"]
+              - type: climate-preset-modes
+                style: dropdown
+            grid_options: {columns: 12}
+          - type: tile
+            entity: switch.my_geely_ex5_defrost
+            name: Defrost
+            grid_options: {columns: 4}
+          - type: tile
+            entity: switch.my_geely_ex5_window_ventilation
+            name: Window vent
+            grid_options: {columns: 4}
+          - type: tile
+            entity: switch.my_geely_ex5_g_clean
+            name: Air purge
+            grid_options: {columns: 4}
+          - type: tile
+            entity: select.my_geely_ex5_seat_heat_driver
+            name: Seat heat — driver
+            features:
+              - type: select-options
+            grid_options: {columns: 6}
+          - type: tile
+            entity: select.my_geely_ex5_seat_heat_passenger
+            name: Seat heat — passenger
+            features:
+              - type: select-options
+            grid_options: {columns: 6}
+          - type: tile
+            entity: select.my_geely_ex5_seat_vent_driver
+            name: Seat vent — driver
+            features:
+              - type: select-options
+            grid_options: {columns: 6}
+          - type: tile
+            entity: select.my_geely_ex5_seat_vent_passenger
+            name: Seat vent — passenger
+            features:
+              - type: select-options
+            grid_options: {columns: 6}
+
+      # ============ Location ============
+      - type: grid
+        cards:
+          - type: heading
+            heading: Location
+            heading_style: title
+          - type: map
+            entities:
+              - entity: device_tracker.my_geely_ex5_location
+            theme_mode: auto
+            grid_options: {columns: 12, rows: 4}
+
+      # ============ Doors, windows & roof ============
+      - type: grid
+        cards:
+          - type: heading
+            heading: Doors, windows & roof
+            heading_style: title
+          - type: tile
+            entity: binary_sensor.my_geely_ex5_door_driver
+            name: Driver door
+            grid_options: {columns: 6}
+          - type: tile
+            entity: binary_sensor.my_geely_ex5_door_passenger
+            name: Passenger door
+            grid_options: {columns: 6}
+          - type: tile
+            entity: binary_sensor.my_geely_ex5_door_rear_left
+            name: Rear-left door
+            grid_options: {columns: 6}
+          - type: tile
+            entity: binary_sensor.my_geely_ex5_door_rear_right
+            name: Rear-right door
+            grid_options: {columns: 6}
+          - type: tile
+            entity: binary_sensor.my_geely_ex5_trunk
+            name: Trunk
+            grid_options: {columns: 6}
+          - type: tile
+            entity: binary_sensor.my_geely_ex5_hood
+            name: Hood
+            grid_options: {columns: 6}
+          - type: tile
+            entity: cover.my_geely_ex5_windows
+            name: Windows
+            features:
+              - type: cover-open-close
+            grid_options: {columns: 4}
+          - type: tile
+            entity: cover.my_geely_ex5_sunroof
+            name: Sunroof
+            features:
+              - type: cover-open-close
+            grid_options: {columns: 4}
+          - type: tile
+            entity: cover.my_geely_ex5_sunshade
+            name: Sunshade
+            features:
+              - type: cover-open-close
+            grid_options: {columns: 4}
+
+      # ============ Tires ============
+      - type: grid
+        cards:
+          - type: heading
+            heading: Tire pressure
+            heading_style: title
+          - type: tile
+            entity: sensor.my_geely_ex5_tire_pressure_fl
+            name: Front-left
+            icon: mdi:tire
+            grid_options: {columns: 6}
+          - type: tile
+            entity: sensor.my_geely_ex5_tire_pressure_fr
+            name: Front-right
+            icon: mdi:tire
+            grid_options: {columns: 6}
+          - type: tile
+            entity: sensor.my_geely_ex5_tire_pressure_rl
+            name: Rear-left
+            icon: mdi:tire
+            grid_options: {columns: 6}
+          - type: tile
+            entity: sensor.my_geely_ex5_tire_pressure_rr
+            name: Rear-right
+            icon: mdi:tire
+            grid_options: {columns: 6}
+
+      # ============ Vehicle info ============
+      - type: grid
+        cards:
+          - type: heading
+            heading: Vehicle info
+            heading_style: title
+          - type: tile
+            entity: sensor.my_geely_ex5_total_mileage
+            name: Odometer
+            grid_options: {columns: 6}
+          - type: tile
+            entity: sensor.my_geely_ex5_average_consumption
+            name: Consumption
+            grid_options: {columns: 6}
+          - type: tile
+            entity: sensor.my_geely_ex5_interior_temperature
+            name: Interior temp
+            grid_options: {columns: 6}
+          - type: tile
+            entity: sensor.my_geely_ex5_exterior_temperature
+            name: Exterior temp
+            grid_options: {columns: 6}
+          - type: tile
+            entity: sensor.my_geely_ex5_12v_battery
+            name: 12V battery
+            grid_options: {columns: 6}
+          - type: tile
+            entity: sensor.my_geely_ex5_days_to_service
+            name: Days to service
+            grid_options: {columns: 6}
+          - type: tile
+            entity: binary_sensor.my_geely_ex5_connected
+            name: Connected
+            grid_options: {columns: 6}
+          - type: tile
+            entity: sensor.my_geely_ex5_last_updated
+            name: Last updated
+            grid_options: {columns: 6}
