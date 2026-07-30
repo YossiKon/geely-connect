@@ -172,20 +172,34 @@ restart.
 
 ---
 
-## 🖥️ Dashboards
+## 🖥️ Dashboards & cards
 
-Two ready-made dashboards live in [`dashboards/`](dashboards/):
+First, find your **entity suffix**: Settings → Devices & Services → Geely Connect
+→ your car. IDs look like `sensor.my_geely_ex5_battery`, so the suffix is
+`my_geely_ex5`. If yours differs, search-replace `my_geely_ex5` in any file below.
 
-- **`dashboard-builtin.yaml`** — uses only Home Assistant's built-in cards, so it
-  works with **no HACS / custom cards**. Copy-paste and go.
-- **`premium-card-hebrew.yaml`** — a styled, dark-themed card (Hebrew). Requires
-  the HACS frontend cards `button-card`, `stack-in-card` and `card-mod`.
+There are two kinds of file — **use the matching paste location**, or you'll get
+a `Cannot read properties of undefined (reading 'startsWith')` error:
 
-**To use one:** find your entity suffix (Settings → Devices & Services → Geely
-Connect → your car; IDs look like `sensor.my_geely_ex5_battery`, so the suffix is
-`my_geely_ex5`). If yours differs, search-replace `my_geely_ex5` in the file.
-Then: Settings → Dashboards → Add dashboard → New dashboard from scratch → open
-it → ⋮ → Edit → ⋮ → **Raw configuration editor** → paste → Save.
+### 🃏 Single cards — [`cards/`](cards/)
+A **card** starts with `type:` and is added via
+**Edit dashboard → Add card → ⤵ Manual → paste → Save** (into any existing view).
+
+- **`cards/card-builtin.yaml`** — one self-contained card (vertical-stack of
+  built-in tiles). **No HACS needed.** Best for dropping into an existing tab.
+- **`cards/card-premium-hebrew.yaml`** — styled dark card (Hebrew). Requires the
+  HACS frontend cards `button-card`, `stack-in-card`, `card-mod`.
+
+### 🖥️ Full dashboards — [`dashboards/`](dashboards/)
+A **dashboard** starts with `title:` / `views:` and is pasted via
+**Settings → Dashboards → Add dashboard → New dashboard from scratch → open →
+⋮ Edit → ⋮ Raw configuration editor → paste → Save** (NOT "Add card").
+
+- **`dashboards/dashboard-builtin.yaml`** — a complete multi-section dashboard
+  using only built-in cards. No HACS needed.
+
+> Any entity your car doesn't report shows as "unavailable" — just delete that
+> tile.
 
 ---
 
