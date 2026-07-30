@@ -341,6 +341,25 @@ project reports. Adding APAC or SA needs that area's app id and secret.
 
 ---
 
+## 🎚️ Changing settings later
+
+Settings → Devices & Services → **Geely Connect** → **Configure** changes the
+**polling mode**, **tire-pressure unit** and **language** at any time — no
+reinstall, no restart. Changing the pressure unit also re-points the four
+existing tire sensors, so history is kept rather than restarting.
+
+### Which entities appear
+
+Anything that could leave the car exposed if pressed by accident is created but
+**disabled by default**: the window, sunroof and sunshade covers, and the
+window-ventilation switch. Turn on the ones you want under **Entities** on the
+device page. The full-exposure raw sensors are disabled by default too, and the
+readings that are only occasionally interesting (tire pressures, 12V, trip
+meter, service counters, engine state) sit in the collapsed **Diagnostic**
+section rather than the main list.
+
+---
+
 ## ⚠️ Known limitation — one session per account
 When Home Assistant logs in, the phone app is signed out, and vice-versa. If it
 happens, HA shows a **Reconfigure** prompt — request a fresh code and

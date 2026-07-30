@@ -324,7 +324,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     poll_state = {"cycle": 0, "idle": 0, "sig": None}
     # Chosen polling profile (Eco / Normal / Live) from setup.
     profile = POLL_PROFILES.get(
-        entry.data.get(CONF_POLL_MODE, DEFAULT_POLL_MODE), POLL_PROFILES[DEFAULT_POLL_MODE]
+        # Options win over data: the polling mode can be changed after setup.
+        entry.options.get(CONF_POLL_MODE)
+        or entry.data.get(CONF_POLL_MODE, DEFAULT_POLL_MODE),
+        POLL_PROFILES[DEFAULT_POLL_MODE]
     )
     _SECONDARY_EVERY = profile["secondary_every"]
     _POSITION_EVERY = profile["position_every"]
@@ -460,8 +463,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "capabilities":  capabilities,
     }
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    # Reload when the options flow changes the polling mode / pressure unit /
+    # language, so the new choice takes effect without a restart.
+    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
     _register_debug_service(hass)
     return True
+
+
+async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 def _register_debug_service(hass: HomeAssistant) -> None:

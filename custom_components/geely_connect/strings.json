@@ -42,5 +42,18 @@
       "reauth_successful": "Re-authenticated. Token refreshed.",
       "unknown": "Something went wrong. Check the logs."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options",
+        "description": "Change how often Home Assistant polls the car, the tire-pressure unit and the entity language. Faster polling logs the phone app out more often.",
+        "data": {
+          "poll_mode": "Polling mode",
+          "pressure_unit": "Tire pressure unit",
+          "language": "Language"
+        }
+      }
+    }
   }
 }

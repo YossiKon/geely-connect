@@ -42,5 +42,18 @@
       "reauth_successful": "Ré-authentification réussie.",
       "unknown": "Une erreur s'est produite."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options",
+        "description": "Modifiez la fréquence d'interrogation du véhicule, l'unité de pression des pneus et la langue des entités. Une interrogation plus rapide déconnecte l'application mobile plus souvent.",
+        "data": {
+          "poll_mode": "Mode d'interrogation",
+          "pressure_unit": "Unité de pression des pneus",
+          "language": "Langue"
+        }
+      }
+    }
   }
 }

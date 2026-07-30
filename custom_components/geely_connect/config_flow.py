@@ -21,7 +21,9 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant import config_entries
+from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers import entity_registry as er
 
 from . import api as geely_api
 from .const import (
@@ -70,6 +72,14 @@ _LOGGER = logging.getLogger(__name__)
 # conservative identifier characters and reject anything else.
 _VIN_RE = re.compile(r"^[A-Za-z0-9]{8,20}$")
 _USER_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+
+# Unique-id suffixes of the four tire-pressure sensors, and the mapping from
+# our setup-time codes to Home Assistant's pressure constants. Both mirror
+# sensor.py; kept here so the options flow does not import a platform module.
+_TIRE_UNIQUE_ID_KEYS = (
+    "tire_pressure_fl", "tire_pressure_fr", "tire_pressure_rl", "tire_pressure_rr",
+)
+_PRESSURE_UNIT_TO_HA: dict[str, str] = {"psi": "psi", "bar": "bar", "kPa": "kPa"}
 
 
 def _valid_vin(vin: Any) -> bool:
@@ -364,3 +374,65 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self.context["entry_id"]
         )
         return await self.async_step_user()
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(
+        entry: config_entries.ConfigEntry,
+    ) -> GeelyIntlOptionsFlow:
+        return GeelyIntlOptionsFlow()
+
+
+class GeelyIntlOptionsFlow(config_entries.OptionsFlow):
+    """Lets the polling mode, tire-pressure unit and language be changed after
+    setup, instead of being frozen at whatever was picked the first time."""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        entry = self.config_entry
+        current = {**entry.data, **entry.options}
+
+        if user_input is not None:
+            # Changing the pressure unit has to reach entities that already
+            # exist: Home Assistant only reads suggested_unit_of_measurement
+            # when an entity is first registered, so afterwards the display
+            # unit lives in the registry and nothing the integration reports
+            # will move it.
+            new_unit = user_input.get(CONF_PRESSURE_UNIT)
+            if new_unit and new_unit != current.get(CONF_PRESSURE_UNIT):
+                _apply_pressure_unit(self.hass, entry, new_unit)
+            return self.async_create_entry(title="", data=user_input)
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema({
+                vol.Required(
+                    CONF_POLL_MODE,
+                    default=current.get(CONF_POLL_MODE, DEFAULT_POLL_MODE),
+                ): vol.In(POLL_MODES),
+                vol.Required(
+                    CONF_PRESSURE_UNIT,
+                    default=current.get(CONF_PRESSURE_UNIT, DEFAULT_PRESSURE_UNIT),
+                ): vol.In(PRESSURE_UNITS),
+                vol.Required(
+                    CONF_LANGUAGE,
+                    default=current.get(CONF_LANGUAGE, DEFAULT_LANGUAGE),
+                ): vol.In(LANGUAGES),
+            }),
+        )
+
+
+def _apply_pressure_unit(hass, entry: config_entries.ConfigEntry, unit: str) -> None:
+    """Re-point this vehicle's tire-pressure entities at a new display unit.
+
+    Same mechanism the per-entity settings dialog uses, so history is kept and
+    Home Assistant converts the stored kPa readings itself."""
+    registry = er.async_get(hass)
+    ha_unit = _PRESSURE_UNIT_TO_HA.get(unit, unit)
+    for reg_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
+        if not any(reg_entry.unique_id.endswith(f"_{k}") for k in _TIRE_UNIQUE_ID_KEYS):
+            continue
+        registry.async_update_entity_options(
+            reg_entry.entity_id, "sensor", {"unit_of_measurement": ha_unit}
+        )

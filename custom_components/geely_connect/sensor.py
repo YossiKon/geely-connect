@@ -26,6 +26,7 @@ from homeassistant.const import (
     PERCENTAGE,
     UnitOfElectricPotential,
     UnitOfLength,
+    UnitOfPressure,
     UnitOfSpeed,
     UnitOfTemperature,
 )
@@ -39,11 +40,19 @@ from .const import (
     CONF_PRESSURE_UNIT,
     DEFAULT_PRESSURE_UNIT,
     DOMAIN,
-    PRESSURE_FACTORS,
 )
 
 # Keys that represent a tire pressure (raw value is kPa; converted per user unit).
 _TIRE_KEYS = {"tire_pressure_fl", "tire_pressure_fr", "tire_pressure_rl", "tire_pressure_rr"}
+
+# Our setup-time unit codes -> the constants Home Assistant converts between.
+# The strings already match, but going through UnitOfPressure keeps us honest
+# if either side ever renames one.
+_PRESSURE_UNIT_TO_HA: dict[str, str] = {
+    "psi": UnitOfPressure.PSI,
+    "bar": UnitOfPressure.BAR,
+    "kPa": UnitOfPressure.KPA,
+}
 
 # Long-term statistics: measurement for live values, total_increasing for odo.
 # Anything not listed here records no statistics at all, so a sensor that holds
@@ -150,6 +159,10 @@ _DIAGNOSTIC_KEYS: set[str] = {
     "tire_pressure_fl", "tire_pressure_fr",
     "tire_pressure_rl", "tire_pressure_rr",
     "days_to_service", "distance_to_service",
+    # Rarely interesting on their own: engine state duplicates what the climate
+    # and charging entities already show, and time-to-full is only meaningful
+    # while charging.
+    "engine_state", "time_to_full_min",
 }
 
 
@@ -231,7 +244,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
     coordinator = bundle["coordinator"]
     vin = bundle["vin"]
     device_name = bundle.get("device_name") or f"Geely ({vin})"
-    pressure_unit = entry.data.get(CONF_PRESSURE_UNIT, DEFAULT_PRESSURE_UNIT)
+    pressure_unit = (entry.options.get(CONF_PRESSURE_UNIT)
+                     or entry.data.get(CONF_PRESSURE_UNIT, DEFAULT_PRESSURE_UNIT))
 
     # 1) Curated, nicely-named sensors.
     add_entities(GeelySensor(coordinator, vin, device_name, *spec,
@@ -280,9 +294,17 @@ class GeelySensor(CoordinatorEntity, SensorEntity):
         self._pressure_unit = pressure_unit
         self._attr_unique_id = f"geely_{vin}_{key}"
         self._attr_name = friendly_name
-        # Tire pressures: display in the unit the user picked at setup.
+        # Tire pressures: report the raw kPa the car sends and let Home
+        # Assistant convert. Setting the chosen unit as the NATIVE unit does
+        # not work - for a device class Home Assistant knows how to convert,
+        # it picks the display unit from suggested_unit_of_measurement and
+        # falls back to the unit system's preference, so a metric install
+        # re-converted our psi figure straight back to kPa.
         if key in _TIRE_KEYS:
-            unit = pressure_unit
+            unit = UnitOfPressure.KPA
+            self._attr_suggested_unit_of_measurement = _PRESSURE_UNIT_TO_HA.get(
+                pressure_unit, UnitOfPressure.KPA
+            )
         if unit is not None:
             self._attr_native_unit_of_measurement = unit
         if device_class is not None:
@@ -306,10 +328,9 @@ class GeelySensor(CoordinatorEntity, SensorEntity):
     def native_value(self) -> Any:
         v = _walk(self.coordinator.data or {}, self._path)
         val = _coerce(v, self._kind, self._value_map)
-        # Convert tire pressure from the raw kPa reading to the chosen unit.
-        if self._key in _TIRE_KEYS and isinstance(val, (int, float)):
-            factor = PRESSURE_FACTORS.get(self._pressure_unit, 1.0)
-            return round(val * factor, 1)
+        # Tire pressure stays in its native kPa here; Home Assistant converts
+        # it to the unit chosen at setup. Converting it ourselves as well
+        # would apply the factor twice.
         return val
 
 
