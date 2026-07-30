@@ -1,0 +1,217 @@
+# =====================================================================
+#  Geely Connect — SINGLE built-in card (vertical-stack).
+#  No HACS needed. Add via:  Edit dashboard → Add card → Manual → paste.
+#  Replace  my_geely_ex5  with your entity suffix if it differs.
+# =====================================================================
+type: vertical-stack
+cards:
+  - type: markdown
+    content: "## 🔋 Battery & charging"
+  - type: grid
+    columns: 2
+    square: false
+    cards:
+      - type: tile
+        entity: sensor.my_geely_ex5_battery
+        name: Battery
+        color: green
+      - type: tile
+        entity: sensor.my_geely_ex5_electric_range
+        name: Range
+        color: blue
+      - type: tile
+        entity: sensor.my_geely_ex5_charger_connection
+        name: Charger
+      - type: tile
+        entity: sensor.my_geely_ex5_time_to_full_charge
+        name: Time to full
+      - type: tile
+        entity: switch.my_geely_ex5_charging
+        name: Charging
+      - type: tile
+        entity: sensor.my_geely_ex5_efficiency
+        name: Efficiency
+
+  - type: markdown
+    content: "## ⚡ Quick actions"
+  - type: grid
+    columns: 2
+    square: false
+    cards:
+      - type: tile
+        entity: lock.my_geely_ex5_doors
+        name: Doors
+        features:
+          - type: lock-commands
+      - type: tile
+        entity: switch.my_geely_ex5_charging
+        name: Charging
+      - type: tile
+        entity: button.my_geely_ex5_find_car
+        name: Find car
+        icon: mdi:car-search
+        tap_action: {action: toggle}
+      - type: tile
+        entity: button.my_geely_ex5_unlock_trunk
+        name: Trunk
+        icon: mdi:car-back
+        tap_action: {action: toggle}
+      - type: tile
+        entity: button.my_geely_ex5_refresh_data
+        name: Refresh
+        icon: mdi:refresh
+        tap_action: {action: toggle}
+
+  - type: markdown
+    content: "## ❄️ Climate"
+  - type: thermostat
+    entity: climate.my_geely_ex5_climate
+    name: Climate
+    features:
+      - type: climate-hvac-modes
+        hvac_modes: [heat_cool, "off"]
+      - type: climate-preset-modes
+        style: dropdown
+  - type: grid
+    columns: 3
+    square: false
+    cards:
+      - type: tile
+        entity: switch.my_geely_ex5_defrost
+        name: Defrost
+      - type: tile
+        entity: switch.my_geely_ex5_window_ventilation
+        name: Window vent
+      - type: tile
+        entity: switch.my_geely_ex5_g_clean
+        name: Air purge
+  - type: grid
+    columns: 2
+    square: false
+    cards:
+      - type: tile
+        entity: select.my_geely_ex5_seat_heat_driver
+        name: Seat heat — driver
+        features:
+          - type: select-options
+      - type: tile
+        entity: select.my_geely_ex5_seat_heat_passenger
+        name: Seat heat — passenger
+        features:
+          - type: select-options
+      - type: tile
+        entity: select.my_geely_ex5_seat_vent_driver
+        name: Seat vent — driver
+        features:
+          - type: select-options
+      - type: tile
+        entity: select.my_geely_ex5_seat_vent_passenger
+        name: Seat vent — passenger
+        features:
+          - type: select-options
+
+  - type: markdown
+    content: "## 📍 Location"
+  - type: map
+    entities:
+      - entity: device_tracker.my_geely_ex5_location
+    theme_mode: auto
+    aspect_ratio: "16:9"
+
+  - type: markdown
+    content: "## 🚪 Doors, windows & roof"
+  - type: grid
+    columns: 2
+    square: false
+    cards:
+      - type: tile
+        entity: binary_sensor.my_geely_ex5_door_driver
+        name: Driver door
+      - type: tile
+        entity: binary_sensor.my_geely_ex5_door_passenger
+        name: Passenger door
+      - type: tile
+        entity: binary_sensor.my_geely_ex5_door_rear_left
+        name: Rear-left door
+      - type: tile
+        entity: binary_sensor.my_geely_ex5_door_rear_right
+        name: Rear-right door
+      - type: tile
+        entity: binary_sensor.my_geely_ex5_trunk
+        name: Trunk
+      - type: tile
+        entity: binary_sensor.my_geely_ex5_hood
+        name: Hood
+  - type: grid
+    columns: 3
+    square: false
+    cards:
+      - type: tile
+        entity: cover.my_geely_ex5_windows
+        name: Windows
+        features:
+          - type: cover-open-close
+      - type: tile
+        entity: cover.my_geely_ex5_sunroof
+        name: Sunroof
+        features:
+          - type: cover-open-close
+      - type: tile
+        entity: cover.my_geely_ex5_sunshade
+        name: Sunshade
+        features:
+          - type: cover-open-close
+
+  - type: markdown
+    content: "## 🛞 Tire pressure"
+  - type: grid
+    columns: 2
+    square: false
+    cards:
+      - type: tile
+        entity: sensor.my_geely_ex5_tire_pressure_fl
+        name: Front-left
+        icon: mdi:tire
+      - type: tile
+        entity: sensor.my_geely_ex5_tire_pressure_fr
+        name: Front-right
+        icon: mdi:tire
+      - type: tile
+        entity: sensor.my_geely_ex5_tire_pressure_rl
+        name: Rear-left
+        icon: mdi:tire
+      - type: tile
+        entity: sensor.my_geely_ex5_tire_pressure_rr
+        name: Rear-right
+        icon: mdi:tire
+
+  - type: markdown
+    content: "## ℹ️ Vehicle info"
+  - type: grid
+    columns: 2
+    square: false
+    cards:
+      - type: tile
+        entity: sensor.my_geely_ex5_total_mileage
+        name: Odometer
+      - type: tile
+        entity: sensor.my_geely_ex5_average_consumption
+        name: Consumption
+      - type: tile
+        entity: sensor.my_geely_ex5_interior_temperature
+        name: Interior temp
+      - type: tile
+        entity: sensor.my_geely_ex5_exterior_temperature
+        name: Exterior temp
+      - type: tile
+        entity: sensor.my_geely_ex5_12v_battery
+        name: 12V battery
+      - type: tile
+        entity: sensor.my_geely_ex5_days_to_service
+        name: Days to service
+      - type: tile
+        entity: binary_sensor.my_geely_ex5_connected
+        name: Connected
+      - type: tile
+        entity: sensor.my_geely_ex5_last_updated
+        name: Last updated
