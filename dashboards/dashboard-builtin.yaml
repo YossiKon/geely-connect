@@ -193,8 +193,10 @@ views:
             entity: binary_sensor.my_geely_ex5_hood
             name: Hood
             grid_options: {columns: 6}
+          # Disabled by default - enable it first under Settings ->
+          # Devices & Services -> Geely Connect -> Entities.
           - type: tile
-            entity: cover.my_geely_ex5_windows
+            entity: cover.my_geely_ex5_all_windows
             name: Windows
             features:
               - type: cover-open-close

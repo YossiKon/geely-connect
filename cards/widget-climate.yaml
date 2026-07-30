@@ -1,0 +1,107 @@
+# =====================================================================
+#  Geely Connect — COMPACT CLIMATE WIDGET (one built-in card).
+#
+#  WHERE TO PASTE:
+#    Open your dashboard → pencil (Edit) → "+ Add card" → scroll to the
+#    bottom → "Manual" → delete the sample text → paste this whole file
+#    → Save.  Works in both Sections and Masonry dashboards.
+#
+#  BEFORE YOU SAVE:
+#    Search-replace  my_geely_ex5  with your own entity suffix.
+#    Find it under Settings → Devices & services → Geely Connect →
+#    your car → click any entity → the id looks like
+#    sensor.<your_suffix>_battery.
+#
+#  Anything your trim does not report shows as "unavailable" —
+#  just delete that row or tile.
+# =====================================================================
+type: vertical-stack
+cards:
+  - type: heading
+    heading: Climate
+    heading_style: title
+    icon: mdi:air-conditioner
+
+  # Main thermostat. Presets: none / rapid_warming / rapid_cooling.
+  - type: thermostat
+    entity: climate.my_geely_ex5_climate
+    name: Cabin
+    features:
+      - type: climate-hvac-modes
+        hvac_modes:
+          - heat_cool
+          - "off"
+      - type: climate-preset-modes
+        style: dropdown
+        preset_modes:
+          - none
+          - rapid_warming
+          - rapid_cooling
+
+  # Current cabin vs. outside temperature.
+  - type: grid
+    columns: 2
+    square: false
+    cards:
+      - type: tile
+        entity: sensor.my_geely_ex5_interior_temperature
+        name: Interior
+        icon: mdi:home-thermometer
+        color: orange
+      - type: tile
+        entity: sensor.my_geely_ex5_exterior_temperature
+        name: Exterior
+        icon: mdi:thermometer-lines
+        color: blue
+
+  # Defrost clears the windscreen; G-Clean runs the cabin air purge.
+  - type: grid
+    columns: 2
+    square: false
+    cards:
+      - type: tile
+        entity: switch.my_geely_ex5_defrost
+        name: Defrost
+        icon: mdi:car-defrost-front
+      - type: tile
+        entity: switch.my_geely_ex5_g_clean
+        name: G-Clean
+        icon: mdi:air-filter
+
+  # Seat heating / ventilation.
+  # NOTE: the four REAR selects (rear_left / rear_right, heat and vent)
+  # only exist on trims fitted with heated or ventilated rear seats.
+  # On every other car they stay "unavailable" — delete those rows.
+  - type: entities
+    title: Seats
+    show_header_toggle: false
+    state_color: true
+    entities:
+      - type: section
+        label: Heating
+      - entity: select.my_geely_ex5_seat_heat_driver
+        name: Driver
+        icon: mdi:car-seat-heater
+      - entity: select.my_geely_ex5_seat_heat_passenger
+        name: Passenger
+        icon: mdi:car-seat-heater
+      - entity: select.my_geely_ex5_seat_heat_rear_left
+        name: Rear left
+        icon: mdi:car-seat-heater
+      - entity: select.my_geely_ex5_seat_heat_rear_right
+        name: Rear right
+        icon: mdi:car-seat-heater
+      - type: section
+        label: Ventilation
+      - entity: select.my_geely_ex5_seat_vent_driver
+        name: Driver
+        icon: mdi:car-seat-cooler
+      - entity: select.my_geely_ex5_seat_vent_passenger
+        name: Passenger
+        icon: mdi:car-seat-cooler
+      - entity: select.my_geely_ex5_seat_vent_rear_left
+        name: Rear left
+        icon: mdi:car-seat-cooler
+      - entity: select.my_geely_ex5_seat_vent_rear_right
+        name: Rear right
+        icon: mdi:car-seat-cooler
