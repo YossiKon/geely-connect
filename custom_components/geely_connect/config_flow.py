@@ -25,9 +25,12 @@ from homeassistant.data_entry_flow import FlowResult
 
 from . import api as geely_api
 from .const import (
-    APP_ID,
-    APP_SECRET,
+    CONF_REGION,
     DEFAULT_COUNTRY_CODE,
+    DEFAULT_REGION,
+    UNSUPPORTED_REGIONS,
+    region_config,
+    resolve_vehicle_region,
     DEFAULT_LANGUAGE,
     DEFAULT_POLL_MODE,
     DEFAULT_PRESSURE_UNIT,
@@ -291,17 +294,34 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         await self.async_set_unique_id(f"{self._email}:{vin}")
         self._abort_if_unique_id_configured()
 
+        # Which Geely backend this car lives on. It comes from the vehicle
+        # record, not from the country the user picked: the two can differ, and
+        # signing against the wrong one is what produces the opaque 1501
+        # "geelyos verify error".
+        region = resolve_vehicle_region(vehicle) or DEFAULT_REGION
+        if region in UNSUPPORTED_REGIONS:
+            _LOGGER.error(
+                "vehicle %s is registered in the %s region (%s), for which no "
+                "app credentials are available", vin[-4:], region,
+                UNSUPPORTED_REGIONS[region],
+            )
+            return self.async_abort(reason="wrong_region")
+        backend = region_config(region)
+        _LOGGER.debug("provisioning against the %s backend (%s)",
+                      region, backend["cert_host"])
+
         device_id = hashlib.md5(f"ha:{self._user_id}:{vin}".encode()).hexdigest()
         cert_path, key_path = _storage_paths(self.hass, vin)
         try:
             await self.hass.async_add_executor_job(
                 lambda: geely_api.provision_user_cert(
-                    app_id=APP_ID,
-                    app_secret=APP_SECRET,
+                    app_id=backend["app_id"],
+                    app_secret=backend["app_secret"],
                     user_id=self._user_id,
                     cidpsso_token=self._cidpsso_token,
                     cert_out_path=cert_path,
                     key_out_path=key_path,
+                    cert_host=backend["cert_host"],
                 )
             )
         except geely_api.GeelyRegionError as e:
@@ -318,6 +338,7 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data={
                 CONF_EMAIL:              self._email,
                 CONF_COUNTRY_CODE:       self._country_code,
+                CONF_REGION:             region,
                 CONF_CIDPSSO_TOKEN:      self._cidpsso_token,
                 CONF_USER_ID:            self._user_id,
                 CONF_VIN:                vin,

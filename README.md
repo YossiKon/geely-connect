@@ -319,18 +319,25 @@ Tip: press the **Refresh Data** button (or call `button.press` on
 
 ## 🌍 Supported regions
 
-Geely runs a separate backend per region — EU/International, APAC, North
-America and South America — and **each one needs its own app credentials**.
-This integration ships the EU/International credentials, so the country
-dropdown lists only countries on that cloud.
+Geely runs a separate backend per area, each with its **own app credentials**:
 
-The region belongs to your **account**, not to the country you pick at setup,
-so an account registered on another backend fails even if you choose an EU
-country. It fails specifically at the certificate step, after the email code
-has already been accepted, and the setup then stops with "this Geely account is
-not served by the EU/International cloud". Adding a region means capturing that
-region's app id and secret, which is why AU, BR, TH and US accounts are not
-supported yet.
+| Area | Backend | Status |
+|---|---|---|
+| **EU / International** | `api.ecloudeu.com` | ✅ supported |
+| **NA** (US, CA, MX — and Brazilian accounts, which resolve here) | `api.ecloudus.com` | ✅ supported |
+| **APAC** (AU, NZ, JP, KR, SG, TH…) | `api.ecloudkr.com` | ❌ credentials not public |
+| **SA** | `tsp-geely-api-sa.xcloudsvc.com` | ❌ credentials not public |
+
+The area belongs to the **vehicle**, not to the country you pick at setup — the
+two can differ — so it is read from the login response
+(`tspInfo[].serviceRegion`, falling back to `edgeInfo.code`) and stored on the
+config entry. Login, the email code and the vehicle list are not regional in
+practice; only certificate provisioning and control commands are.
+
+A car in an area whose credentials are unknown stops the setup with a clear
+message naming the area, rather than being signed against the European backend
+and failing with the opaque `1501 geelyos verify error` that the upstream
+project reports. Adding APAC or SA needs that area's app id and secret.
 
 ---
 

@@ -22,14 +22,13 @@ from homeassistant.util import dt as dt_util
 from . import api as geely_api
 from .api import GeelyApi, GeelyAuthError, GeelyControlError, GeelyTLSPinError
 from .const import (
-    APP_ID,
-    APP_SECRET,
     CLIENT_ID,
     CONF_CERT_PATH,
     CONF_CIDPSSO_TOKEN,
     CONF_DEVICE_ID,
     CONF_KEY_PATH,
     CONF_POLL_MODE,
+    CONF_REGION,
     CONF_USER_ID,
     CONF_VEHICLE_MODEL_CODE,
     CONF_VEHICLE_NICKNAME,
@@ -40,6 +39,7 @@ from .const import (
     POLL_PROFILES,
     SCAN_INTERVAL_SECONDS,
     SERIES_TO_FRIENDLY_NAME,
+    region_config,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -271,9 +271,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         or d.get(CONF_VEHICLE_SERIES)
         or "E245-J1"
     )
+    # Entries created before regions were tracked carry no CONF_REGION and
+    # resolve to EU, which is the backend they were provisioned against.
+    backend = region_config(d.get(CONF_REGION))
     api = GeelyApi(
-        app_id=APP_ID,
-        app_secret=APP_SECRET,
+        app_id=backend["app_id"],
+        app_secret=backend["app_secret"],
         user_id=d[CONF_USER_ID],
         vin=d[CONF_VIN],
         cidpsso_token=d[CONF_CIDPSSO_TOKEN],
@@ -283,6 +286,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         device_id=d[CONF_DEVICE_ID],
         cert_path=d[CONF_CERT_PATH],
         key_path=d[CONF_KEY_PATH],
+        control_host=backend["control_host"],
     )
 
     _SUCCESS_CODES = {1000, "1000", 10000000, "10000000", None}

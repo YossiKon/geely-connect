@@ -262,7 +262,10 @@ _TLS_LEGACY_RENEG = 0x4   # OP_LEGACY_SERVER_CONNECT - old handshake mode only
 # ("Geely Trust Center / External Services Issuing EU-CA", valid 2022-2032)
 # and sends no intermediate. Every other Geely host answers with a normal
 # GlobalSign or Amazon chain and so must validate strictly.
-_PRIVATE_PKI_HOSTS: frozenset = frozenset({"apis.ecloudeu.com"})
+_PRIVATE_PKI_HOSTS: frozenset = frozenset({
+    "apis.ecloudeu.com",
+    "apis.ecloudus.com",
+})
 
 # SubjectPublicKeyInfo SHA-256 pins (base64) for those hosts. Captured
 # 2026-07-30 and cross-checked against all three published A records and two
@@ -271,6 +274,7 @@ _PRIVATE_PKI_HOSTS: frozenset = frozenset({"apis.ecloudeu.com"})
 # trust-on-first-use - it is verified from the first connection onwards.
 _BUNDLED_TLS_PINS: dict[str, tuple[str, ...]] = {
     "apis.ecloudeu.com": ("Hm0olBoClunXgMp4wFvdrr8SC5iSt+LX6iyB4N828C8=",),
+    "apis.ecloudus.com": ("yTrWM8YjYq6ivb6HP1usQiBdgZYGiCwR6yuQYOm2KVs=",),
 }
 
 # OpenSSL verify codes that mean "the chain is fine, we just don't have this
@@ -575,6 +579,7 @@ class GeelyApi:
         device_id: str,
         cert_path: str,
         key_path: str,
+        control_host: str = "apis.ecloudeu.com",
     ) -> None:
         self.app_id = app_id
         self.app_secret = app_secret
@@ -587,6 +592,8 @@ class GeelyApi:
         self.device_id = device_id
         self.cert_path = cert_path
         self.key_path = key_path
+        # Regional control endpoint; see const.REGIONS.
+        self.control_host = control_host
         # Server-key pin store lives next to the mTLS material for this VIN.
         self.pin_path = os.path.join(os.path.dirname(cert_path), "server_pins.json") \
             if cert_path else None
@@ -703,7 +710,7 @@ class GeelyApi:
         ac = self._get_access_code()
         body = json.dumps({"authCode": ac}).encode()
         status, resp = self._mtls_send(
-            "apis.ecloudeu.com", "POST",
+            self.control_host, "POST",
             "/auth/account/session/secure?identity_type=geelyos",
             body,
         )
@@ -740,7 +747,7 @@ class GeelyApi:
         in), auto-refresh the JWT once and retry. Only escalates to
         GeelyAuthError when the cidpsso token itself has been revoked."""
         status, resp = self._mtls_send(
-            "apis.ecloudeu.com", method, path, body,
+            self.control_host, method, path, body,
             extra_headers=self._headers_with_jwt(),
         )
         j = json.loads(resp)
@@ -755,7 +762,7 @@ class GeelyApi:
                 # cidpsso token also dead - needs reauth
                 raise
             status, resp = self._mtls_send(
-                "apis.ecloudeu.com", method, path, body,
+                self.control_host, method, path, body,
                 extra_headers=self._headers_with_jwt(),
             )
             j = json.loads(resp)
@@ -794,7 +801,7 @@ class GeelyApi:
         }
         path = f"/remote-control/vehicle/telematics/{self.vin}"
         status, resp = self._mtls_send(
-            "apis.ecloudeu.com", "PUT", path, json.dumps(body).encode(),
+            self.control_host, "PUT", path, json.dumps(body).encode(),
             extra_headers=self._headers_with_jwt(),
         )
         return json.loads(resp)
@@ -802,7 +809,7 @@ class GeelyApi:
     def vehicle_status_state(self) -> dict:
         path = f"/remote-control/vehicle/status/state/{self.vin}"
         status, resp = self._mtls_send(
-            "apis.ecloudeu.com", "GET", path, b"",
+            self.control_host, "GET", path, b"",
             extra_headers=self._headers_with_jwt(),
         )
         return json.loads(resp)
@@ -810,7 +817,7 @@ class GeelyApi:
     def charging_reservation(self) -> dict:
         path = f"/remote-control/charging/reservation/{self.vin}"
         status, resp = self._mtls_send(
-            "apis.ecloudeu.com", "GET", path, b"",
+            self.control_host, "GET", path, b"",
             extra_headers=self._headers_with_jwt(),
         )
         return json.loads(resp)
@@ -826,7 +833,7 @@ class GeelyApi:
         """
         path = f"/charge-server/ecarx_charge_set/{self.vin}?bizType={biz_type}"
         status, resp = self._mtls_send(
-            "apis.ecloudeu.com", "GET", path, b"",
+            self.control_host, "GET", path, b"",
             extra_headers=self._headers_with_jwt(),
         )
         return json.loads(resp)
@@ -865,7 +872,7 @@ class GeelyApi:
         body_bytes = json.dumps(body, separators=(",", ":")).encode()
         path = f"/charge-server/ecarx_charge_set/{self.vin}"
         status, resp = self._mtls_send(
-            "apis.ecloudeu.com", "POST", path, body_bytes,
+            self.control_host, "POST", path, body_bytes,
             extra_headers=self._headers_with_jwt(),
         )
         j = json.loads(resp)
@@ -895,7 +902,7 @@ class GeelyApi:
         body = json.dumps(body_dict, separators=(",", ":")).encode()
         path = f"/remote-control/vehicle/telematics/{self.vin}"
         status, resp = self._mtls_send(
-            "apis.ecloudeu.com", "PUT", path, body,
+            self.control_host, "PUT", path, body,
             extra_headers=self._headers_with_jwt(),
         )
         j = json.loads(resp)
@@ -934,7 +941,7 @@ class GeelyApi:
         body_bytes = json.dumps(body, separators=(",", ":")).encode()
         path = f"/charge-server/ecarx_charge_set/{self.vin}"
         status, resp = self._mtls_send(
-            "apis.ecloudeu.com", "POST", path, body_bytes,
+            self.control_host, "POST", path, body_bytes,
             extra_headers=self._headers_with_jwt(),
         )
         j = json.loads(resp)
@@ -957,7 +964,7 @@ class GeelyApi:
             "?pageSize=2000&pageIndex=1&vehicleType=0&sortField=&direction="
         )
         status, resp = self._mtls_send(
-            "apis.ecloudeu.com", "GET", path, b"",
+            self.control_host, "GET", path, b"",
             extra_headers=self._headers_with_jwt(),
         )
         try:
@@ -1001,7 +1008,8 @@ def _sign_request_for_api_ecloudeu(app_id: str, app_secret: str,
 
 def provision_user_cert(*, app_id: str, app_secret: str, user_id: str,
                          cidpsso_token: str, cert_out_path: str,
-                         key_out_path: str) -> tuple[str, str]:
+                         key_out_path: str,
+                         cert_host: str = "api.ecloudeu.com") -> tuple[str, str]:
     """Generate EC P-256 keypair + CSR, send through /auth/cert/info + /file,
     save signed cert + key. Returns (cert_path, key_path)."""
     from cryptography.hazmat.primitives.asymmetric import ec
@@ -1033,8 +1041,8 @@ def provision_user_cert(*, app_id: str, app_secret: str, user_id: str,
     body = json.dumps({"checkValue": user_id}, separators=(',', ':')).encode()
     headers = _sign_request_for_api_ecloudeu(
         app_id, app_secret, "POST",
-        "https://api.ecloudeu.com/auth/cert/info", body)
-    resp_bytes = _raw_https("api.ecloudeu.com", "POST", "/auth/cert/info",
+        f"https://{cert_host}/auth/cert/info", body)
+    resp_bytes = _raw_https(cert_host, "POST", "/auth/cert/info",
                             headers, body, pin_path=pin_path, timeout=20)
     j = json.loads(resp_bytes)
     if j.get("code") != 1000:
@@ -1060,8 +1068,8 @@ def provision_user_cert(*, app_id: str, app_secret: str, user_id: str,
     }, separators=(',', ':')).encode()
     headers = _sign_request_for_api_ecloudeu(
         app_id, app_secret, "POST",
-        "https://api.ecloudeu.com/auth/cert/file", body)
-    resp_bytes = _raw_https("api.ecloudeu.com", "POST", "/auth/cert/file",
+        f"https://{cert_host}/auth/cert/file", body)
+    resp_bytes = _raw_https(cert_host, "POST", "/auth/cert/file",
                             headers, body, pin_path=pin_path, timeout=30)
     j = json.loads(resp_bytes)
     if j.get("code") != 1000:

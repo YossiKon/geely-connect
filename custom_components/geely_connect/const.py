@@ -13,9 +13,50 @@ Global app's network calls captured live via OkHttp interception.
 
 DOMAIN = "geely_connect"
 
-# App-level credentials - same across all users on the EU region.
+# App-level credentials - same across all users on the EU region. Kept as
+# module constants for backwards compatibility; REGIONS below is the source of
+# truth and EU resolves to exactly these values.
 APP_ID     = "GEELYE245"
 APP_SECRET = "48d6fff3ea19447bbf6f3ed76a608ff9"
+
+# ---------------------------------------------------------------------------
+# Regional backends
+# ---------------------------------------------------------------------------
+# Geely runs a separate backend per area, each with its own app credentials.
+# The area belongs to the VEHICLE's telematics registration, not to the country
+# typed at setup - a Brazilian account can have a car registered in NA - so it
+# is read from the /controlCars response (tspInfo[].serviceRegion, falling back
+# to edgeInfo.code) rather than from CONF_COUNTRY_CODE.
+#
+# Login, OTP and the vehicle list are NOT regional in practice: accounts in
+# every region reach them through the EU host today, and only certificate
+# provisioning and control commands are rejected. So a region swaps just
+# `cert_host`, `control_host` and the signing credentials.
+REGIONS: dict[str, dict[str, str]] = {
+    "EU": {
+        "app_id":       "GEELYE245",
+        "app_secret":   "48d6fff3ea19447bbf6f3ed76a608ff9",
+        "cert_host":    "api.ecloudeu.com",
+        "control_host": "apis.ecloudeu.com",
+    },
+    "NA": {
+        "app_id":       "GEELYUS",
+        "app_secret":   "cd3a278dc4e844ca8a1c22f7b2447a0e",
+        "cert_host":    "api.ecloudus.com",
+        "control_host": "apis.ecloudus.com",
+    },
+}
+
+# Areas whose hosts are known but whose app credentials have never been
+# captured. Listed separately so an account from one of them fails with a clear
+# message instead of being silently signed against the European backend, which
+# only produces the confusing "geelyos verify error".
+UNSUPPORTED_REGIONS: dict[str, str] = {
+    "APAC": "api.ecloudkr.com",
+    "SA":   "tsp-geely-api-sa.xcloudsvc.com",
+}
+
+DEFAULT_REGION = "EU"
 
 # Vehicle / client metadata sent in headers during control commands.
 CLIENT_ID      = "OOGLE0000APPE64ARM64264T31485278"
@@ -29,6 +70,7 @@ JWT_REFRESH_SECONDS = 6500   # JWT lasts 7200s - refresh a bit early
 # ConfigEntry data keys
 CONF_EMAIL              = "email"
 CONF_COUNTRY_CODE       = "country_code"
+CONF_REGION             = "region"
 CONF_CIDPSSO_TOKEN      = "cidpsso_token"
 CONF_USER_ID            = "user_id"
 CONF_VIN                = "vin"
@@ -92,8 +134,10 @@ LANGUAGES: dict[str, str] = {
 }
 DEFAULT_LANGUAGE = "auto"
 
-# Countries served by the Geely Global / International (EU cloud) backend.
-# Rendered as a dropdown in the config flow. code -> display label.
+# Countries whose accounts reach a backend this integration has credentials
+# for (EU or NA). Rendered as a dropdown in the config flow. code -> display
+# label. The vehicle's actual area still comes from the login response, so a
+# country here is a starting point, not a guarantee.
 SUPPORTED_COUNTRIES: dict[str, str] = {
     "IL": "🇮🇱 Israel (IL)",
     "GB": "🇬🇧 United Kingdom (GB)",
@@ -127,7 +171,39 @@ SUPPORTED_COUNTRIES: dict[str, str] = {
     "LT": "🇱🇹 Lithuania (LT)",
     "CY": "🇨🇾 Cyprus (CY)",
     "MT": "🇲🇹 Malta (MT)",
+    # North-American backend (api.ecloudus.com). Brazilian accounts have been
+    # reported to resolve to this area too, despite the SA hosts existing.
+    "US": "🇺🇸 United States (US)",
+    "CA": "🇨🇦 Canada (CA)",
+    "MX": "🇲🇽 Mexico (MX)",
+    "BR": "🇧🇷 Brazil (BR)",
 }
+
+def region_config(region: str | None) -> dict[str, str]:
+    """Resolve an area code to its backend config.
+
+    Unknown areas fall back to EU, which is right for a blank or unrecognised
+    value; areas in UNSUPPORTED_REGIONS are rejected by the config flow before
+    they get here, so this never silently signs a foreign account with European
+    credentials."""
+    return REGIONS.get((region or DEFAULT_REGION).upper(), REGIONS[DEFAULT_REGION])
+
+
+def resolve_vehicle_region(vehicle: dict) -> str | None:
+    """Read the telematics area out of a /controlCars vehicle record.
+
+    `tspInfo` is a list of per-service entries that each carry a
+    `serviceRegion`; `edgeInfo.code` carries the same area on some accounts."""
+    tsp = vehicle.get("tspInfo")
+    if isinstance(tsp, list):
+        for entry in tsp:
+            if isinstance(entry, dict) and entry.get("serviceRegion"):
+                return str(entry["serviceRegion"]).upper()
+    edge = vehicle.get("edgeInfo")
+    if isinstance(edge, dict) and edge.get("code"):
+        return str(edge["code"]).upper()
+    return None
+
 
 SERIES_TO_FRIENDLY_NAME: dict[str, str] = {
     "E245-J1": "EX5",
