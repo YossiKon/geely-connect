@@ -1,11 +1,11 @@
 THIRD-PARTY NOTICES — Geely Connect
 ===================================
 
-This project's own framework, security hardening and TLS transport are
-original work. The reverse-engineered Geely protocol implementation and
-vehicle field mappings (the parts that required protocol research) are
-derived from the following MIT-licensed project, and its license is
-reproduced below as required:
+This project is released under the MIT License (see LICENSE). Its own
+framework, security hardening and TLS transport are original work. The
+reverse-engineered Geely protocol implementation and vehicle field mappings
+(the parts that required protocol research) are derived from the following
+MIT-licensed project, and its license is reproduced below as required:
 
   nitaybz/geely-global-ha  —  https://github.com/nitaybz/geely-global-ha
 
