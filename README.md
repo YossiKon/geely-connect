@@ -199,16 +199,33 @@ a `Cannot read properties of undefined (reading 'startsWith')` error:
 A **card** starts with `type:` and is added via
 **Edit dashboard → Add card → ⤵ Manual → paste → Save** (into any existing view).
 
+- **`cards/card-overview.yaml`** — ⭐ start here. Battery, range, interior temp
+  and charger status, plus working lock and climate controls, quick actions, and
+  a charging panel that appears only while charging. No HACS needed.
 - **`cards/card-builtin.yaml`** — one self-contained card (vertical-stack of
   built-in tiles). **No HACS needed.** Best for dropping into an existing tab.
 - **`cards/card-premium-hebrew.yaml`** — styled dark card (Hebrew). Requires the
   HACS frontend cards `button-card`, `stack-in-card`, `card-mod`.
+
+**Widgets** — narrow, single-purpose cards for a sidebar or phone column, all
+built-in only:
+
+- **`cards/widget-battery.yaml`** — battery gauge with colour bands, range,
+  charging switch, time-to-full while charging.
+- **`cards/widget-climate.yaml`** — thermostat, temperatures, defrost, G-Clean
+  and the seat heat/vent selects.
+- **`cards/widget-security.yaml`** — lock, every door/trunk/hood at a glance, and
+  a red warning block when something is open.
+- **`cards/widget-tires.yaml`** — the four pressures laid out like the car, with
+  a history graph to spot a slow leak.
 
 ### 🖥️ Full dashboards — [`dashboards/`](dashboards/)
 A **dashboard** starts with `title:` / `views:` and is pasted via
 **Settings → Dashboards → Add dashboard → New dashboard from scratch → open →
 ⋮ Edit → ⋮ Raw configuration editor → paste → Save** (NOT "Add card").
 
+- **`dashboards/dashboard-premium.yaml`** — ⭐ four views (Overview with a map,
+  Charging, Climate, Trip & Health). Built-in cards only.
 - **`dashboards/dashboard-builtin.yaml`** — a complete multi-section dashboard
   using only built-in cards. No HACS needed.
 

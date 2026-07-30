@@ -1,0 +1,75 @@
+# =====================================================================
+#  Geely Connect - BATTERY &amp; CHARGING WIDGET (built-in cards only).
+#
+#  What it is : a narrow, one-column widget - battery gauge with colour
+#               bands, electric range, the charging switch, and the
+#               time-to-full tile that appears only while charging.
+#               Sized for a sidebar / phone column.
+#
+#  Where to paste : open your dashboard -> Edit dashboard ->
+#                   Add card -> Manual -> delete the sample text ->
+#                   paste this whole file -> Save.
+#
+#  Before saving : search-replace  my_geely_ex5  with your own entity
+#                  suffix (see Settings -> Devices -> your car -> any
+#                  entity id) if yours differs.
+#
+#  Anything your car does not report shows as "unavailable" - just
+#  delete that tile.
+# =====================================================================
+type: vertical-stack
+cards:
+  # The badge shows Disconnected / Plugged in / Charging, so it is clear
+  # why the time-to-full tile lower down comes and goes.
+  # Heading badges need Home Assistant 2024.11 or newer - on older
+  # versions delete the "badges:" block below, the rest still works.
+  - type: heading
+    heading: Battery
+    heading_style: title
+    icon: mdi:battery-charging-medium
+    badges:
+      - type: entity
+        entity: sensor.my_geely_ex5_charger_connection
+        show_state: true
+        show_icon: true
+
+  # Severity keys are the LOWER bound of each colour band:
+  #   red 0-20  |  yellow 20-40  |  green 40-100
+  # All three bands are set, so every reading gets an explicit colour.
+  - type: gauge
+    entity: sensor.my_geely_ex5_battery
+    name: Charge
+    min: 0
+    max: 100
+    needle: false
+    severity:
+      red: 0
+      yellow: 20
+      green: 40
+
+  - type: tile
+    entity: sensor.my_geely_ex5_electric_range
+    name: Range
+    icon: mdi:map-marker-distance
+    color: blue
+
+  - type: tile
+    entity: switch.my_geely_ex5_charging
+    name: Charging
+    icon: mdi:ev-station
+
+  # Only rendered while the car actually reports "Charging" - a plugged-in
+  # but idle car hides this tile instead of showing a stale figure.
+  # sensor.my_geely_ex5_time_to_full_charge is a diagnostic entity; it is
+  # enabled by default, so nothing extra is needed to use it here.
+  - type: conditional
+    conditions:
+      - condition: state
+        entity: sensor.my_geely_ex5_charger_connection
+        state: Charging
+    card:
+      type: tile
+      entity: sensor.my_geely_ex5_time_to_full_charge
+      name: Time to full
+      icon: mdi:battery-clock
+      color: green
