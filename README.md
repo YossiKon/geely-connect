@@ -172,6 +172,123 @@ restart.
 
 ---
 
+## 🖥️ Dashboards
+
+Two ready-made dashboards live in [`dashboards/`](dashboards/):
+
+- **`dashboard-builtin.yaml`** — uses only Home Assistant's built-in cards, so it
+  works with **no HACS / custom cards**. Copy-paste and go.
+- **`premium-card-hebrew.yaml`** — a styled, dark-themed card (Hebrew). Requires
+  the HACS frontend cards `button-card`, `stack-in-card` and `card-mod`.
+
+**To use one:** find your entity suffix (Settings → Devices & Services → Geely
+Connect → your car; IDs look like `sensor.my_geely_ex5_battery`, so the suffix is
+`my_geely_ex5`). If yours differs, search-replace `my_geely_ex5` in the file.
+Then: Settings → Dashboards → Add dashboard → New dashboard from scratch → open
+it → ⋮ → Edit → ⋮ → **Raw configuration editor** → paste → Save.
+
+---
+
+## 💡 Usage examples
+
+Beyond the dashboards, here are copy-paste automations. Replace `my_geely_ex5`
+with your suffix and `notify.mobile_app_xxxx` with your phone's notify service.
+Ready-made **Blueprints** for these live in [`blueprints/`](blueprints/) if you
+prefer a UI.
+
+**Notify when charging finishes**
+```yaml
+automation:
+  - alias: Geely — charging complete
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.my_geely_ex5_battery
+        above: 80
+    action:
+      - service: notify.mobile_app_xxxx
+        data:
+          title: "🔋 Geely"
+          message: "Charging done — battery at {{ states('sensor.my_geely_ex5_battery') }}%."
+```
+
+**Warm up the car on weekday mornings**
+```yaml
+automation:
+  - alias: Geely — pre-heat before work
+    trigger:
+      - platform: time
+        at: "07:20:00"
+    condition:
+      - condition: time
+        weekday: [mon, tue, wed, thu, fri]
+      - condition: state
+        entity_id: device_tracker.my_geely_ex5_location
+        state: home
+    action:
+      - service: climate.set_temperature
+        target: { entity_id: climate.my_geely_ex5_climate }
+        data: { temperature: 22 }
+      - service: climate.set_hvac_mode
+        target: { entity_id: climate.my_geely_ex5_climate }
+        data: { hvac_mode: heat_cool }
+```
+
+**Auto-lock when you leave home**
+```yaml
+automation:
+  - alias: Geely — lock on leaving home
+    trigger:
+      - platform: state
+        entity_id: device_tracker.my_geely_ex5_location
+        from: home
+    condition:
+      - condition: state
+        entity_id: lock.my_geely_ex5_doors
+        state: unlocked
+    action:
+      - service: lock.lock
+        target: { entity_id: lock.my_geely_ex5_doors }
+```
+
+**Alert if a door or the trunk is left open**
+```yaml
+automation:
+  - alias: Geely — left open
+    trigger:
+      - platform: state
+        entity_id:
+          - binary_sensor.my_geely_ex5_door_driver
+          - binary_sensor.my_geely_ex5_trunk
+          - binary_sensor.my_geely_ex5_hood
+        to: "on"
+        for: { minutes: 3 }
+    action:
+      - service: notify.mobile_app_xxxx
+        data:
+          title: "⚠️ Geely"
+          message: "{{ trigger.to_state.attributes.friendly_name }} has been open for 3 minutes."
+```
+
+**Low-battery reminder**
+```yaml
+automation:
+  - alias: Geely — low battery
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.my_geely_ex5_battery
+        below: 20
+    action:
+      - service: notify.mobile_app_xxxx
+        data:
+          title: "🔋 Geely"
+          message: "Battery low ({{ states('sensor.my_geely_ex5_battery') }}%). Time to charge."
+```
+
+Tip: press the **Refresh Data** button (or call `button.press` on
+`button.my_geely_ex5_refresh_data`) any time you want an immediate update.
+
+---
+
 ## ⚠️ Known limitation — one session per account
 When Home Assistant logs in, the phone app is signed out, and vice-versa. If it
 happens, HA shows a **Reconfigure** prompt — request a fresh code and
