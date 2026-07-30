@@ -13,6 +13,7 @@ The server sends every numeric value as a string - we coerce here.
 # -----------------------------------------------------------------------------
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -32,6 +33,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as _dt_util
 
 from .const import (
     CONF_PRESSURE_UNIT,
@@ -202,13 +204,15 @@ def _flatten(obj: Any, prefix: str = "", depth: int = 0) -> dict[str, Any]:
     return out
 
 
+_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+
+
 def _prettify(path: str) -> str:
     """Human label from a dotted path: use the last 1-2 segments, spaced."""
-    parts = [p for p in path.split(".") if not p.isdigit()]
-    tail = parts[-1] if parts else path
+    segments = [p for p in path.split(".") if not p.isdigit()]
+    tail = segments[-1] if segments else path
     # camelCase / snake_case -> spaced Title-ish, keep it readable but raw.
-    import re as _re
-    spaced = _re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", tail).replace("_", " ")
+    spaced = _CAMEL_BOUNDARY.sub(" ", tail).replace("_", " ")
     return spaced[:1].upper() + spaced[1:]
 
 
@@ -360,7 +364,6 @@ class GeelyRawSensor(CoordinatorEntity, SensorEntity):
 # ---------------------------------------------------------------------------
 # Computed / meta sensors (our own additions — not raw server fields)
 # ---------------------------------------------------------------------------
-from homeassistant.util import dt as _dt_util  # noqa: E402
 
 
 class GeelyEfficiencySensor(CoordinatorEntity, SensorEntity):

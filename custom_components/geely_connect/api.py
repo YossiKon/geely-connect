@@ -20,8 +20,11 @@ import hmac
 import json
 import logging
 import os
+import random
+import secrets
 import socket
 import ssl
+import string
 import time
 import uuid
 from typing import Any
@@ -160,13 +163,20 @@ def _build_sign_string(*, method, path, query, accept, nonce, sig_version,
                       f"{timestamp_ms}", method.upper(), path])
 
 
+_NONCE_HEX = "0123456789abcdef"
+_NONCE_ALNUM = string.ascii_uppercase + string.digits
+
+
 def _make_nonce() -> str:
-    """Mimic Android's nonce format: 3hex-12hex 7alnum 13ts."""
-    import random, string
-    a = ''.join(random.choices('0123456789abcdef', k=3))
-    b = ''.join(random.choices('0123456789abcdef', k=12))
-    c = ''.join(random.choices(string.ascii_uppercase + string.digits, k=7))
-    return f"{a}-{b}{c}{int(time.time()*1000)}"
+    """Mimic Android's nonce format: 3hex-12hex 7alnum 13ts.
+
+    Cosmetic only - the nonce just has to look like the app's and be unique
+    per request; it carries no security weight, which is why `random` rather
+    than `secrets` is fine here."""
+    prefix = "".join(random.choices(_NONCE_HEX, k=3))
+    middle = "".join(random.choices(_NONCE_HEX, k=12))
+    suffix = "".join(random.choices(_NONCE_ALNUM, k=7))
+    return f"{prefix}-{middle}{suffix}{int(time.time() * 1000)}"
 
 
 # ---------- Raw-socket mTLS sender ----------
@@ -1066,7 +1076,6 @@ def _ios_headers(token: str | None = None, user_id: str | None = None,
     HA's session is distinguishable from the user's iPhone/Android session.
     Only used as a fallback when omitted (mostly during initial setup).
     """
-    import secrets as _secrets
     rt = int(time.time() * 1000)
     h = {
         "Content-Type":  "application/json",
@@ -1083,7 +1092,7 @@ def _ios_headers(token: str | None = None, user_id: str | None = None,
         "devicehardwareidfa": (idfa or str(uuid.uuid4()).upper()),
         "devicehardwareidfv": (idfv or str(uuid.uuid4()).upper()),
         "requesttime":   str(rt),
-        "requestid":     f"{rt}{_secrets.token_hex(6)}",
+        "requestid":     f"{rt}{secrets.token_hex(6)}",
     }
     if token:
         h["token"] = token
