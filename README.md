@@ -371,15 +371,20 @@ re-authenticate. Tip: run the first setup on a network you trust.
 
 ```
 custom_components/geely_connect/   the integration itself (what HACS installs)
+├── brand/                         icon.png / logo.png shown in the HA UI
 ├── translations/                  UI translations (en, he, ar, fr, ru)
 ├── manifest.json                  integration metadata
 └── *.py                           platforms, API client, config flow, …
 blueprints/automation/             ready-made automation blueprints
 cards/                             single Lovelace cards (paste as "Manual card")
 dashboards/                        full dashboards (paste in Raw config editor)
-brands/geely_connect/              icon/logo assets (for home-assistant/brands)
 hacs.json                          HACS metadata
 ```
+
+The icon and logo live in `custom_components/geely_connect/brand/`. Since Home
+Assistant 2026.3 a custom integration serves its own brand images from there
+and they take priority over the CDN, so no `home-assistant/brands` submission
+is needed. On older versions the folder is simply ignored.
 
 ---
 
