@@ -1,0 +1,296 @@
+# Geely Connect - comfort and maintenance automations
+#
+# WHAT THIS IS
+#   Five ready-to-use automations: weekday morning pre-heat, hot-cabin pre-cool,
+#   low tire pressure, service due soon, and 12V battery health.
+#
+# WHERE TO PASTE IT
+#   Save this file as:  <config>/automations/comfort-and-maintenance.yaml
+#   Then make sure configuration.yaml loads that folder. If you already have the
+#   default UI-managed automations file, use the labeled-key form so both load:
+#
+#     automation: !include automations.yaml
+#     automation manual: !include_dir_merge_list automations/
+#
+#   Restart Home Assistant (or Developer Tools > YAML > Reload automations).
+#   Alternatively, paste the list items below straight into automations.yaml.
+#
+# BEFORE YOU USE IT - search and replace:
+#   1. my_geely_ex5              -> your car's entity slug (Settings > Devices &
+#                                   Services > Geely Connect > any entity id)
+#   2. notify.mobile_app_your_phone -> your real notify service
+#                                   (Developer Tools > Actions > search "notify")
+#
+# Every automation checks has_value() first, so nothing can fire on a sensor
+# that is unavailable or has not reported yet after a restart.
+# Numbers marked "TUNE" are safe defaults - adjust to taste.
+
+- id: geely_preheat_weekday_morning
+  alias: "Geely: pre-heat on cold weekday mornings"
+  description: >-
+    Warms the cabin before the commute on Mon-Fri when the car is parked at home
+    and it is cold outside.
+  mode: single
+  triggers:
+    # TUNE: departure prep time.
+    - trigger: time
+      at: "07:00:00"
+  conditions:
+    - condition: time
+      weekday:
+        - mon
+        - tue
+        - wed
+        - thu
+        - fri
+    # Only when the car is actually at home.
+    - condition: state
+      entity_id: device_tracker.my_geely_ex5_location
+      state: "home"
+    # Guard: skip if the outside temperature has not reported yet.
+    - condition: template
+      value_template: "{{ has_value('sensor.my_geely_ex5_exterior_temperature') }}"
+    # TUNE: cold threshold in degrees C.
+    - condition: numeric_state
+      entity_id: sensor.my_geely_ex5_exterior_temperature
+      below: 8
+    # TUNE: do not pre-heat on a nearly empty battery. Passes if the battery
+    # sensor is unavailable, so a missing reading never blocks the automation.
+    - condition: template
+      value_template: >-
+        {{ not has_value('sensor.my_geely_ex5_battery')
+           or states('sensor.my_geely_ex5_battery') | float(0) > 25 }}
+    # Guard: never fire remote commands at a climate entity that is offline.
+    - condition: template
+      value_template: "{{ has_value('climate.my_geely_ex5_climate') }}"
+  actions:
+    # ORDER MATTERS - keep this step ABOVE set_temperature. The rapid_*
+    # presets are a compound command that also forces the target temperature
+    # to the entity's own max (warming) or min (cooling), so a preset fired
+    # last would silently overwrite the setpoint chosen below.
+    # continue_on_error: a car that does not report preset support must not
+    # abort the run. Delete this step entirely if yours rejects it.
+    - action: climate.set_preset_mode
+      continue_on_error: true
+      target:
+        entity_id: climate.my_geely_ex5_climate
+      data:
+        preset_mode: rapid_warming
+    # This single call both switches the climate on and sets the target, so
+    # there is no separate climate.set_hvac_mode step - one less remote
+    # command sent to the car.
+    # TUNE: cabin target temperature. Valid range is 15.5-28.5 C.
+    - action: climate.set_temperature
+      target:
+        entity_id: climate.my_geely_ex5_climate
+      data:
+        temperature: 22
+    - action: notify.mobile_app_your_phone
+      data:
+        title: "Geely: pre-heating"
+        message: >-
+          It is {{ states('sensor.my_geely_ex5_exterior_temperature') }} C
+          outside. Warming the cabin to 22 C.
+
+- id: geely_precool_hot_cabin
+  alias: "Geely: pre-cool when the cabin gets hot"
+  description: >-
+    Cools the cabin down when the interior temperature climbs above a comfort
+    limit while the car is parked at home.
+  mode: single
+  triggers:
+    # TUNE: hot-cabin threshold in degrees C. "for" avoids reacting to a single
+    # noisy reading.
+    - trigger: numeric_state
+      entity_id: sensor.my_geely_ex5_interior_temperature
+      above: 35
+      for: "00:05:00"
+  conditions:
+    # Guard: a numeric_state trigger can also fire on unavailable -> value.
+    - condition: template
+      value_template: "{{ has_value('sensor.my_geely_ex5_interior_temperature') }}"
+    - condition: state
+      entity_id: device_tracker.my_geely_ex5_location
+      state: "home"
+    # Guard: never fire remote commands at a climate entity that is offline.
+    # There is deliberately no "is it already cooling?" test here - the car
+    # reports no live AC flag, preset_mode is optimistic and falls back to
+    # "none" after about 30 seconds, so any such test would always pass and
+    # only look reassuring. Repeats are already prevented by the trigger
+    # firing on the 35 C crossing only, the 5 minute "for", and mode: single.
+    - condition: template
+      value_template: "{{ has_value('climate.my_geely_ex5_climate') }}"
+  actions:
+    # ORDER MATTERS - see the pre-heat automation above. rapid_cooling also
+    # forces the target temperature to the entity minimum, so it has to run
+    # before the explicit setpoint, not after it.
+    - action: climate.set_preset_mode
+      continue_on_error: true
+      target:
+        entity_id: climate.my_geely_ex5_climate
+      data:
+        preset_mode: rapid_cooling
+    # TUNE: cabin target temperature. Valid range is 15.5-28.5 C.
+    - action: climate.set_temperature
+      target:
+        entity_id: climate.my_geely_ex5_climate
+      data:
+        temperature: 22
+    - action: notify.mobile_app_your_phone
+      data:
+        title: "Geely: pre-cooling"
+        message: >-
+          Cabin reached {{ states('sensor.my_geely_ex5_interior_temperature') }} C.
+          Cooling the car down to 22 C.
+
+- id: geely_tire_pressure_low
+  alias: "Geely: tire pressure below limit"
+  description: >-
+    Alerts when any of the four tires drops below the low-pressure limit.
+  # One automation run per tire, so a slow leak on two tires reports both.
+  mode: queued
+  max: 4
+  triggers:
+    # CHECK THE UNIT BEFORE YOU RELOAD. The tire sensors are displayed in the
+    # pressure unit picked when the integration was set up, and the numbers
+    # below are compared against that displayed value - so a threshold in the
+    # wrong unit either alerts constantly or never alerts at all.
+    # Open Developer Tools > States, look up one tire sensor and read its
+    # unit, then set all four "below:" values to match:
+    #   psi -> 28    (used below - psi is the setup default)
+    #   kPa -> 193
+    #   bar -> 1.93
+    # TUNE: 28 psi is a conservative low-pressure warning for a typical
+    # passenger-car placard of 33-36 psi. Check the placard in your door jamb
+    # and adjust - raise it for an earlier warning, lower it if cold mornings
+    # nag you.
+    # "above: 0" means a parked car whose TPMS sensors are asleep and report 0
+    # is ignored; the trade-off is that a tire reading exactly 0 never alerts.
+    - trigger: numeric_state
+      entity_id: sensor.my_geely_ex5_tire_pressure_fl
+      above: 0
+      below: 28
+      for: "00:02:00"
+    - trigger: numeric_state
+      entity_id: sensor.my_geely_ex5_tire_pressure_fr
+      above: 0
+      below: 28
+      for: "00:02:00"
+    - trigger: numeric_state
+      entity_id: sensor.my_geely_ex5_tire_pressure_rl
+      above: 0
+      below: 28
+      for: "00:02:00"
+    - trigger: numeric_state
+      entity_id: sensor.my_geely_ex5_tire_pressure_rr
+      above: 0
+      below: 28
+      for: "00:02:00"
+  conditions:
+    - condition: template
+      value_template: "{{ has_value(trigger.entity_id) }}"
+  actions:
+    # The message prints the unit, so the first alert you get also tells you
+    # which unit the thresholds above need to be in.
+    - action: notify.mobile_app_your_phone
+      data:
+        title: "Geely: low tire pressure"
+        message: >-
+          {{ state_attr(trigger.entity_id, 'friendly_name') or trigger.entity_id }}
+          is {{ states(trigger.entity_id) }}
+          {{ state_attr(trigger.entity_id, 'unit_of_measurement') or '' }}.
+          Check the tire before driving.
+
+- id: geely_service_due_soon
+  alias: "Geely: service due soon"
+  description: >-
+    Reminds you when the next service is close, by time or by distance.
+  mode: single
+  triggers:
+    # TUNE: how much warning you want.
+    - trigger: numeric_state
+      entity_id: sensor.my_geely_ex5_days_to_service
+      below: 30
+      id: days
+    - trigger: numeric_state
+      entity_id: sensor.my_geely_ex5_distance_to_service
+      below: 1000
+      id: distance
+    # A numeric_state trigger only fires on the crossing, so an already-overdue
+    # car would stay silent after a restart. This Monday morning re-check keeps
+    # nagging. Delete this trigger (and the "or" block below) if it is too much.
+    - trigger: time
+      at: "09:00:00"
+      id: weekly_recheck
+  conditions:
+    # The weekly re-check only runs on Mondays AND only if something is due.
+    # The crossings themselves are never gated by the weekday.
+    - condition: or
+      conditions:
+        - condition: template
+          value_template: "{{ trigger.id != 'weekly_recheck' }}"
+        - condition: and
+          conditions:
+            - condition: time
+              weekday:
+                - mon
+            - condition: template
+              value_template: >-
+                {{ (has_value('sensor.my_geely_ex5_days_to_service')
+                    and states('sensor.my_geely_ex5_days_to_service') | float(9999) < 30)
+                   or (has_value('sensor.my_geely_ex5_distance_to_service')
+                    and states('sensor.my_geely_ex5_distance_to_service') | float(99999) < 1000) }}
+    # Guard: whichever sensor triggered must hold a real value. Note there is no
+    # "above:" limit on the triggers - both values go negative when overdue.
+    - condition: template
+      value_template: >-
+        {{ trigger.id == 'weekly_recheck' or has_value(trigger.entity_id) }}
+  actions:
+    # Only mention the figure that actually reported - a car that returns just
+    # one of the two would otherwise be announced as "unavailable days".
+    # Negative values mean the service is already past due, so they are
+    # rendered as "overdue" rather than as a minus sign.
+    - action: notify.mobile_app_your_phone
+      data:
+        title: "Geely: service due soon"
+        message: >-
+          {%- set ns = namespace(parts=[]) -%}
+          {%- if has_value('sensor.my_geely_ex5_days_to_service') -%}
+          {%- set d = states('sensor.my_geely_ex5_days_to_service') | float(0) -%}
+          {%- set ns.parts = ns.parts + [(d | abs | round | int) ~ (' days overdue' if d < 0 else ' days')] -%}
+          {%- endif -%}
+          {%- if has_value('sensor.my_geely_ex5_distance_to_service') -%}
+          {%- set k = states('sensor.my_geely_ex5_distance_to_service') | float(0) -%}
+          {%- set ns.parts = ns.parts + [(k | abs | round | int) ~ (' km overdue' if k < 0 else ' km')] -%}
+          {%- endif -%}
+          Next service: {{ ns.parts | join(' / ') }}.
+          Time to book an appointment.
+
+- id: geely_12v_battery_low
+  alias: "Geely: 12V battery low"
+  description: >-
+    Warns when the 12V (accessory) battery gets weak. A flat 12V battery leaves
+    the car unable to wake, unlock or start, even on a full traction battery.
+  mode: single
+  triggers:
+    # TUNE: warning level in percent. "above: 0" ignores a bogus 0 reading from
+    # a sleeping car; "for" rides out the short dip that a remote command or a
+    # wake-up causes, so only a sustained low level alerts.
+    - trigger: numeric_state
+      entity_id: sensor.my_geely_ex5_12v_battery
+      above: 0
+      below: 60
+      for: "00:10:00"
+  conditions:
+    - condition: template
+      value_template: "{{ has_value('sensor.my_geely_ex5_12v_battery') }}"
+  actions:
+    - action: notify.mobile_app_your_phone
+      data:
+        title: "Geely: 12V battery low"
+        message: >-
+          12V battery is at {{ states('sensor.my_geely_ex5_12v_battery') }} %
+          {%- if has_value('sensor.my_geely_ex5_12v_voltage') %}
+          ({{ states('sensor.my_geely_ex5_12v_voltage') }} V)
+          {%- endif %}.
+          Drive the car or have the 12V battery checked.

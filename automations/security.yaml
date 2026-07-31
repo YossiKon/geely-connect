@@ -1,0 +1,384 @@
+# =============================================================================
+# Geely Connect - SECURITY AUTOMATIONS
+# =============================================================================
+# WHAT THIS IS
+#   Five automations that watch the car for things left open, unlocked or
+#   exposed to rain, plus a nightly "is everything shut?" report.
+#
+# WHERE TO PASTE IT
+#   Save this file as:            <config>/automations/security.yaml
+#   (on Home Assistant OS that is /config/automations/security.yaml)
+#
+#   Then make sure configuration.yaml loads the folder, e.g.:
+#
+#     automation split: !include_dir_merge_list automations/
+#
+#   This file is a LIST of automations, so it must be merged with
+#   !include_dir_merge_list (or !include'd into a key that expects a list).
+#   Reload with Developer tools > YAML > Automations, or restart HA.
+#
+# BEFORE IT WILL WORK - SEARCH AND REPLACE THESE THREE PLACEHOLDERS
+#   1. my_geely_ex5              -> your car's entity slug. Find it under
+#                                   Settings > Devices > your Geely > any
+#                                   entity, e.g. sensor.ex5_2024_battery
+#                                   means the slug is ex5_2024.
+#   2. notify.mobile_app_your_phone -> your real notify service. See
+#                                   Developer tools > Actions > Notifications.
+#   3. weather.home              -> your real weather entity (Met.no, AccuWeather,
+#                                   OpenWeatherMap...). It must support hourly
+#                                   forecasts. It is used by automation 3b only,
+#                                   on exactly three "entity_id:" lines: the
+#                                   state trigger, the availability condition
+#                                   and the weather.get_forecasts target. The
+#                                   forecast template reads whatever that action
+#                                   returns, so it never needs editing.
+#
+# NOTES
+#   - Every automation checks for real states only, so nothing can fire on an
+#     entity that is still "unknown"/"unavailable" after a restart.
+#   - An entity your car does not report stays "unavailable" forever. The
+#     bedtime check (4) lists those as "did not report" rather than pretending
+#     they are shut - if yours never reports, say, the hood, delete that line
+#     from the two lists inside automation 4 so it stops being mentioned.
+#   - Values marked "TUNE" are the knobs worth adjusting.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 1. Any door, the trunk or the hood left open for 5 minutes.
+# -----------------------------------------------------------------------------
+- id: geely_ex5_security_opening_left_open
+  alias: "Geely EX5 - Door, trunk or hood left open"
+  description: >-
+    Notifies when any door, the trunk or the hood has been open continuously
+    for 5 minutes. Runs in parallel so several openings can alert at once.
+  mode: parallel
+  max: 6
+  triggers:
+    - trigger: state
+      entity_id:
+        - binary_sensor.my_geely_ex5_door_driver
+        - binary_sensor.my_geely_ex5_door_passenger
+        - binary_sensor.my_geely_ex5_door_rear_left
+        - binary_sensor.my_geely_ex5_door_rear_right
+        - binary_sensor.my_geely_ex5_trunk
+        - binary_sensor.my_geely_ex5_hood
+      to: "on"
+      # TUNE: how long something may stay open before you get pinged.
+      for:
+        minutes: 5
+  conditions:
+    # Belt and braces: it must still be open right now, and it must be a real
+    # reading rather than a leftover unknown/unavailable state.
+    - condition: template
+      value_template: "{{ is_state(trigger.entity_id, 'on') }}"
+  actions:
+    - action: notify.mobile_app_your_phone
+      data:
+        title: "Geely EX5 - left open"
+        message: >-
+          {{ trigger.to_state.attributes.friendly_name | default(trigger.entity_id, true) }}
+          has been open for 5 minutes.
+
+# -----------------------------------------------------------------------------
+# 2. Car left unlocked after leaving home.
+# -----------------------------------------------------------------------------
+- id: geely_ex5_security_unlocked_away_from_home
+  alias: "Geely EX5 - Left unlocked away from home"
+  description: >-
+    Fires when the car has left the home zone and the doors are still
+    unlocked, and also if it is simply left unlocked while parked away.
+  # queued, not single: the "left home" run sits in a delay for three minutes,
+  # and mode: single would silently drop the "still unlocked" trigger during
+  # it. The trade-off is that one careless trip can notify twice (once on
+  # leaving, once five minutes later) - set mode: single if you prefer that
+  # over the occasional duplicate.
+  mode: queued
+  max: 3
+  triggers:
+    # The car left the home zone. No "for:" here on purpose - a moving car
+    # hops home -> not_home -> another zone, and each hop would restart a
+    # "for:" timer, so the alert could never fire. The grace period is done
+    # with a delay in the actions instead, where the state is re-read live.
+    - trigger: state
+      entity_id: device_tracker.my_geely_ex5_location
+      from: "home"
+      not_to:
+        - unknown
+        - unavailable
+      id: left_home
+    # Or it was already away and got unlocked and stayed unlocked.
+    - trigger: state
+      entity_id: lock.my_geely_ex5_doors
+      to: "unlocked"
+      for:
+        minutes: 5
+      id: stayed_unlocked
+  actions:
+    - if:
+        - condition: trigger
+          id: left_home
+      then:
+        # TUNE: grace period so a quick move on the driveway is ignored.
+        - delay:
+            minutes: 3
+    - condition: state
+      entity_id: lock.my_geely_ex5_doors
+      state: "unlocked"
+    # Must be a real zone reading, and not home.
+    - condition: template
+      value_template: >-
+        {{ states('device_tracker.my_geely_ex5_location')
+        not in ['home', 'unknown', 'unavailable', 'none', 'None'] }}
+    - action: notify.mobile_app_your_phone
+      data:
+        title: "Geely EX5 - unlocked away from home"
+        message: >-
+          The car is unlocked at
+          {{ states('device_tracker.my_geely_ex5_location')
+          | replace('not_home', 'a location outside your zones') }}.
+    # OPTIONAL: uncomment to lock it automatically instead of only nagging.
+    # Only do this if you are happy for HA to lock the car unattended.
+    # - action: lock.lock
+    #   target:
+    #     entity_id: lock.my_geely_ex5_doors
+
+# -----------------------------------------------------------------------------
+# 3a. Windows or sunroof left open when leaving home.
+# -----------------------------------------------------------------------------
+- id: geely_ex5_security_windows_open_leaving_home
+  alias: "Geely EX5 - Windows or sunroof open after leaving home"
+  description: >-
+    Fires when the car leaves the home zone with the windows or the sunroof
+    still open.
+  mode: single
+  triggers:
+    # Same reasoning as above: no "for:" on a device_tracker trigger, the
+    # settling time is a delay in the actions.
+    - trigger: state
+      entity_id: device_tracker.my_geely_ex5_location
+      from: "home"
+      not_to:
+        - unknown
+        - unavailable
+  actions:
+    # TUNE: how long after leaving home to check.
+    - delay:
+        minutes: 2
+    - condition: template
+      value_template: >-
+        {{ states('device_tracker.my_geely_ex5_location')
+        not in ['home', 'unknown', 'unavailable', 'none', 'None'] }}
+    - condition: or
+      conditions:
+        - condition: state
+          entity_id: cover.my_geely_ex5_all_windows
+          state: "open"
+        - condition: state
+          entity_id: cover.my_geely_ex5_sunroof
+          state: "open"
+    - action: notify.mobile_app_your_phone
+      data:
+        title: "Geely EX5 - open while away"
+        message: |-
+          {%- set ns = namespace(items=[]) -%}
+          {%- if is_state('cover.my_geely_ex5_all_windows', 'open') -%}
+          {%- set ns.items = ns.items + ['windows'] -%}
+          {%- endif -%}
+          {%- if is_state('cover.my_geely_ex5_sunroof', 'open') -%}
+          {%- set ns.items = ns.items + ['sunroof'] -%}
+          {%- endif -%}
+          You left home with the {{ ns.items | join(' and the ') }} open.
+
+# -----------------------------------------------------------------------------
+# 3b. Windows or sunroof open while rain is forecast.
+#     REPLACE weather.home on the three "entity_id:" lines below with your own
+#     weather entity. The forecast template needs no editing - it reads
+#     whatever weather.get_forecasts returns.
+# -----------------------------------------------------------------------------
+- id: geely_ex5_security_windows_open_rain_forecast
+  alias: "Geely EX5 - Windows or sunroof open with rain forecast"
+  description: >-
+    Checks every 30 minutes, and whenever the weather entity changes, whether
+    rain is coming in the next few hours while the car is still open.
+  mode: single
+  triggers:
+    - trigger: time_pattern
+      # TUNE: how often to re-check the forecast. While it is raining soon and
+      # the car is still open you get one alert per interval - on a phone the
+      # "tag" below makes each one replace the previous instead of stacking.
+      minutes: "/30"
+    - trigger: state
+      entity_id: weather.home
+      not_to:
+        - unknown
+        - unavailable
+  conditions:
+    - condition: or
+      conditions:
+        - condition: state
+          entity_id: cover.my_geely_ex5_all_windows
+          state: "open"
+        - condition: state
+          entity_id: cover.my_geely_ex5_sunroof
+          state: "open"
+    - condition: not
+      conditions:
+        - condition: state
+          entity_id: weather.home
+          state:
+            - unknown
+            - unavailable
+  actions:
+    - action: weather.get_forecasts
+      target:
+        entity_id: weather.home
+      data:
+        type: hourly
+      response_variable: forecast_data
+    # Stop here unless rain shows up in the forecast window. The response is
+    # keyed by entity id, so we just take the first (only) entry rather than
+    # naming the entity again - that way swapping weather.home above is enough.
+    - condition: template
+      value_template: |-
+        {%- set hours = 4 -%}
+        {%- set wet = ['rainy', 'pouring', 'lightning-rainy', 'snowy-rainy', 'hail'] -%}
+        {%- set resp = (forecast_data.values() | list | first) | default({}, true) -%}
+        {%- set fc = (resp.forecast | default([], true))[:hours] -%}
+        {%- set ns = namespace(rain=false) -%}
+        {%- for f in fc -%}
+        {%- if (f.condition | default('', true)) in wet
+               or (f.precipitation_probability | default(0, true) | float(0)) >= 60
+               or (f.precipitation | default(0, true) | float(0)) > 0 -%}
+        {%- set ns.rain = true -%}
+        {%- endif -%}
+        {%- endfor -%}
+        {{ ns.rain }}
+    # TUNE above: "hours" = how far ahead to look, 60 = rain probability in %.
+    - action: notify.mobile_app_your_phone
+      data:
+        title: "Geely EX5 - rain coming, car is open"
+        message: |-
+          {%- set ns = namespace(items=[]) -%}
+          {%- if is_state('cover.my_geely_ex5_all_windows', 'open') -%}
+          {%- set ns.items = ns.items + ['windows are'] -%}
+          {%- endif -%}
+          {%- if is_state('cover.my_geely_ex5_sunroof', 'open') -%}
+          {%- set ns.items = ns.items + ['sunroof is'] -%}
+          {%- endif -%}
+          Rain is forecast in the next few hours and the {{ ns.items | join(' open, the ') }} open.
+        # "tag" is a notify.mobile_app_* feature: a new alert replaces the
+        # previous one instead of stacking up. Delete this "data:" block if you
+        # swapped in a notify service that is not the companion app.
+        data:
+          tag: geely_ex5_rain_car_open
+    # OPTIONAL: uncomment to close everything automatically.
+    # - action: cover.close_cover
+    #   target:
+    #     entity_id:
+    #       - cover.my_geely_ex5_all_windows
+    #       - cover.my_geely_ex5_sunroof
+
+# -----------------------------------------------------------------------------
+# 4. Nightly bedtime check - is the car locked and shut?
+# -----------------------------------------------------------------------------
+- id: geely_ex5_security_bedtime_check
+  alias: "Geely EX5 - Bedtime security check"
+  description: >-
+    At bedtime, refreshes the car data and reports anything left unlocked,
+    open or ajar - plus anything the car did not report, so an unavailable
+    sensor is never mistaken for a closed door. Stays silent when all is well.
+  mode: single
+  triggers:
+    - trigger: time
+      # TUNE: your bedtime.
+      at: "22:30:00"
+  actions:
+    # Remember the current poll timestamp before asking for a new one, so we
+    # can tell a genuinely fresh reading from the one we already had.
+    - variables:
+        poll_before: "{{ states('sensor.my_geely_ex5_last_updated') }}"
+    # Wake the car so the report is based on fresh data. Remove these three
+    # steps (the variables above, the button press and the wait below) if you
+    # would rather not poll the car at night. continue_on_error keeps the
+    # report going if the car is asleep and the refresh call fails.
+    - action: button.press
+      continue_on_error: true
+      target:
+        entity_id: button.my_geely_ex5_refresh_data
+    # Wait for the poll timestamp to actually change instead of guessing at a
+    # delay, so the report is never built from the pre-refresh reading.
+    - wait_template: >-
+        {{ states('sensor.my_geely_ex5_last_updated') not in ['unknown', 'unavailable']
+        and states('sensor.my_geely_ex5_last_updated') != poll_before }}
+      timeout:
+        seconds: 120
+      continue_on_timeout: true
+    # If even the lock is not reporting, the car is asleep or the integration
+    # is down and there is nothing trustworthy to say - stay quiet. Delete this
+    # condition if you would rather be told the car was unreachable at bedtime.
+    - condition: template
+      value_template: >-
+        {{ states('lock.my_geely_ex5_doors') not in ['unknown', 'unavailable'] }}
+    - variables:
+        # Everything that is genuinely open or unlocked right now.
+        problems: |-
+          {%- set ns = namespace(items=[]) -%}
+          {%- set openings = [
+                'binary_sensor.my_geely_ex5_door_driver',
+                'binary_sensor.my_geely_ex5_door_passenger',
+                'binary_sensor.my_geely_ex5_door_rear_left',
+                'binary_sensor.my_geely_ex5_door_rear_right',
+                'binary_sensor.my_geely_ex5_trunk',
+                'binary_sensor.my_geely_ex5_hood'
+              ] -%}
+          {%- for e in openings -%}
+          {%- if is_state(e, 'on') -%}
+          {%- set ns.items = ns.items + [(state_attr(e, 'friendly_name') or e) ~ ' is open'] -%}
+          {%- endif -%}
+          {%- endfor -%}
+          {%- if is_state('cover.my_geely_ex5_all_windows', 'open') -%}
+          {%- set ns.items = ns.items + ['the windows are open'] -%}
+          {%- endif -%}
+          {%- if is_state('cover.my_geely_ex5_sunroof', 'open') -%}
+          {%- set ns.items = ns.items + ['the sunroof is open'] -%}
+          {%- endif -%}
+          {%- if is_state('lock.my_geely_ex5_doors', 'unlocked') -%}
+          {%- set ns.items = ns.items + ['the doors are unlocked'] -%}
+          {%- endif -%}
+          {{ ns.items | join(', ') }}
+        # Anything that did not report. An unavailable sensor must not be read
+        # as "closed" - the whole point of this automation is to be sure.
+        # TUNE: if your car never reports one of these, delete it from BOTH
+        # lists so the nightly report stops mentioning it every single night.
+        unchecked: |-
+          {%- set ns = namespace(items=[]) -%}
+          {%- set watched = [
+                'binary_sensor.my_geely_ex5_door_driver',
+                'binary_sensor.my_geely_ex5_door_passenger',
+                'binary_sensor.my_geely_ex5_door_rear_left',
+                'binary_sensor.my_geely_ex5_door_rear_right',
+                'binary_sensor.my_geely_ex5_trunk',
+                'binary_sensor.my_geely_ex5_hood',
+                'cover.my_geely_ex5_all_windows',
+                'cover.my_geely_ex5_sunroof'
+              ] -%}
+          {%- for e in watched -%}
+          {%- if states(e) in ['unknown', 'unavailable'] -%}
+          {%- set ns.items = ns.items + [state_attr(e, 'friendly_name') or e] -%}
+          {%- endif -%}
+          {%- endfor -%}
+          {{ ns.items | join(', ') }}
+    # All clear and everything readable - say nothing.
+    - condition: template
+      value_template: >-
+        {{ problems | trim | length > 0 or unchecked | trim | length > 0 }}
+    - action: notify.mobile_app_your_phone
+      data:
+        title: "Geely EX5 - bedtime check"
+        message: |-
+          {%- if problems | trim | length > 0 -%}
+          Before you turn in: {{ problems | trim }}.
+          {%- endif -%}
+          {%- if unchecked | trim | length > 0 -%}
+          {{ ' ' if problems | trim | length > 0 else '' }}No reading from the car for: {{ unchecked | trim }}.
+          {%- endif -%}

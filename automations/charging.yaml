@@ -1,0 +1,208 @@
+# Geely Connect - CHARGING AUTOMATIONS
+#
+# What this is:
+#   Four ready-to-use automations built around the charging entities of the
+#   Geely Connect integration: charge finished, charge nearly finished, low
+#   battery, and a "you forgot to plug in" reminder.
+#
+# Where to paste it:
+#   * Whole file - append this list to automations.yaml in your Home Assistant
+#     config directory (the file referenced by
+#     "automation: !include automations.yaml" in configuration.yaml), then
+#     Developer tools > YAML > Reload automations.
+#   * One at a time - Settings > Automations & scenes > Create automation >
+#     Create new automation > three-dot menu > Edit in YAML, then paste a
+#     single block *without* its leading "- " and *without* the "id:" line
+#     (the editor assigns its own id).
+#
+# BEFORE YOU RELOAD - two search-and-replace passes:
+#   1. my_geely_ex5              -> your car's entity slug. It is the
+#                                   slugified device name, e.g. a device named
+#                                   "Geely EX5" gives geely_ex5. Check one id
+#                                   in Developer tools > States.
+#   2. notify.mobile_app_your_phone -> your real notify service, e.g.
+#                                   notify.mobile_app_pixel_9 or
+#                                   notify.persistent_notification.
+#
+# Every threshold worth tuning is marked with a "# TUNE:" comment.
+
+- id: geely_charging_finished
+  alias: "Geely: charging finished"
+  description: >-
+    Fires when the charger connection sensor leaves "Charging" while the
+    battery is above 80%, i.e. the session ended because the car is full
+    rather than because someone unplugged a half-empty pack.
+  triggers:
+    - trigger: state
+      entity_id: sensor.my_geely_ex5_charger_connection
+      from: "Charging"
+      # Listing the destination states explicitly means an integration
+      # hiccup (unavailable/unknown) can never look like a finished charge.
+      to:
+        - "Plugged in"
+        - "Disconnected"
+  conditions:
+    # Do not act on a battery reading that has not arrived yet.
+    - condition: template
+      value_template: "{{ has_value('sensor.my_geely_ex5_battery') }}"
+    # TUNE: 80 - the level above which a stopped session counts as "done".
+    - condition: numeric_state
+      entity_id: sensor.my_geely_ex5_battery
+      above: 80
+  actions:
+    - action: notify.mobile_app_your_phone
+      data:
+        title: "Geely - charging finished"
+        message: >-
+          Battery {{ states('sensor.my_geely_ex5_battery') }}%,
+          {{ states('sensor.my_geely_ex5_electric_range') }} km of range.
+          Charger is now
+          {{ states('sensor.my_geely_ex5_charger_connection') | lower }}.
+  mode: single
+
+- id: geely_charging_almost_done
+  alias: "Geely: charging almost done"
+  description: >-
+    Heads-up shortly before the session ends, driven by the computed Charge
+    Complete timestamp. That sensor is only set while the car is actually
+    drawing current, so it cannot fire on a parked, idle car.
+  triggers:
+    # Template triggers containing now() are re-evaluated every minute, so
+    # this fires the minute the remaining time drops inside the window.
+    # TUNE: 600 seconds = 10 minutes of warning.
+    - trigger: template
+      value_template: >-
+        {% set left = as_timestamp(
+        states('sensor.my_geely_ex5_charge_complete'), 0)
+        - as_timestamp(now()) %}
+        {{ has_value('sensor.my_geely_ex5_charge_complete')
+        and left > 0 and left <= 600 }}
+  conditions:
+    # Only while current is still flowing - protects against a stale estimate.
+    - condition: state
+      entity_id: sensor.my_geely_ex5_charger_connection
+      state: "Charging"
+    # The estimate drops to unknown the moment time-to-full reaches zero, even
+    # though the connection sensor still reads "Charging". Without this the
+    # message below could render a 1970 fallback time.
+    - condition: template
+      value_template: >-
+        {{ has_value('sensor.my_geely_ex5_charge_complete') }}
+    # The estimate can blink to unknown and back near the end of a session,
+    # which would re-enter the window and notify twice. One per half hour.
+    # "this" is the automation's own state object, so this keeps working when
+    # the block is pasted into the UI editor under a different entity id.
+    # TUNE: 1800 seconds. ("mode: single" does not do this - it only blocks
+    # overlapping runs, and a notification finishes instantly.)
+    - condition: template
+      value_template: >-
+        {% set last = this.attributes.get('last_triggered')
+        if this is defined and this is not none else none %}
+        {{ as_timestamp(now()) - as_timestamp(last, 0) > 1800 }}
+  actions:
+    # "min left" is derived from the same timestamp as "done at" so the two
+    # cannot disagree. Do not substitute Time To Full Charge here: that is the
+    # figure the car reported at the last poll and it does not tick down
+    # between polls, so it would overstate the remaining time by however long
+    # ago that poll was.
+    - action: notify.mobile_app_your_phone
+      data:
+        title: "Geely - almost charged"
+        message: >-
+          Battery {{ states('sensor.my_geely_ex5_battery') }}%, done at
+          {{ as_timestamp(states('sensor.my_geely_ex5_charge_complete'), 0)
+          | timestamp_custom('%H:%M', true) }}
+          ({{ ((as_timestamp(states('sensor.my_geely_ex5_charge_complete'), 0)
+          - as_timestamp(now())) / 60) | round | int }} min left).
+  mode: single
+
+- id: geely_low_battery
+  alias: "Geely: low battery - plug in"
+  description: >-
+    Warns once when the pack falls below 20%. Stays quiet if the car is
+    already charging, and ignores the jump that happens when the sensor comes
+    back from unavailable after a restart or a failed poll.
+  triggers:
+    - trigger: numeric_state
+      entity_id: sensor.my_geely_ex5_battery
+      # TUNE: 20 - the level at which you want to be nagged.
+      below: 20
+      # Must hold for a few minutes so a single odd reading stays silent.
+      for: "00:05:00"
+  conditions:
+    # A numeric_state trigger also fires on unavailable -> 15. Requiring a
+    # real previous reading means only a genuine drop notifies. The
+    # "trigger is defined" guard keeps a manual automation.trigger call from
+    # throwing a template error here.
+    - condition: template
+      value_template: >-
+        {{ trigger is defined and trigger.from_state is not none
+        and trigger.from_state.state not in ['unknown', 'unavailable'] }}
+    # No point telling you to plug in while it is plugged in and charging.
+    - condition: not
+      conditions:
+        - condition: state
+          entity_id: sensor.my_geely_ex5_charger_connection
+          state: "Charging"
+  actions:
+    - action: notify.mobile_app_your_phone
+      data:
+        title: "Geely - low battery"
+        message: >-
+          Battery is down to {{ states('sensor.my_geely_ex5_battery') }}%
+          ({{ states('sensor.my_geely_ex5_electric_range') }} km left).
+          Time to plug in.
+  mode: single
+
+- id: geely_forgot_to_plug_in
+  alias: "Geely: forgot to plug in"
+  description: >-
+    Evening reminder - car sitting at home, cable not connected, battery low
+    enough that it should be charging overnight. Checks at a fixed hour and
+    again if you get home later than that.
+  triggers:
+    # TUNE: 21:00:00 - the nightly check, ideally after you are usually home.
+    # If you change it, move the "after:" in the time condition below to match
+    # (a minute earlier is a safe margin); otherwise the new trigger time can
+    # fall outside the reminder window and the nightly check does nothing.
+    - trigger: time
+      at: "21:00:00"
+      id: nightly_check
+    # Also catch a late arrival, once the car has settled at home.
+    - trigger: state
+      entity_id: device_tracker.my_geely_ex5_location
+      to: "home"
+      for: "00:05:00"
+      id: late_arrival
+  conditions:
+    # TUNE: the window in which a reminder is welcome. This one wraps past
+    # midnight - Home Assistant handles that whenever before < after.
+    - condition: time
+      after: "20:59:00"
+      before: "02:00:00"
+    # The tracker is a GPS entity, so "home" is resolved from your Home zone.
+    # It reads unknown when the car has never reported a position, which this
+    # condition rejects.
+    - condition: state
+      entity_id: device_tracker.my_geely_ex5_location
+      state: "home"
+    # "off" = nothing in the socket. If the sensor were unavailable this
+    # condition is false, so a dead poll never produces a false alarm.
+    - condition: state
+      entity_id: binary_sensor.my_geely_ex5_charger_plug
+      state: "off"
+    - condition: template
+      value_template: "{{ has_value('sensor.my_geely_ex5_battery') }}"
+    # TUNE: 50 - below this, an overnight charge is worth the reminder.
+    - condition: numeric_state
+      entity_id: sensor.my_geely_ex5_battery
+      below: 50
+  actions:
+    - action: notify.mobile_app_your_phone
+      data:
+        title: "Geely - not plugged in"
+        message: >-
+          The car is home at {{ states('sensor.my_geely_ex5_battery') }}%
+          ({{ states('sensor.my_geely_ex5_electric_range') }} km) and the
+          cable is not connected.
+  mode: single

@@ -261,6 +261,40 @@ built-in only:
 - **`cards/widget-tires.yaml`** — the four pressures laid out like the car, with
   a history graph to spot a slow leak.
 
+- **`cards/widget-range.yaml`** — range now, range at full charge and
+  efficiency, with a 30-day graph so pack degradation or seasonal loss shows up.
+
+### 📑 Single views — [`views/`](views/)
+A **view** is one tab of a dashboard. Each file is a YAML list item starting
+with `- title:`, pasted under the `views:` key via **Edit dashboard → ⋮ → Raw
+configuration editor** — not via "Add card". Line the `- title:` up with the
+views already there.
+
+- **`views/view-car.yaml`** — the car at a glance: key numbers, lock and climate
+  controls, every opening, quick actions, and a map.
+- **`views/view-charging.yaml`** — battery gauge, charge complete, range at full
+  charge, scheduled charging, and a week of battery history.
+- **`views/view-mobile.yaml`** — single column with big touch targets, for a
+  phone.
+
+### 🤖 Automations — [`automations/`](automations/)
+Ready-to-paste automations. Append a file to your `automations.yaml`, or copy
+one entry at a time through the automation editor's ⋮ → **Edit in YAML**.
+Replace `notify.mobile_app_your_phone` with your own notifier.
+
+- **`automations/charging.yaml`** — charge finished, charge nearly finished
+  (uses the Charge Complete timestamp), low battery, and "you forgot to plug in".
+- **`automations/security.yaml`** — something left open, left unlocked after
+  leaving, windows open with rain forecast, and a bedtime check.
+- **`automations/comfort-and-maintenance.yaml`** — weekday pre-heat, hot-cabin
+  pre-cool, low tire pressure, service due, and 12V battery health.
+
+> The tire-pressure thresholds are in **psi**, matching the setup default.
+> Change them if you picked bar or kPa — the file says where.
+
+Prefer a UI? The same ideas are in [`blueprints/`](blueprints/) as importable
+blueprints.
+
 ### 🖥️ Full dashboards — [`dashboards/`](dashboards/)
 A **dashboard** starts with `title:` / `views:` and is pasted via
 **Settings → Dashboards → Add dashboard → New dashboard from scratch → open →
@@ -438,8 +472,10 @@ custom_components/geely_connect/   the integration itself (what HACS installs)
 ├── translations/                  UI translations (en, he, ar, fr, ru)
 ├── manifest.json                  integration metadata
 └── *.py                           platforms, API client, config flow, …
-blueprints/automation/             ready-made automation blueprints
-cards/                             single Lovelace cards (paste as "Manual card")
+automations/                       ready-to-paste automations
+blueprints/automation/             the same ideas as importable blueprints
+cards/                             single cards and widgets (paste as "Manual card")
+views/                             single dashboard tabs (paste under "views:")
 dashboards/                        full dashboards (paste in Raw config editor)
 hacs.json                          HACS metadata
 ```

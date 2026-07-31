@@ -1,0 +1,136 @@
+# =====================================================================
+#  Geely Connect - "Car" VIEW   (views/view-car.yaml)
+#
+#  WHAT THIS IS
+#  A complete single dashboard VIEW - not a card, not a whole dashboard.
+#  It is one YAML list item: the file starts with "- title:".
+#
+#  WHERE TO PASTE IT  --  this is NOT an "Add card" snippet
+#   1. Open the dashboard you want this view in.
+#   2. Pencil icon (Edit dashboard) -> three-dot menu (top right) ->
+#      "Raw configuration editor".
+#   3. Find the top-level  views:  key.
+#   4. Paste this whole block as one more item in that list, alongside
+#      the other "- " entries.
+#   5. Save.
+#  Pasting it through "Add card" will NOT work - a view is not a card.
+#
+#  INDENTATION - the one thing that breaks it
+#  Every item of a YAML list must start in the same column. Here
+#  "- title:" sits at column 0. If the views already in your dashboard
+#  are indented (commonly two spaces under "views:"), indent this
+#  entire block by the same amount before saving, or the editor will
+#  reject the configuration.
+#
+#  BEFORE YOU SAVE
+#  Search-replace  my_geely_ex5  with your own car's entity suffix.
+#  Find it under Settings -> Devices & Services -> Geely Connect ->
+#  your car; ids look like  sensor.my_geely_ex5_battery.
+#  This view calls no notify service, so there is no notify.xxx to
+#  replace here - only the automation/blueprint files need that.
+#
+#  Anything your car does not report shows as "unavailable" - just
+#  delete that card.
+# =====================================================================
+- title: Car
+  path: car
+  icon: mdi:car-electric
+  cards:
+    - type: vertical-stack
+      cards:
+
+        # ---------- Heading ----------
+        - type: heading
+          heading: My Geely
+          heading_style: title
+          icon: mdi:car-electric
+
+        # ---------- The numbers that matter ----------
+        - type: grid
+          columns: 2
+          square: false
+          cards:
+            - type: tile
+              entity: sensor.my_geely_ex5_battery
+              name: Battery
+              color: green
+            - type: tile
+              entity: sensor.my_geely_ex5_electric_range
+              name: Range
+              color: blue
+            - type: tile
+              entity: sensor.my_geely_ex5_interior_temperature
+              name: Interior
+              color: orange
+            - type: tile
+              entity: sensor.my_geely_ex5_charger_connection
+              name: Charger
+
+        # ---------- Lock & climate (with working controls) ----------
+        - type: tile
+          entity: lock.my_geely_ex5_doors
+          name: Doors
+          features:
+            - type: lock-commands
+
+        # "off" MUST stay quoted - bare off is the boolean false in YAML
+        # and the mode button would silently disappear.
+        - type: tile
+          entity: climate.my_geely_ex5_climate
+          name: Climate
+          features:
+            - type: climate-hvac-modes
+              hvac_modes: [heat_cool, "off"]
+            - type: target-temperature
+
+        # ---------- Everything that can be left open ----------
+        # state_color paints an open door red - without it an open and a
+        # closed door look identical apart from the small text below.
+        - type: glance
+          title: Doors, trunk & hood
+          columns: 3
+          show_state: true
+          state_color: true
+          entities:
+            - entity: binary_sensor.my_geely_ex5_door_driver
+              name: Driver
+            - entity: binary_sensor.my_geely_ex5_door_passenger
+              name: Passenger
+            - entity: binary_sensor.my_geely_ex5_door_rear_left
+              name: Rear left
+            - entity: binary_sensor.my_geely_ex5_door_rear_right
+              name: Rear right
+            - entity: binary_sensor.my_geely_ex5_trunk
+              name: Trunk
+            - entity: binary_sensor.my_geely_ex5_hood
+              name: Hood
+
+        # ---------- Quick actions ----------
+        - type: horizontal-stack
+          cards:
+            - type: button
+              entity: button.my_geely_ex5_find_car
+              name: Find car
+              icon: mdi:car-search
+              show_state: false
+              tap_action: {action: toggle}
+            - type: button
+              entity: button.my_geely_ex5_unlock_trunk
+              name: Trunk
+              icon: mdi:car-back
+              show_state: false
+              tap_action: {action: toggle}
+            - type: button
+              entity: button.my_geely_ex5_refresh_data
+              name: Refresh
+              icon: mdi:refresh
+              show_state: false
+              tap_action: {action: toggle}
+
+        # ---------- Where is it ----------
+        - type: map
+          entities:
+            - entity: device_tracker.my_geely_ex5_location
+          theme_mode: auto
+          default_zoom: 14
+          aspect_ratio: "16:9"
