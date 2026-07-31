@@ -290,6 +290,16 @@ built-in only:
 - **`cards/widget-control.yaml`** — ⭐ the four things you reach for most: lock
   and unlock, rapid warming or cooling in one tap, battery percentage, and
   whether the car is shut, plugged in and reachable.
+- **`cards/widget-status.yaml`** — the whole state in four sentences: lock,
+  charge and range; what charging is doing and when it finishes; which openings
+  are open by name; and how old the data is.
+- **`cards/widget-attention.yaml`** — silent until something needs you, then
+  lists only that: left open, unlocked, low battery, a soft tire, weak 12V,
+  service due, or no contact with the car.
+- **`cards/widget-template.yaml`** — a starter to copy when building your own.
+  A working card that walks through each pattern — heading, tile grid,
+  interactive tiles, gauge bands, conditional, glance, history graph and a
+  templated markdown card — with a comment over each saying which line to change.
 
 ### 📑 Single views — [`views/`](views/)
 A **view** is one tab of a dashboard. Each file is a YAML list item starting

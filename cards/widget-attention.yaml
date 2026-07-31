@@ -72,8 +72,10 @@ cards:
       {#- =========================================================== -#}
 
       {#- Every field this template appends to has to be declared here in
-          one go: assigning to a namespace field that does not exist yet
-          raises, and a raising template renders as an error box. -#}
+          one go. Each line below is "ns.x = ns.x + [...]", which READS
+          the field before writing it, and reading a namespace field that
+          was never declared raises - a raising template renders as an
+          error box instead of a card. -#}
       {%- set ns = namespace(items=[], open=[], low=[], svc=[], urgent=false) -%}
 
       {#- 1. Contact with the car. This sensor is on whenever the last
@@ -86,10 +88,17 @@ cards:
              entity never goes unavailable, so 'off' is the only state
              that means trouble, and this way a mistyped entity id (or
              the moments before the first poll) leaves the card quiet
-             instead of stuck on a warning. -#}
+             instead of stuck on a warning.
+             The time of the last good poll is printed as a local clock
+             time. as_datetime(none) turns "unknown" - or a sensor that
+             is not there at all - into none rather than raising, and the
+             "if seen" below then drops the whole bracket. as_local moves
+             the stored UTC timestamp into your own time zone; do not
+             print the raw state, which is UTC and unreadable. -#}
       {%- if is_state('binary_sensor.my_geely_ex5_connected', 'off') -%}
         {%- set seen = states('sensor.my_geely_ex5_last_updated') | as_datetime(none) -%}
-        {%- set ns.items = ns.items + ['**No contact with the car** - anything below may be stale' ~ ((' (last good poll ' ~ relative_time(seen) ~ ' ago)') if seen else '')] -%}
+        {%- set seen_txt = (' (last good poll ' ~ (seen | as_local).strftime('%H:%M on %d %b') ~ ')') if seen else '' -%}
+        {%- set ns.items = ns.items + ['**No contact with the car** - anything below may be stale' ~ seen_txt] -%}
       {%- endif -%}
 
       {#- 2. Anything physically open. Seatbelt and charger plug are
