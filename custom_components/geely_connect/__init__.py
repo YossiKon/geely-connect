@@ -23,6 +23,7 @@ from . import api as geely_api
 from .api import GeelyApi, GeelyAuthError, GeelyControlError, GeelyTLSPinError
 from .const import (
     CLIENT_ID,
+    CONF_COUNTRY_CODE,
     CONF_CERT_PATH,
     CONF_CIDPSSO_TOKEN,
     CONF_DEVICE_ID,
