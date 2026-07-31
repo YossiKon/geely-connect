@@ -22,7 +22,9 @@ cards:
     heading_style: title
     icon: mdi:air-conditioner
 
-  # Main thermostat. Presets: none / rapid_warming / rapid_cooling.
+  # Main thermostat. Preset values are exactly "Rapid Warming",
+  # "Rapid Cooling" and "none" - see const.py. Spelling and capitals
+  # matter; rapid_warming is silently ignored.
   - type: thermostat
     entity: climate.my_geely_ex5_climate
     name: Cabin
@@ -35,8 +37,8 @@ cards:
         style: dropdown
         preset_modes:
           - none
-          - rapid_warming
-          - rapid_cooling
+          - Rapid Warming
+          - Rapid Cooling
 
   # Current cabin vs. outside temperature.
   - type: grid

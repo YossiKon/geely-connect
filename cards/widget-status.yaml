@@ -1,0 +1,191 @@
+# =====================================================================
+#  Geely Connect - ONE-GLANCE STATUS WIDGET (single built-in card).
+#
+#  What it is : a markdown card that writes the car's state out in a few
+#               short sentences instead of a wall of tiles -
+#                 line 1  lock state, charge percent and range left
+#                 line 2  charging, worded differently for unplugged /
+#                         plugged in but idle / charging - and while it
+#                         charges, the finish clock time and roughly
+#                         how long that is from now
+#                 line 3  exactly which doors, trunk or hood are open,
+#                         or a plain "everything is shut"
+#                 line 4  how long ago the data was refreshed, plus a
+#                         warning when the car is offline
+#               Underneath: the door lock and a refresh button, so the
+#               widget is actionable and not only a read-out.
+#
+#  Where to paste : your dashboard -> Edit dashboard (pencil, top right)
+#                   -> Add card -> scroll to the bottom -> Manual ->
+#                   delete the sample YAML -> paste everything below
+#                   this comment block (from "type: vertical-stack"
+#                   downwards) -> Save.
+#
+#  Before saving : search-replace  my_geely_ex5  with your own entity
+#                  suffix (Settings -> Devices & services ->
+#                  Geely Connect -> your car -> any entity id).
+#
+#  Every reading is guarded, so a car that has not reported yet is
+#  described in words - the card never prints "unknown" and never shows
+#  a 1970 finish time. The template calls now(), so Home Assistant
+#  re-renders it every minute and the "in about ..." and "updated ...
+#  ago" figures stay honest without any automation.
+# =====================================================================
+type: vertical-stack
+cards:
+  # --- The whole status, in sentences --------------------------------
+  # Style note: every line is worked out into a variable first and the
+  # four of them are printed together at the very bottom. That keeps the
+  # wording readable and makes it obvious which line is which when you
+  # want to reword something. One line per line: the markdown card
+  # renders with line breaks turned on, so a plain newline is already a
+  # break - no <br> and no trailing spaces needed.
+  - type: markdown
+    content: |-
+      {#- 1. HEADLINE - lock, charge, range ------------------------- -#}
+      {%- set lock_state = states('lock.my_geely_ex5_doors') -%}
+      {%- set lock_txt = {
+        'locked': 'Locked',
+        'unlocked': 'UNLOCKED',
+        'jammed': 'LOCK JAMMED',
+        'locking': 'Locking',
+        'unlocking': 'Unlocking',
+        'open': 'Doors open',
+        'opening': 'Opening' }.get(lock_state, 'Lock state unknown') -%}
+      {%- set batt_id = 'sensor.my_geely_ex5_battery' -%}
+      {%- set range_id = 'sensor.my_geely_ex5_electric_range' -%}
+      {%- set batt_txt = (states(batt_id) | float(0) | round(0) | int ~ '%')
+        if has_value(batt_id) else 'charge not reported' -%}
+      {%- set range_txt = (states(range_id) | float(0) | round(0) | int ~ ' km left')
+        if has_value(range_id) else 'range not reported' -%}
+
+      {#- 2. CHARGING - three different sentences -------------------- -#}
+      {%- set conn_id = 'sensor.my_geely_ex5_charger_connection' -%}
+      {%- set plug_id = 'binary_sensor.my_geely_ex5_charger_plug' -%}
+      {%- set done_id = 'sensor.my_geely_ex5_charge_complete' -%}
+      {%- set ttf_id = 'sensor.my_geely_ex5_time_to_full_charge' -%}
+      {#- Lower-cased so a differently-cased state string still matches. -#}
+      {%- set conn = states(conn_id) | lower -%}
+      {%- set is_charging = 'charging' in conn -%}
+      {%- set is_plugged = is_charging or 'plug' in conn or is_state(plug_id, 'on') -%}
+      {%- if not has_value(conn_id) and not has_value(plug_id) -%}
+        {%- set charge_line = 'Charging status has not been reported yet.' -%}
+      {%- elif is_charging -%}
+        {#- Preferred source: the computed finish timestamp. as_timestamp
+            is only called inside this has_value guard, because a default
+            of 0 would otherwise print a perfectly plausible 1970 time. -#}
+        {%- if has_value(done_id) -%}
+          {%- set eta = as_timestamp(states(done_id), 0) -%}
+          {%- set left = ((eta - as_timestamp(now())) / 60) | round(0) | int -%}
+          {%- set left = [left, 0] | max -%}
+          {%- set left_txt = (left ~ ' minutes') if left < 60
+            else ((left // 60) ~ ' h ' ~ (left % 60) ~ ' min') -%}
+          {%- if left < 1 -%}
+            {%- set charge_line = 'Charging - finishing any moment now.' -%}
+          {%- else -%}
+            {%- set charge_line = 'Charging - full at ' ~ eta | timestamp_custom('%H:%M', true)
+              ~ ', in about ' ~ left_txt ~ '.' -%}
+          {%- endif -%}
+        {#- Fallback: the car's own countdown, if the timestamp is missing. -#}
+        {%- elif has_value(ttf_id) -%}
+          {%- set mins = states(ttf_id) | float(0) | round(0) | int -%}
+          {%- set mins_txt = (mins ~ ' minutes') if mins < 60
+            else ((mins // 60) ~ ' h ' ~ (mins % 60) ~ ' min') -%}
+          {%- set charge_line = 'Charging - about ' ~ mins_txt ~ ' to go.' -%}
+        {%- else -%}
+          {%- set charge_line = 'Charging - no finish time reported yet.' -%}
+        {%- endif -%}
+      {%- elif is_plugged -%}
+        {#- Plugged in and idle: usually a charge schedule, so say so. -#}
+        {%- set start_id = 'time.my_geely_ex5_scheduled_charging_start' -%}
+        {%- if is_state('switch.my_geely_ex5_scheduled_charging', 'on') and has_value(start_id) -%}
+          {%- set charge_line = 'Plugged in, waiting - scheduled charging starts at '
+            ~ states(start_id)[0:5] ~ '.' -%}
+        {%- elif is_state('switch.my_geely_ex5_scheduled_charging', 'on') -%}
+          {%- set charge_line = 'Plugged in, waiting for its charging schedule.' -%}
+        {%- else -%}
+          {%- set charge_line = 'Plugged in but not charging.' -%}
+        {%- endif -%}
+      {%- else -%}
+        {%- set charge_line = 'Not plugged in.' -%}
+      {%- endif -%}
+
+      {#- 3. OPENINGS - name them, and never claim shut for a sensor
+             that is simply not reporting ---------------------------- -#}
+      {%- set openings = {
+        'binary_sensor.my_geely_ex5_door_driver': 'driver door',
+        'binary_sensor.my_geely_ex5_door_passenger': 'passenger door',
+        'binary_sensor.my_geely_ex5_door_rear_left': 'rear left door',
+        'binary_sensor.my_geely_ex5_door_rear_right': 'rear right door',
+        'binary_sensor.my_geely_ex5_trunk': 'trunk',
+        'binary_sensor.my_geely_ex5_hood': 'hood' } -%}
+      {%- set ns = namespace(open=[], quiet=[]) -%}
+      {%- for eid, label in openings.items() -%}
+        {%- if is_state(eid, 'on') -%}
+          {%- set ns.open = ns.open + [label] -%}
+        {%- elif not has_value(eid) -%}
+          {%- set ns.quiet = ns.quiet + [label] -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {%- set quiet_note = (' (' ~ (ns.quiet | join(', ')) ~ ' not reporting)')
+        if ns.quiet else '' -%}
+      {%- if ns.open -%}
+        {%- set open_line = '**Open: ' ~ (ns.open | join(', ')) ~ '**' ~ quiet_note -%}
+      {%- elif ns.quiet | count == openings | count -%}
+        {%- set open_line = 'No door, trunk or hood sensor is reporting right now.' -%}
+      {%- else -%}
+        {%- set open_line = 'Doors, trunk and hood all shut' ~ quiet_note ~ '.' -%}
+      {%- endif -%}
+
+      {#- 4. FOOTER - data age and the link warning ------------------ -#}
+      {%- set seen_id = 'sensor.my_geely_ex5_last_updated' -%}
+      {%- if has_value(seen_id) -%}
+        {%- set age = ((as_timestamp(now()) - as_timestamp(states(seen_id), 0)) / 60)
+          | round(0) | int -%}
+        {%- set age = [age, 0] | max -%}
+        {%- if age < 1 -%}
+          {%- set foot_line = 'Updated just now' -%}
+        {%- elif age < 60 -%}
+          {%- set foot_line = 'Updated ' ~ age ~ ' min ago' -%}
+        {%- elif age < 1440 -%}
+          {%- set foot_line = 'Updated ' ~ (age // 60) ~ ' h ' ~ (age % 60) ~ ' min ago' -%}
+        {%- else -%}
+          {%- set foot_line = 'Updated ' ~ (age // 1440) ~ ' days ago' -%}
+        {%- endif -%}
+      {%- else -%}
+        {%- set foot_line = 'No successful poll recorded yet' -%}
+      {%- endif -%}
+      {%- if is_state('binary_sensor.my_geely_ex5_connected', 'off') -%}
+        {%- set foot_line = foot_line ~ ' - car is offline, so everything above may be stale' -%}
+      {%- elif not has_value('binary_sensor.my_geely_ex5_connected') -%}
+        {%- set foot_line = foot_line ~ ' - link state unknown' -%}
+      {%- endif -%}
+
+      {#- PRINT ------------------------------------------------------ -#}
+      ## {{ lock_txt }} - {{ batt_txt }} - {{ range_txt }}
+      {{ charge_line }}
+      {{ open_line }}
+      *{{ foot_line }}*
+
+  # --- Make it actionable --------------------------------------------
+  # Lock/unlock without leaving the widget, and force a poll when the
+  # footer above says the data is old.
+  # "action: toggle" on a button entity presses it - that is how the
+  # other cards in this repo drive button.* and it needs no service
+  # name, so nothing here breaks on the 2024.8 service/action rename.
+  - type: grid
+    columns: 2
+    square: false
+    cards:
+      - type: tile
+        entity: lock.my_geely_ex5_doors
+        name: Doors
+        icon: mdi:car-door-lock
+        features:
+          - type: lock-commands
+      - type: tile
+        entity: button.my_geely_ex5_refresh_data
+        name: Refresh
+        icon: mdi:refresh
+        tap_action:
+          action: toggle

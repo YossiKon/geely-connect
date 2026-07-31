@@ -75,7 +75,7 @@
       target:
         entity_id: climate.my_geely_ex5_climate
       data:
-        preset_mode: rapid_warming
+        preset_mode: Rapid Warming
     # This single call both switches the climate on and sets the target, so
     # there is no separate climate.set_hvac_mode step - one less remote
     # command sent to the car.
@@ -121,7 +121,7 @@
     - condition: template
       value_template: "{{ has_value('climate.my_geely_ex5_climate') }}"
   actions:
-    # ORDER MATTERS - see the pre-heat automation above. rapid_cooling also
+    # ORDER MATTERS - see the pre-heat automation above. Rapid Cooling also
     # forces the target temperature to the entity minimum, so it has to run
     # before the explicit setpoint, not after it.
     - action: climate.set_preset_mode
@@ -129,7 +129,7 @@
       target:
         entity_id: climate.my_geely_ex5_climate
       data:
-        preset_mode: rapid_cooling
+        preset_mode: Rapid Cooling
     # TUNE: cabin target temperature. Valid range is 15.5-28.5 C.
     - action: climate.set_temperature
       target:

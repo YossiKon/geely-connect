@@ -287,6 +287,9 @@ built-in only:
 
 - **`cards/widget-range.yaml`** — range now, range at full charge and
   efficiency, with a 30-day graph so pack degradation or seasonal loss shows up.
+- **`cards/widget-control.yaml`** — ⭐ the four things you reach for most: lock
+  and unlock, rapid warming or cooling in one tap, battery percentage, and
+  whether the car is shut, plugged in and reachable.
 
 ### 📑 Single views — [`views/`](views/)
 A **view** is one tab of a dashboard. Each file is a YAML list item starting

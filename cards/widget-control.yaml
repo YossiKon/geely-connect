@@ -1,0 +1,163 @@
+# =====================================================================
+#  Geely Connect - CONTROL WIDGET
+#
+#  WHAT THIS IS
+#    The four things you reach for most, in one card:
+#      * lock / unlock the doors
+#      * rapid warming or rapid cooling in one tap
+#      * battery percentage
+#      * whether the car is shut, plugged in and reachable
+#
+#  WHERE TO PASTE IT
+#    Open your dashboard -> pencil (Edit dashboard) -> + Add card ->
+#    scroll to the bottom -> "Manual" -> delete the sample content ->
+#    paste this whole file -> Save.
+#
+#  BEFORE YOU SAVE
+#    Search-replace  my_geely_ex5  with your own entity suffix. Find it
+#    under Settings -> Devices & Services -> Geely Connect -> your car:
+#    ids look like  sensor.my_geely_ex5_battery , so the suffix is
+#    my_geely_ex5 .
+#
+#  Anything your car does not report shows as "unavailable" - delete
+#  that card.
+# =====================================================================
+type: vertical-stack
+cards:
+  - type: heading
+    heading: My Geely
+    heading_style: title
+    icon: mdi:car-electric
+
+  # ---------- Battery ------------------------------------------------
+  # Severity keys are the LOWER bound of each band: red 0-20, yellow
+  # 20-40, green 40-100. Change the numbers to move the bands.
+  - type: gauge
+    entity: sensor.my_geely_ex5_battery
+    name: Battery
+    min: 0
+    max: 100
+    needle: false
+    severity:
+      red: 0
+      yellow: 20
+      green: 40
+
+  - type: grid
+    columns: 2
+    square: false
+    cards:
+      - type: tile
+        entity: sensor.my_geely_ex5_electric_range
+        name: Range
+        icon: mdi:map-marker-distance
+        color: blue
+      - type: tile
+        entity: sensor.my_geely_ex5_charger_connection
+        name: Charger
+        icon: mdi:ev-plug-type2
+
+  # ---------- Doors --------------------------------------------------
+  # lock-commands puts LOCK and UNLOCK buttons on the tile itself, so
+  # this row both shows the state and does the job.
+  - type: tile
+    entity: lock.my_geely_ex5_doors
+    name: Doors
+    icon: mdi:car-door-lock
+    features:
+      - type: lock-commands
+
+  # ---------- Rapid warming / cooling --------------------------------
+  # The preset values are exactly "Rapid Warming", "Rapid Cooling" and
+  # "none" - capitals and the space matter, a lowercase rapid_warming is
+  # silently ignored by Home Assistant.
+  # The two presets are one-tap: each turns the climate on and drives the
+  # cabin to the entity's max (warming) or min (cooling) by itself, so
+  # there is nothing else to set. "none" returns to the normal setpoint.
+  #
+  # The temperature row below is for when you want a specific target
+  # instead - set it AFTER the preset, never before, because a preset
+  # overwrites whatever target was set before it.
+  - type: tile
+    entity: climate.my_geely_ex5_climate
+    name: Climate
+    icon: mdi:air-conditioner
+    features:
+      - type: climate-preset-modes
+        style: icons
+        preset_modes:
+          - Rapid Warming
+          - Rapid Cooling
+          - none
+      # "off" MUST stay quoted - bare off is the boolean false in YAML
+      # and the button would silently disappear.
+      - type: climate-hvac-modes
+        hvac_modes:
+          - heat_cool
+          - "off"
+      - type: target-temperature
+
+  - type: grid
+    columns: 2
+    square: false
+    cards:
+      - type: tile
+        entity: sensor.my_geely_ex5_interior_temperature
+        name: Interior
+        icon: mdi:thermometer
+        color: orange
+      - type: tile
+        entity: sensor.my_geely_ex5_exterior_temperature
+        name: Outside
+        icon: mdi:thermometer-lines
+
+  # ---------- Overall status -----------------------------------------
+  # state_color paints anything open in red. Without it an open and a
+  # closed door look identical apart from the small text underneath.
+  - type: glance
+    title: Status
+    columns: 4
+    show_state: true
+    state_color: true
+    entities:
+      - entity: binary_sensor.my_geely_ex5_door_driver
+        name: Driver
+      - entity: binary_sensor.my_geely_ex5_door_passenger
+        name: Passenger
+      - entity: binary_sensor.my_geely_ex5_door_rear_left
+        name: Rear L
+      - entity: binary_sensor.my_geely_ex5_door_rear_right
+        name: Rear R
+      - entity: binary_sensor.my_geely_ex5_trunk
+        name: Trunk
+      - entity: binary_sensor.my_geely_ex5_hood
+        name: Hood
+      - entity: binary_sensor.my_geely_ex5_charger_plug
+        name: Plug
+      - entity: binary_sensor.my_geely_ex5_connected
+        name: Online
+
+  # ---------- Quick actions ------------------------------------------
+  - type: horizontal-stack
+    cards:
+      - type: button
+        entity: button.my_geely_ex5_find_car
+        name: Find car
+        icon: mdi:car-search
+        show_state: false
+        tap_action:
+          action: toggle
+      - type: button
+        entity: button.my_geely_ex5_unlock_trunk
+        name: Trunk
+        icon: mdi:car-back
+        show_state: false
+        tap_action:
+          action: toggle
+      - type: button
+        entity: button.my_geely_ex5_refresh_data
+        name: Refresh
+        icon: mdi:refresh
+        show_state: false
+        tap_action:
+          action: toggle
