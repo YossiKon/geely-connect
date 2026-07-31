@@ -22,18 +22,23 @@ polished setup on top.
 ## ✨ Highlights
 
 - 🔒 **Security-first** — verified TLS plus public-key pinning.
-- 📊 **Full data exposure** — every field the server returns can be shown, not
-  just a curated subset.
-- 🔋 **Efficient polling** with selectable modes (Eco / Normal / Live).
-- 🌍 **Setup choices** — country, tire-pressure unit (PSI / bar / kPa) and
-  language.
+- 📊 **Everything enabled** — all 55 entities are on from the start, no
+  duplicates, nothing to switch on by hand.
+- 🧮 **Computed extras** — charge completion time, range at full charge and
+  efficiency, none of which the car reports itself.
+- 🔋 **Efficient polling** with selectable modes (Eco / Normal / Live),
+  changeable at any time.
+- 🌍 **EU and North-American** backends, detected from the vehicle.
 - 🗣️ **Multi-language** — English, Hebrew, Arabic, Russian, French.
-- 🧩 **Ready-made Blueprints** and long-term statistics / Energy dashboard
-  support.
+- 🖥️ **Ready-made cards, widgets, a four-view dashboard and Blueprints**, all
+  built-in Lovelace cards — no extra HACS frontend packages.
+- 📈 **Long-term statistics** on every numeric entity.
 
 ---
 
 ## 📊 What you can see (sensors)
+
+All of these are created **enabled** — nothing to switch on by hand.
 
 ### Battery & charging
 | Entity | Description |
@@ -44,7 +49,6 @@ polished setup on top.
 | Charger Plug | Binary — cable connected |
 | Time To Full Charge | Minutes remaining while charging |
 | Average Consumption | Energy use (kWh / 100 km) |
-| **Efficiency** | Derived km per kWh *(computed by us)* |
 
 ### Driving & trip
 | Entity | Description |
@@ -74,19 +78,15 @@ Driver seatbelt.
 | 12V Battery / 12V Voltage | Auxiliary battery level & voltage |
 | Days To Service / Distance To Service | Maintenance intervals |
 
-### Location & status
-| Entity | Description |
-|---|---|
-| Location (device tracker) | GPS position on the map (with altitude) |
-| **Connected** | Is the integration reaching the car right now *(ours)* |
-| **Last Updated** | Timestamp of the last successful poll *(ours)* |
+### Location
+Location (device tracker) — GPS position on the map, with altitude.
 
-### 🧮 Computed (not reported by the car)
+### 🧮 Computed — not reported by the car
 | Entity | Description |
 |---|---|
 | **Efficiency** | km per kWh, derived from average consumption |
-| **Charge Complete** | When charging will finish, as a time — not a minute count |
-| **Range At Full Charge** | What the range would be at 100%, so it's comparable week to week |
+| **Charge Complete** | When charging finishes, as a time rather than a minute count — so a notification can fire on it |
+| **Range At Full Charge** | Remaining range extrapolated to 100% at the current efficiency, so it's comparable week to week. Blank below 10% charge, where the estimate is mostly noise |
 | **Connected** | Is the integration reaching the car right now |
 | **Last Updated** | Timestamp of the last successful poll |
 
@@ -131,6 +131,9 @@ profile at setup:
 | 🔋 **Eco** — fewest interruptions | every 90 s | 300 s → 30 min | every 6th cycle | every 12th |
 | ⚖️ **Normal** — balanced | every 30 s | 90 s → 15 min | every 4th cycle | every 6th |
 | ⚡ **Live** — freshest | every 15 s | 45 s → 5 min | every 3rd cycle | every 3rd |
+
+The mode is **not fixed at setup** — change it any time under
+[Configure](#️-changing-settings-later).
 
 Everything is per-mode: the active-polling rate, the parked back-off, the cap,
 and how often secondary/GPS calls run.
@@ -194,6 +197,34 @@ Or manually:
 ### Manual installation
 Copy `custom_components/geely_connect/` into `config/custom_components/` and
 restart.
+
+---
+
+## 🔄 Updating
+
+**You never need to remove and re-add the integration.** Your vehicle, history,
+automations and dashboards all survive an update.
+
+1. HACS → **Geely Connect** → **Update**
+2. **Restart Home Assistant** — always required. Python caches modules it has
+   already imported, so *Reload* on the integration rebuilds the entities from
+   the code already in memory and will not pick up a new version.
+
+Turn on HACS → ⋮ → **Settings** → *Show notification when a new version is
+available* and updates also appear under Settings → **Updates** alongside
+everything else.
+
+### No update showing?
+
+- HACS refreshes repository data on a timer. Force it: HACS → **Geely Connect**
+  → ⋮ → **Update information**, or ⋮ → **Reload data** on the HACS main page.
+- If you installed before the first release existed, HACS is tracking the
+  **branch**, not releases, and has no version to compare against. Fix it once:
+  ⋮ → **Redownload** → pick a version such as `v1.4.0` from the dropdown. Every
+  later release then shows up as a normal update.
+- Conversely, choosing **main** in that same dropdown tracks the branch, so
+  every push is available immediately without waiting for a release — handy
+  while a change is being tested.
 
 ---
 
