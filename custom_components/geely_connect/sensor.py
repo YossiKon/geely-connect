@@ -34,6 +34,7 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as _dt_util
 
@@ -275,6 +276,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
         GeelyLastUpdatedSensor(coordinator, vin, device_name),
         GeelyChargeCompleteSensor(coordinator, vin, device_name),
         GeelyFullRangeSensor(coordinator, vin, device_name),
+        GeelyLastTripSensor(coordinator, vin, device_name),
+        GeelyTripInProgressSensor(coordinator, vin, device_name),
         *(GeelyTireSensor(coordinator, vin, device_name, key, name, path,
                           pressure_unit)
           for key, name, path in _TIRE_CORNERS),
@@ -613,4 +616,140 @@ class GeelyTireSensor(CoordinatorEntity, SensorEntity):
         return {
             unit: round(kpa * factor, digits)
             for unit, (factor, digits) in _PRESSURE_FROM_KPA.items()
+        }
+
+
+def _engine_running(data: dict) -> bool | None:
+    """True while the car is on, None when it has not said.
+
+    The server reports this field in several shapes across firmware, so it
+    goes through the same map the Engine State sensor uses."""
+    raw = _walk(data or {}, (*_BASIC, "engineStatus"))
+    if raw is None:
+        return None
+    mapped = _ENGINE_STATE_MAP.get(raw)
+    if mapped is None and isinstance(raw, str):
+        mapped = _ENGINE_STATE_MAP.get(raw.strip().lower())
+    if mapped is None:
+        return None
+    return mapped == "Running"
+
+
+def _odometer(data: dict) -> float | None:
+    try:
+        km = float(_walk(data or {}, (*_MAINT, "odometer")))
+    except (TypeError, ValueError):
+        return None
+    return km if km > 0 else None
+
+
+class _GeelyTripBase(CoordinatorEntity, SensorEntity, RestoreEntity):
+    """Shared bookkeeping for the two trip sensors.
+
+    The car's own tripMeter1 is the trip meter A on the dash - the driver
+    resets it by hand and it has nothing to do with a single journey, which
+    is why it can read 0 while you are driving. These two work the distance
+    out from the odometer instead: note where it stood when the engine came
+    on, and read it again when the engine goes off.
+
+    State is restored across restarts, so a Home Assistant reboot mid-journey
+    does not lose the trip that was in progress."""
+
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.DISTANCE
+    _attr_native_unit_of_measurement = UnitOfLength.KILOMETERS
+
+    def __init__(self, coordinator, vin: str, device_name: str) -> None:
+        super().__init__(coordinator)
+        self._start_km: float | None = None
+        self._last_trip: float | None = None
+        self._was_running: bool | None = None
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, vin)}, manufacturer="Geely", name=device_name)
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        if (last := await self.async_get_last_state()) is not None:
+            attrs = last.attributes or {}
+            self._start_km = attrs.get("trip_start_odometer")
+            self._was_running = attrs.get("engine_was_running")
+            try:
+                self._last_trip = float(last.state)
+            except (TypeError, ValueError):
+                self._last_trip = None
+
+    def _advance(self) -> None:
+        """Fold the newest poll into the trip bookkeeping.
+
+        Called from both sensors, so whichever updates first does the work
+        and the other sees the same numbers."""
+        data = self.coordinator.data or {}
+        running = _engine_running(data)
+        km = _odometer(data)
+        if running is None or km is None:
+            return                       # nothing to learn from this poll
+        if running and not self._was_running:
+            self._start_km = km          # journey started
+        elif not running and self._was_running and self._start_km is not None:
+            covered = km - self._start_km
+            # A negative or absurd delta means the odometer was misreported,
+            # not that the car drove backwards - keep the previous trip.
+            if 0 <= covered < 2000:
+                self._last_trip = round(covered, 1)
+            self._start_km = None        # journey over
+        self._was_running = running
+
+
+class GeelyLastTripSensor(_GeelyTripBase):
+    """How far the last completed journey went.
+
+    Unknown until the car has been driven once with the integration running -
+    there is no way to learn a journey that finished before we were watching."""
+
+    _attr_icon = "mdi:map-marker-path"
+
+    def __init__(self, coordinator, vin: str, device_name: str) -> None:
+        super().__init__(coordinator, vin, device_name)
+        self._attr_unique_id = f"geely_{vin}_last_trip"
+        self._attr_name = "Last Trip"
+
+    @property
+    def native_value(self):
+        self._advance()
+        return self._last_trip
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            "trip_start_odometer": self._start_km,
+            "engine_was_running": self._was_running,
+        }
+
+
+class GeelyTripInProgressSensor(_GeelyTripBase):
+    """How far the current journey has gone so far. Zero when parked."""
+
+    _attr_icon = "mdi:car-arrow-right"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator, vin: str, device_name: str) -> None:
+        super().__init__(coordinator, vin, device_name)
+        self._attr_unique_id = f"geely_{vin}_trip_in_progress"
+        self._attr_name = "Trip In Progress"
+
+    @property
+    def native_value(self):
+        self._advance()
+        if not self._was_running or self._start_km is None:
+            return 0.0
+        km = _odometer(self.coordinator.data or {})
+        if km is None:
+            return None
+        return round(max(0.0, km - self._start_km), 1)
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            "trip_start_odometer": self._start_km,
+            "engine_was_running": self._was_running,
         }

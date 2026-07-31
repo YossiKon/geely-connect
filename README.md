@@ -54,7 +54,7 @@ All of these are created **enabled** — nothing to switch on by hand.
 | Entity | Description |
 |---|---|
 | Speed / Average Speed | Current & average speed (km/h) |
-| Trip Meter | Last-trip distance (km) |
+| Trip Meter | The car's own trip meter A — the one the driver resets on the dash, not a single journey |
 | Total Mileage | Odometer (km) |
 | Engine State | Off / Running |
 | Park Brake | Engaged / Released |
@@ -111,6 +111,8 @@ Location (device tracker) — GPS position on the map, with altitude.
 | **Efficiency** | km per kWh, derived from average consumption |
 | **Charge Complete** | When charging finishes, as a time rather than a minute count — so a notification can fire on it |
 | **Range At Full Charge** | Remaining range extrapolated to 100% at the current efficiency, so it's comparable week to week. Blank below 10% charge, where the estimate is mostly noise |
+| **Last Trip** | How far the last completed journey went, worked out from the odometer between engine-on and engine-off |
+| **Trip In Progress** | How far the current journey has gone; 0 when parked |
 | **Connected** | Is the integration reaching the car right now |
 | **Last Updated** | Timestamp of the last successful poll |
 
