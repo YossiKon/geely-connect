@@ -62,7 +62,14 @@ views:
               ## {{ b if b not in ['unknown', 'unavailable'] else '--' }} % - {{ r if r not in ['unknown', 'unavailable'] else '--' }} km
               {% if plug == 'Charging' %}Charging now{% elif plug == 'Plugged in' %}Plugged in, not charging{% else %}Running on battery{% endif %} -
               {%- if is_state('lock.my_geely_ex5_doors', 'locked') %} doors locked{% else %} **doors unlocked**{% endif %} -
-              {%- if as_datetime(lu) %} updated {{ relative_time(as_datetime(lu)) }} ago{% else %} no fresh data{% endif %}
+              {#- as_datetime needs the none default: without it any state that is
+                  not a timestamp RAISES and the whole card renders as an error box.
+                  has_value() does not help - it only rules out unknown, it cannot
+                  promise the string parses. A local clock time rather than
+                  relative_time(), which hands back its input unchanged for a future
+                  timestamp and would print a raw UTC datetime mid-sentence. -#}
+              {%- set seen = lu | as_datetime(none) %}
+              {%- if seen %} updated {{ (seen | as_local).strftime('%H:%M') }}{% else %} no fresh data{% endif %}
             grid_options: {columns: 12}
           - type: tile
             entity: sensor.my_geely_ex5_battery

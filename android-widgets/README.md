@@ -26,12 +26,27 @@ the app's **Button widget** and point it at `button.my_geely_ex5_find_car`,
 
 ## What's here
 
-| File | Shows |
-|---|---|
-| `status.jinja` | Lock, battery, range, charging, anything open, data age |
-| `battery.jinja` | Battery and range, with charging progress and finish time |
-| `attention.jinja` | Nothing at all unless something needs you |
-| `one-line.jinja` | A single line, for a narrow 1×1 widget |
+| File | Shows | Fits |
+|---|---|---|
+| **`all-in-one.jinja`** | ⭐ Everything below in one widget | 4×3 |
+| `status.jinja` | Lock, battery, range, charging, anything open, data age | 4×2 |
+| `battery.jinja` | Battery and range, with charging progress and finish time | 2×2 |
+| `attention.jinja` | Nothing at all unless something needs you | 4×1 |
+| `one-line.jinja` | A single line, for a narrow widget | 2×1 |
+
+Start with **`all-in-one.jinja`** — one widget, everything in it:
+
+```
+🔒 Locked · 58% · 247 km
+█████░░░░░
+⚡ Full at 13:46 · in 1h 35m
+✅ All shut
+🛞 RR 26.5 psi · 🔧 service in 12d
+5 min ago · 4646 km total
+```
+
+The warning line only appears when there is something to warn about. Each
+section is independent — on a smaller widget, delete a whole `SECTION` block.
 
 ## Formatting notes
 

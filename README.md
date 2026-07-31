@@ -301,6 +301,13 @@ built-in only:
   interactive tiles, gauge bands, conditional, glance, history graph and a
   templated markdown card — with a comment over each saying which line to change.
 
+### 📱 Home-screen widgets — [`android-widgets/`](android-widgets/)
+Not dashboard cards. These are **Jinja templates** for the companion app's
+**Template widget**, which puts a live line of text on your phone's home screen.
+Pasting card YAML into that field shows you the YAML as text — different thing
+entirely. Start with **`all-in-one.jinja`**: lock, charge bar, charging and its
+finish time, what's open, any warning, and data age, all in one widget.
+
 ### 📑 Single views — [`views/`](views/)
 A **view** is one tab of a dashboard. Each file is a YAML list item starting
 with `- title:`, pasted under the `views:` key via **Edit dashboard → ⋮ → Raw

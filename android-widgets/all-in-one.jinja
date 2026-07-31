@@ -1,0 +1,165 @@
+{#- =====================================================================
+    Geely Connect - ALL-IN-ONE home-screen widget.
+
+    Everything the other templates in this folder show, in one Template
+    widget: lock, charge and range; what charging is doing and when it
+    finishes; anything open, by name; tires, 12V and service; and how
+    old the data is.
+
+    WHERE IT GOES
+      Long-press the home screen -> Widgets -> Home Assistant ->
+      Template. Drop it, pick your server, then paste this WHOLE file
+      into the Template field.
+      This is NOT a dashboard card - do not paste any YAML from cards/
+      in here, and do not paste this into a dashboard.
+
+    BEFORE YOU SAVE
+      Search-replace  my_geely_ex5  with your own entity suffix. Find it
+      under Settings -> Devices & Services -> Geely Connect -> your car;
+      ids look like  sensor.my_geely_ex5_battery .
+
+    SIZE
+      A 4x3 widget at text size 12-13 fits the whole thing. On a smaller
+      widget, delete a SECTION block below - each is marked and they are
+      independent.
+
+    Every reading is guarded: a car that has not reported is described in
+    words rather than printing "unknown", and a timestamp that will not
+    parse never becomes a 1970 clock time. The template calls now(), so
+    Home Assistant re-renders it every minute and the relative times stay
+    honest with no automation behind them.
+    ===================================================================== -#}
+
+{#- ---- shared: say a number of minutes the way a person would ------- -#}
+{%- macro span(mins) -%}
+  {%- if mins < 60 -%}{{ mins }} min
+  {%- elif mins % 60 == 0 -%}{{ mins // 60 }}h
+  {%- else -%}{{ mins // 60 }}h {{ mins % 60 }}m{%- endif -%}
+{%- endmacro -%}
+
+{%- set batt = 'sensor.my_geely_ex5_battery' -%}
+{%- set rng = 'sensor.my_geely_ex5_electric_range' -%}
+{%- set conn = states('sensor.my_geely_ex5_charger_connection') | lower -%}
+{%- set lock = states('lock.my_geely_ex5_doors') -%}
+
+{#- ================= SECTION 1 - headline ========================== -#}
+{%- set lock_txt = {'locked': '🔒 Locked', 'unlocked': '🔓 UNLOCKED',
+    'jammed': '⚠️ JAMMED', 'locking': 'Locking…', 'unlocking': 'Unlocking…',
+    'open': '🔓 Open', 'opening': 'Opening…'}.get(lock, '🔒❓ Lock unknown') -%}
+<b>{{ lock_txt }}</b>
+{%- if has_value(batt) %} · <b>{{ states(batt) | float(0) | round | int }}%</b>{% endif -%}
+{%- if has_value(rng) %} · {{ states(rng) | float(0) | round | int }} km{% endif %}<br>
+
+{#- ================= SECTION 2 - charge bar ======================== -#}
+{%- if has_value(batt) -%}
+  {%- set pct = states(batt) | float(0) | round | int -%}
+  {%- set filled = (pct / 10) | round(0, 'floor') | int -%}
+  {{ '█' * filled }}{{ '░' * (10 - filled) }}<br>
+{%- endif -%}
+
+{#- ================= SECTION 3 - charging ========================== -#}
+{#- as_timestamp with a 0 default, then test the NUMBER. has_value() only
+    rules out unknown; it cannot promise the string parses, and an
+    unparseable one would otherwise print a 1970 clock time. -#}
+{%- set eta = as_timestamp(states('sensor.my_geely_ex5_charge_complete'), 0) -%}
+{%- if 'charging' in conn -%}
+  {%- if eta > 0 -%}
+    {%- set left = [((eta - as_timestamp(now())) / 60) | round | int, 0] | max -%}
+    ⚡ Full at {{ eta | timestamp_custom('%H:%M', true) }}
+    {%- if left > 0 %} · in {{ span(left) | trim }}{% else %} · any moment{% endif -%}
+  {%- elif has_value('sensor.my_geely_ex5_time_to_full_charge') -%}
+    ⚡ Charging · {{ span(states('sensor.my_geely_ex5_time_to_full_charge') | float(0) | round | int) | trim }} to go
+  {%- else -%}
+    ⚡ Charging
+  {%- endif -%}
+{%- elif 'plug' in conn -%}
+  {%- if is_state('switch.my_geely_ex5_scheduled_charging', 'on')
+        and has_value('time.my_geely_ex5_scheduled_charging_start') -%}
+    🔌 Plugged in · starts {{ states('time.my_geely_ex5_scheduled_charging_start')[0:5] }}
+  {%- else -%}
+    🔌 Plugged in, not charging
+  {%- endif -%}
+{%- elif conn == 'disconnected' -%}
+  Not plugged in
+{%- else -%}
+  Charger state unknown
+{%- endif %}<br>
+
+{#- ================= SECTION 4 - what is open ====================== -#}
+{%- set openings = {
+  'binary_sensor.my_geely_ex5_door_driver': 'driver door',
+  'binary_sensor.my_geely_ex5_door_passenger': 'passenger door',
+  'binary_sensor.my_geely_ex5_door_rear_left': 'rear left',
+  'binary_sensor.my_geely_ex5_door_rear_right': 'rear right',
+  'binary_sensor.my_geely_ex5_trunk': 'trunk',
+  'binary_sensor.my_geely_ex5_hood': 'hood'} -%}
+{%- set ns = namespace(open=[], quiet=0, warn=[]) -%}
+{%- for eid, label in openings.items() -%}
+  {%- if is_state(eid, 'on') -%}{%- set ns.open = ns.open + [label] -%}
+  {%- elif not has_value(eid) -%}{%- set ns.quiet = ns.quiet + 1 -%}{%- endif -%}
+{%- endfor -%}
+{%- if ns.open -%}
+  <b>⚠️ Open: {{ ns.open | join(', ') }}</b>
+{%- elif ns.quiet == openings | count -%}
+  No door sensors reporting
+{%- elif ns.quiet -%}
+  Everything reporting is shut
+{%- else -%}
+  ✅ All shut
+{%- endif %}<br>
+
+{#- ================= SECTION 5 - anything else worth knowing ======= -#}
+{#- Tune these three. The tire figure is read from the psi ATTRIBUTE, so
+    it holds whichever unit your sensors display. -#}
+{%- set tire_min_psi = 28 -%}
+{%- set v12_min = 60 -%}
+{%- set svc_days = 30 -%}
+{%- set tires = {
+  'sensor.my_geely_ex5_tire_front_left': 'FL',
+  'sensor.my_geely_ex5_tire_front_right': 'FR',
+  'sensor.my_geely_ex5_tire_rear_left': 'RL',
+  'sensor.my_geely_ex5_tire_rear_right': 'RR'} -%}
+{%- set soft = namespace(list=[]) -%}
+{%- for eid, label in tires.items() -%}
+  {#- p > 0 skips a parked car whose TPMS is asleep, and covers a missing
+      attribute, which float(0) turns into 0. -#}
+  {%- set p = state_attr(eid, 'psi') | float(0) -%}
+  {%- if p > 0 and p < tire_min_psi -%}
+    {%- set soft.list = soft.list + [label ~ ' ' ~ (p | round(1))] -%}
+  {%- endif -%}
+{%- endfor -%}
+{%- if soft.list -%}
+  {%- set ns.warn = ns.warn + ['🛞 ' ~ (soft.list | join(', ')) ~ ' psi'] -%}
+{%- endif -%}
+{#- Fallbacks are always the SAFE end, never 0, so a car that has not
+    reported never reads as empty. -#}
+{%- if has_value('sensor.my_geely_ex5_12v_battery') -%}
+  {%- set v = states('sensor.my_geely_ex5_12v_battery') | float(100) -%}
+  {%- if v > 0 and v < v12_min -%}
+    {%- set ns.warn = ns.warn + ['🪫 12V ' ~ (v | round | int) ~ '%'] -%}
+  {%- endif -%}
+{%- endif -%}
+{#- daysToService goes negative once overdue, so no lower bound - only the
+    wording changes. -#}
+{%- if has_value('sensor.my_geely_ex5_days_to_service') -%}
+  {%- set d = states('sensor.my_geely_ex5_days_to_service') | float(9999) -%}
+  {%- if d < svc_days -%}
+    {%- set ns.warn = ns.warn + ['🔧 service ' ~ (((d | abs | round | int) ~ 'd overdue') if d < 0 else ('in ' ~ (d | round | int) ~ 'd'))] -%}
+  {%- endif -%}
+{%- endif -%}
+{%- if ns.warn %}<b>{{ ns.warn | join(' · ') }}</b><br>{% endif -%}
+
+{#- ================= SECTION 6 - footer ============================ -#}
+{%- set seen = as_timestamp(states('sensor.my_geely_ex5_last_updated'), 0) -%}
+<i>
+{%- if seen > 0 -%}
+  {%- set age = [((as_timestamp(now()) - seen) / 60) | round | int, 0] | max -%}
+  {%- if age < 1 %}just now
+  {%- elif age < 1440 %}{{ span(age) | trim }} ago
+  {%- else %}{{ age // 1440 }}d ago{% endif -%}
+{%- else -%}
+  no update time
+{%- endif -%}
+{%- if has_value('sensor.my_geely_ex5_total_mileage') %} · {{ states('sensor.my_geely_ex5_total_mileage') | float(0) | round | int }} km total{% endif -%}
+{%- if is_state('binary_sensor.my_geely_ex5_connected', 'off') %} · ⚠️ offline{% endif -%}
+</i>
