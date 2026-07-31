@@ -1,0 +1,169 @@
+# =====================================================================
+#  Geely Connect - SCRIPTS FOR HOME-SCREEN BUTTONS
+#
+#  WHY THIS FILE EXISTS
+#    The companion app's Template widget only displays text - it cannot
+#    act. Actions come from the app's *Button* widget, which calls one
+#    action on one entity.
+#    You could point a Button widget straight at lock.lock, but a script
+#    gives it a name and an icon on your home screen, and lets one
+#    button do something a raw action cannot - like the lock TOGGLE
+#    below, or setting a preset and confirming it in one press.
+#
+#  WHERE TO PASTE IT
+#    Append the whole file to  <config>/scripts.yaml , then
+#    Developer tools -> YAML -> "Reload scripts" (no restart needed).
+#    If you keep scripts in the UI instead, create each one via
+#    Settings -> Automations & scenes -> Scripts -> + -> 3-dot menu ->
+#    "Edit in YAML" and paste one block.
+#
+#  BEFORE YOU SAVE
+#    Search-replace  my_geely_ex5  with your own entity suffix (Settings
+#    -> Devices & Services -> Geely Connect -> your car).
+#
+#  THEN, ON YOUR PHONE
+#    Long-press the home screen -> Widgets -> Home Assistant -> Button.
+#    Action:  script.turn_on
+#    Entity:  script.geely_lock  (or whichever below)
+#    Give it the icon and label you want. One widget per button; they
+#    sit happily in a row next to the Template widget.
+# =====================================================================
+
+geely_lock:
+  alias: Geely - Lock
+  icon: mdi:car-door-lock
+  mode: single
+  sequence:
+    - action: lock.lock
+      target:
+        entity_id: lock.my_geely_ex5_doors
+    # The car answers the gateway before it answers the lock, so give it
+    # a moment and then pull fresh state rather than leaving the widget
+    # showing the old one.
+    - delay: "00:00:08"
+    - action: button.press
+      target:
+        entity_id: button.my_geely_ex5_refresh_data
+
+geely_unlock:
+  alias: Geely - Unlock
+  icon: mdi:car-door
+  mode: single
+  sequence:
+    - action: lock.unlock
+      target:
+        entity_id: lock.my_geely_ex5_doors
+    - delay: "00:00:08"
+    - action: button.press
+      target:
+        entity_id: button.my_geely_ex5_refresh_data
+
+geely_lock_toggle:
+  alias: Geely - Lock or unlock
+  icon: mdi:car-key
+  # One button for both, so a single home-screen widget covers locking
+  # and unlocking. It refuses to act on an unknown state rather than
+  # guessing - an unlock you did not mean is the worse mistake.
+  mode: single
+  sequence:
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: lock.my_geely_ex5_doors
+              state: locked
+          sequence:
+            - action: lock.unlock
+              target:
+                entity_id: lock.my_geely_ex5_doors
+        - conditions:
+            - condition: state
+              entity_id: lock.my_geely_ex5_doors
+              state: unlocked
+          sequence:
+            - action: lock.lock
+              target:
+                entity_id: lock.my_geely_ex5_doors
+      default:
+        - action: persistent_notification.create
+          data:
+            title: Geely
+            message: >-
+              Lock state is
+              {{ states('lock.my_geely_ex5_doors') }} - not touching it.
+              Refresh the car and try again.
+    - delay: "00:00:08"
+    - action: button.press
+      target:
+        entity_id: button.my_geely_ex5_refresh_data
+
+geely_rapid_warm:
+  alias: Geely - Rapid warming
+  icon: mdi:fire
+  mode: single
+  sequence:
+    # The preset does the whole job: it switches the climate on and
+    # drives the cabin to the entity's maximum by itself. Do NOT add a
+    # set_temperature step after it - that would overwrite the preset's
+    # own target and defeat the point of "rapid".
+    #
+    # "Rapid Warming" is the exact preset name, capitals and space
+    # included (see const.py). Home Assistant ignores a preset name it
+    # does not recognise WITHOUT complaining, so a lowercase
+    # rapid_warming here would look like it worked and do nothing.
+    - action: climate.set_preset_mode
+      target:
+        entity_id: climate.my_geely_ex5_climate
+      data:
+        preset_mode: Rapid Warming
+    - delay: "00:00:08"
+    - action: button.press
+      target:
+        entity_id: button.my_geely_ex5_refresh_data
+
+geely_rapid_cool:
+  alias: Geely - Rapid cooling
+  icon: mdi:snowflake
+  mode: single
+  sequence:
+    - action: climate.set_preset_mode
+      target:
+        entity_id: climate.my_geely_ex5_climate
+      data:
+        preset_mode: Rapid Cooling
+    - delay: "00:00:08"
+    - action: button.press
+      target:
+        entity_id: button.my_geely_ex5_refresh_data
+
+geely_climate_off:
+  alias: Geely - Climate off
+  icon: mdi:air-conditioner
+  mode: single
+  sequence:
+    - action: climate.set_hvac_mode
+      target:
+        entity_id: climate.my_geely_ex5_climate
+      data:
+        hvac_mode: "off"
+    - delay: "00:00:08"
+    - action: button.press
+      target:
+        entity_id: button.my_geely_ex5_refresh_data
+
+geely_find_car:
+  alias: Geely - Find car
+  icon: mdi:car-search
+  mode: single
+  sequence:
+    - action: button.press
+      target:
+        entity_id: button.my_geely_ex5_find_car
+
+geely_refresh:
+  alias: Geely - Refresh now
+  icon: mdi:refresh
+  mode: single
+  sequence:
+    - action: button.press
+      target:
+        entity_id: button.my_geely_ex5_refresh_data
