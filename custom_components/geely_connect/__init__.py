@@ -565,48 +565,24 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 # entity_registry_enabled_default only applies the first time an entity is
 # registered, so an install that predates that change keeps them switched on;
 # the v3 migration below turns them off once.
-_OFF_BY_DEFAULT_UNIQUE_ID_PATTERNS: tuple[str, ...] = (
-    # Safety-relevant controls - easy to hit by accident from a dashboard.
-    "_cover_sunroof",            # cover.py _key = "sunroof"
-    "_cover_sunshade",           # cover.py _key = "sunshade"
-    "_cover_windows",            # cover.py _key = "windows"
-    "_sw_window_ventilation",    # switch.py
-    # Readings that duplicate a better entity or say little from a 90-second
-    # cloud poll. Mirrors _OFF_BY_DEFAULT_KEYS in sensor.py; unique ids are
-    # "geely_<vin>_<key>", so the leading underscore anchors the match.
-    "_speed", "_engine_state", "_park_brake",
-    "_12v_voltage", "_avg_speed", "_trip_meter",
-    "_tire_pressure_fl", "_tire_pressure_fr",
-    "_tire_pressure_rl", "_tire_pressure_rr",
-    "_days_to_service", "_distance_to_service",
-    "_time_to_full_min",
-    "_bs_driver_seatbelt",
-)
+_INTEGRATION_DISABLED = er.RegistryEntryDisabler.INTEGRATION
 
 
-def _disable_off_by_default_entities(hass: HomeAssistant, entry: ConfigEntry) -> int:
-    """Switch off the entities that are created disabled from v3 onwards.
+def _reenable_integration_disabled_entities(hass: HomeAssistant, entry: ConfigEntry) -> int:
+    """Turn back on everything earlier versions switched off.
 
-    Only ever disables - the user can turn any of them back on, and nothing is
-    removed, so no history is lost."""
+    Only entities the integration itself disabled are touched, so anything the
+    user turned off by hand stays off."""
     registry = er.async_get(hass)
-    disabled = 0
+    restored = 0
     for reg_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
-        if reg_entry.disabled_by is not None:
+        if reg_entry.disabled_by is not _INTEGRATION_DISABLED:
             continue
-        if not any(p in reg_entry.unique_id for p in _OFF_BY_DEFAULT_UNIQUE_ID_PATTERNS):
-            continue
-        registry.async_update_entity(
-            reg_entry.entity_id, disabled_by=er.RegistryEntryDisabler.INTEGRATION
-        )
-        disabled += 1
-    if disabled:
-        _LOGGER.info(
-            "Disabled %d window/sunroof entities that now ship off by default; "
-            "re-enable any you want under Settings -> Devices & Services -> "
-            "Geely Connect -> Entities", disabled,
-        )
-    return disabled
+        registry.async_update_entity(reg_entry.entity_id, disabled_by=None)
+        restored += 1
+    if restored:
+        _LOGGER.info("Re-enabled %d entities that earlier versions had switched off", restored)
+    return restored
 
 
 def _purge_raw_exposure_entities(hass: HomeAssistant, entry: ConfigEntry) -> int:
@@ -639,10 +615,12 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     window-ventilation entities, which now ship disabled because opening them
     by accident from a dashboard leaves the car exposed. v3 -> v4: clear the
     ~180 auto-generated full-exposure sensors, now opt-in under Configure.
-    v4 -> v5: switch off the readings that duplicate a better entity or say
-    little from a cloud poll, leaving a core set on. Everything else keeps
+    v4 -> v6: turn every entity back on - the useful set is now everything the
+    car reports plus the computed extras, with the duplicated aggregates
+    removed rather than hidden. Only entities the integration disabled are
+    restored, so anything switched off by hand stays off. Everything else keeps
     working; missing fields fall back to safe defaults."""
-    if entry.version >= 5:
+    if entry.version >= 6:
         return True
 
     new_data = dict(entry.data)
@@ -653,8 +631,8 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             new_data["device_idfa"] = idfa
             new_data["device_idfv"] = idfv
 
-    _disable_off_by_default_entities(hass, entry)
+    _reenable_integration_disabled_entities(hass, entry)
     _purge_raw_exposure_entities(hass, entry)
-    hass.config_entries.async_update_entry(entry, data=new_data, version=5)
-    _LOGGER.info("Migrated geely_connect entry %s to v5", entry.entry_id)
+    hass.config_entries.async_update_entry(entry, data=new_data, version=6)
+    _LOGGER.info("Migrated geely_connect entry %s to v6", entry.entry_id)
     return True

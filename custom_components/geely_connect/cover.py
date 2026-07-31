@@ -54,11 +54,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
 
 
 class _BaseGeelyCover(CoordinatorEntity, CoverEntity):
-    # Off by default. Opening a window, the sunroof or the sunshade from a
-    # dashboard is easy to do by accident and leaves the car exposed to
-    # weather and theft, so these are opt-in: enable the ones you want in
-    # Settings -> Devices & Services -> Geely Connect -> Entities.
-    _attr_entity_registry_enabled_default = False
     _attr_has_entity_name = True
     _attr_supported_features = CoverEntityFeature.OPEN | CoverEntityFeature.CLOSE
     _target: str = ""   # "sunshade" or "window"

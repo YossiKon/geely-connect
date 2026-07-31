@@ -39,10 +39,6 @@ _ICONS: dict[str, str] = {
 }
 
 
-# Off by default: whether the driver had their seatbelt on is not
-# actionable from a phone, and it only updates once a poll.
-_OFF_BY_DEFAULT_BINARY_KEYS: set[str] = {"driver_seatbelt"}
-
 SPECS: tuple[tuple[str, str, tuple[str, ...], BinarySensorDeviceClass | None, tuple[Any, ...]], ...] = (
     # All four doors prefixed "Door" so they group together in HA's
     # alphabetical device-page list. Same for entity_id keys.
@@ -132,8 +128,6 @@ class GeelyBinarySensor(CoordinatorEntity, BinarySensorEntity):
         self._on_values = on_values
         self._attr_unique_id = f"geely_{vin}_bs_{key}"
         self._attr_name = friendly_name
-        if key in _OFF_BY_DEFAULT_BINARY_KEYS:
-            self._attr_entity_registry_enabled_default = False
         if device_class is not None:
             self._attr_device_class = device_class
         icon = _ICONS.get(key)

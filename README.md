@@ -86,8 +86,7 @@ Driver seatbelt.
 |---|---|
 | **Efficiency** | km per kWh, derived from average consumption |
 | **Charge Complete** | When charging will finish, as a time — not a minute count |
-| **Lowest Tire Pressure** | The lowest of the four, so one alert covers all; attributes name the corner |
-| **Service Due** | The next service as a date, from the days-remaining counter |
+| **Range At Full Charge** | What the range would be at 100%, so it's comparable week to week |
 | **Connected** | Is the integration reaching the car right now |
 | **Last Updated** | Timestamp of the last successful poll |
 
@@ -379,25 +378,17 @@ existing tire sensors, so history is kept rather than restarting.
 
 ### Which entities appear
 
-**38 entities are on by default** — the ones you'd actually look at or press:
-battery, range, odometer, both temperatures, charger status, efficiency, charge
-complete, lowest tire pressure, service due, every door plus trunk and hood, the
-lock, climate, charging and scheduled charging, defrost, G-Clean, parking
-comfort, the seat heat and vent selects, find car, unlock trunk, refresh, and
-the location tracker.
+**All 55 are on from the start** — nothing is hidden and nothing needs enabling.
+Everything the car reports, plus the computed extras above.
 
-**18 more are created but switched off.** Two reasons:
+The only thing not created is the raw full-exposure pass (see below), because
+those are duplicates of the curated entities by definition. Two aggregates that
+restated entities already on the list — a "lowest tire pressure" and a "service
+due" date — were removed rather than shipped alongside the four pressures and
+the two service counters.
 
-- *Safety* — the window, sunroof and sunshade covers and the window-ventilation
-  switch are easy to hit by accident and leave the car exposed.
-- *Noise* — readings that duplicate a better entity (12V voltage vs 12V
-  percentage; the four corner pressures vs Lowest Tire Pressure; days and
-  distance to service vs Service Due) or that say little when polled every 90
-  seconds (speed, engine state, park brake, trip meter, average speed, driver
-  seatbelt).
-
-Nothing is deleted — turn on whichever you want under **Entities** on the device
-page.
+> The window, sunroof and sunshade controls are live. They are ordinary
+> dashboard controls, so put them somewhere you won't hit them by accident.
 
 ---
 

@@ -439,9 +439,6 @@ class GeelyWindowVentilationSwitch(CoordinatorEntity, SwitchEntity):
     """Cracks all four windows for fresh air. Verified ON via
     `RWS_2 target=ventilate`. OFF closes windows via `target=window` stop."""
 
-    # Opens the windows. Off by default for the same reason as the cover
-    # entities - enable it deliberately if you want it on a dashboard.
-    _attr_entity_registry_enabled_default = False
     _attr_has_entity_name = True
     _attr_icon = "mdi:car-door"
 
