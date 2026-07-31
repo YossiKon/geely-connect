@@ -36,6 +36,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .api import GeelyControlError
 from .const import DOMAIN
+from .helpers import truthy as _truthy, schedule_refresh
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -54,14 +55,12 @@ def _fmt_hhmm(t: dtime) -> str:
     return f"{t.hour:02d}:{t.minute:02d}"
 
 
-def _truthy(v: Any) -> bool:
-    return str(v).lower() in ("1", "true", "yes")
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entities: AddEntitiesCallback) -> None:
     bundle = hass.data[DOMAIN][entry.entry_id]
     caps = bundle.get("capabilities") or {}
-    if caps and not caps.get("scheduled_charging.enabled", True) and not caps.get("charging.enabled", True):
+    if not caps.get("scheduled_charging.enabled", True) and not caps.get("charging.enabled", True):
         _LOGGER.info("Capability says scheduled charging not supported - skipping time entities")
         return
     add_entities([
@@ -153,13 +152,6 @@ class GeelyScheduledChargingTime(CoordinatorEntity, TimeEntity):
             data.setdefault("_scheduled_charging", {})[self._field] = _fmt_hhmm(value)
         self.async_write_ha_state()
 
-        async def delayed_refresh():
-            # Server takes about 30s to propagate. Refresh at 15, 35,
-            # 55s so the UI catches up as soon as the real state lands.
-            await asyncio.sleep(15)
-            await self.coordinator.async_request_refresh()
-            await asyncio.sleep(20)
-            await self.coordinator.async_request_refresh()
-            await asyncio.sleep(20)
-            await self.coordinator.async_request_refresh()
-        self._hass.async_create_task(delayed_refresh())
+        # Server takes about 30s to propagate, so refresh at 15, 35 and 55s.
+        # Delays are relative.
+        schedule_refresh(self._hass, self.coordinator, 15, 20, 20)

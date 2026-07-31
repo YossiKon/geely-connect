@@ -44,6 +44,7 @@ from .const import (
     DEFAULT_PRESSURE_UNIT,
     DOMAIN,
 )
+from .helpers import walk as _walk
 
 # Keys that represent a tire pressure (raw value is kPa; converted per user unit).
 _TIRE_KEYS = {"tire_pressure_fl", "tire_pressure_fr", "tire_pressure_rl", "tire_pressure_rr"}
@@ -185,15 +186,6 @@ _DIAGNOSTIC_KEYS: set[str] = {
 }
 
 
-def _walk(d: Any, path: tuple[str, ...]) -> Any:
-    cur = d
-    for key in path:
-        if not isinstance(cur, dict):
-            return None
-        cur = cur.get(key)
-        if cur is None:
-            return None
-    return cur
 
 
 def _coerce(v: Any, kind: str, value_map: dict | None = None) -> Any:
@@ -214,9 +206,6 @@ def _coerce(v: Any, kind: str, value_map: dict | None = None) -> Any:
 # Paths already covered by a curated sensor above — skip them in the dynamic
 # full-exposure pass so we don't create duplicates.
 _CURATED_PATHS: set[str] = {".".join(spec[2]) for spec in SENSOR_SPECS}
-
-# Internal keys we merge into the status dict ourselves (not from the car).
-_SKIP_TOP_KEYS: set[str] = set()
 
 
 _MAX_FLATTEN_DEPTH = 12   # deeper than any real status payload nests

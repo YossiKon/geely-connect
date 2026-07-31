@@ -28,7 +28,6 @@
     },
     "error": {
       "send_code_failed": "Échec de l'envoi du code. Réessayez.",
-      "captcha_failed": "Erreur du résolveur de captcha — veuillez réessayer.",
       "invalid_code": "Code refusé (code à usage unique).",
       "no_vehicles": "Connexion réussie mais aucun véhicule trouvé.",
       "unknown": "Une erreur s'est produite. Consultez les journaux."

@@ -24,6 +24,7 @@ from . import api as geely_api
 from .api import GeelyApi, GeelyAuthError, GeelyControlError, GeelyTLSPinError
 from .const import (
     CLIENT_ID,
+    VEHICLE_SERIES,
     CONF_COUNTRY_CODE,
     CONF_CERT_PATH,
     CONF_CIDPSSO_TOKEN,
@@ -285,7 +286,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     series_code = (
         d.get(CONF_VEHICLE_MODEL_CODE)
         or d.get(CONF_VEHICLE_SERIES)
-        or "E245-J1"
+        or VEHICLE_SERIES
     )
     # Entries created before regions were tracked carry no CONF_REGION and
     # resolve to EU, which is the backend they were provisioned against.

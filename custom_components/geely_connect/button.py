@@ -56,7 +56,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
 
     entities: list[ButtonEntity] = []
     for key, name, icon, sid, params, flag in SIMPLE_BUTTONS:
-        if caps and flag and not caps.get(flag, True):
+        if flag and not caps.get(flag, True):
             _LOGGER.debug("button %s skipped (capability flag %s=False)", key, flag)
             continue
         entities.append(GeelyTelematicsButton(hass, bundle, key, name, icon, sid, params))

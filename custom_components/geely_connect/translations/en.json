@@ -28,7 +28,6 @@
     },
     "error": {
       "send_code_failed": "Failed to send the email code. Try again in a minute.",
-      "captcha_failed": "Captcha solver hit an error - please retry.",
       "invalid_code": "That code wasn't accepted. It may have expired (codes are single-use).",
       "no_vehicles": "Login succeeded but no vehicles were found on this account.",
       "unknown": "Something went wrong. Check the logs."

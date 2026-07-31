@@ -25,20 +25,12 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
+from .helpers import walk as _walk
 
 _POS_PATH = ("vehicleStatus", "basicVehicleStatus", "position")
 _ARC_MS_PER_DEGREE = 3_600_000.0
 
 
-def _walk(d: Any, path: tuple[str, ...]) -> Any:
-    cur = d
-    for key in path:
-        if not isinstance(cur, dict):
-            return None
-        cur = cur.get(key)
-        if cur is None:
-            return None
-    return cur
 
 
 def _decode_coord(raw: Any, *, max_abs: float) -> float | None:

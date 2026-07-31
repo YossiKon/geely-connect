@@ -20,6 +20,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
+from .helpers import walk as _walk
 
 _SAFE = ("vehicleStatus", "additionalVehicleStatus", "drivingSafetyStatus")
 _CLIM = ("vehicleStatus", "additionalVehicleStatus", "climateStatus")
@@ -66,15 +67,6 @@ SPECS: tuple[tuple[str, str, tuple[str, ...], BinarySensorDeviceClass | None, tu
 # HA purges them on next reload.
 
 
-def _walk(d: Any, path: tuple[str, ...]) -> Any:
-    cur = d
-    for key in path:
-        if not isinstance(cur, dict):
-            return None
-        cur = cur.get(key)
-        if cur is None:
-            return None
-    return cur
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entities: AddEntitiesCallback) -> None:

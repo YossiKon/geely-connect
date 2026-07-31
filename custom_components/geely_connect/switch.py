@@ -41,6 +41,9 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     DOMAIN,
+    SERVICE_CHARGING_START_PARAMS,
+    SERVICE_CHARGING_STOP_PARAMS,
+    SERVICE_WINDOW_VENT_PARAMS,
     RCE_KEY_CONDITIONER,
     RCE_KEY_LEVEL,
     RCE_VAL_DEFROST,
@@ -52,6 +55,7 @@ from .const import (
     SERVICE_PARKING_COMFORT,
     SERVICE_WINDOW,
 )
+from .helpers import walk as _walk, windows_open, schedule_refresh
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -61,18 +65,16 @@ _EV_PATH      = ("vehicleStatus", "additionalVehicleStatus", "electricVehicleSta
 _STATE_PATH   = ("_state",)
 
 
-def _walk(d: Any, path: tuple[str, ...]) -> Any:
-    cur = d
-    for k in path:
-        if not isinstance(cur, dict):
-            return None
-        cur = cur.get(k)
-        if cur is None:
-            return None
-    return cur
 
 
-def _truthy(v: Any, on_values: tuple[Any, ...] = ("1", 1, "true", "True", True)) -> bool:
+def _state_in(v: Any, on_values: tuple[Any, ...]) -> bool:
+    """Membership test against this entity's own ON values.
+
+    NOT helpers.truthy, which accepts "yes"/"TRUE" for every caller. Each
+    switch here declares exactly which raw values mean on, so the two must
+    stay apart; naming them differently is what stops them being merged
+    later. The old default was never used - all call sites pass on_values.
+    """
     return v in on_values
 
 
@@ -93,8 +95,8 @@ SWITCH_DEFS: list[tuple] = [
     (
         "charging", "Charging", "mdi:ev-station",
         SERVICE_CHARGING,
-        [{"key": "operation", "value": "1"}, {"key": "rcs.restart", "value": "1"}],
-        [{"key": "operation", "value": "0"}, {"key": "rcs.terminate", "value": "1"}],
+        SERVICE_CHARGING_START_PARAMS,
+        SERVICE_CHARGING_STOP_PARAMS,
         "start", "stop",
         (*_EV_PATH, "statusOfChargerConnection"),
         ("3", 3),
@@ -111,17 +113,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
     entities: list[SwitchEntity] = []
     for defn in SWITCH_DEFS:
         flag = defn[-1]
-        if caps and flag and not caps.get(flag, True):
+        if flag and not caps.get(flag, True):
             _LOGGER.debug("switch %s skipped (capability flag %s=False)", defn[0], flag)
             continue
         entities.append(GeelySwitch(hass, bundle, *defn[:-1]))
-    if not caps or caps.get("windows.enabled", True):
+    if caps.get("windows.enabled", True):
         entities.append(GeelyWindowVentilationSwitch(hass, bundle))
-    if not caps or caps.get("gclean.enabled", True):
+    if caps.get("gclean.enabled", True):
         entities.append(GeelyGCleanSwitch(hass, bundle))
-    if not caps or caps.get("ac.enabled", True) and caps.get("defrost.enabled", True):
+    if caps.get("ac.enabled", True) and caps.get("defrost.enabled", True):
         entities.append(GeelyDefrostSwitch(hass, bundle))
-    if not caps or caps.get("scheduled_charging.enabled", True) or caps.get("charging.enabled", True):
+    if caps.get("scheduled_charging.enabled", True) or caps.get("charging.enabled", True):
         entities.append(GeelyScheduledChargingSwitch(hass, bundle))
     add_entities(entities)
 
@@ -160,7 +162,7 @@ class GeelySwitch(CoordinatorEntity, SwitchEntity):
         v = _walk(self.coordinator.data or {}, self._state_path)
         if v is None:
             return None
-        return _truthy(v, self._on_when_in)
+        return _state_in(v, self._on_when_in)
 
     async def async_turn_on(self, **_: Any) -> None:
         await self._fire(self._on_params, self._command_on)
@@ -181,10 +183,7 @@ class GeelySwitch(CoordinatorEntity, SwitchEntity):
         _LOGGER.debug("Geely switch %s %s params=%s response=%s",
                       self._service_id, command, params, resp)
 
-        async def delayed_refresh():
-            await asyncio.sleep(8)
-            await self.coordinator.async_request_refresh()
-        self._hass.async_create_task(delayed_refresh())
+        schedule_refresh(self._hass, self.coordinator, 8)
 
 
 class GeelyGCleanSwitch(CoordinatorEntity, SwitchEntity):
@@ -222,7 +221,7 @@ class GeelyGCleanSwitch(CoordinatorEntity, SwitchEntity):
         v = _walk(self.coordinator.data or {}, (*_CLIMATE_PATH, "airBlowerActive"))
         if v is None:
             return None
-        return _truthy(v, ("true", "True", True, "1", 1))
+        return _state_in(v, ("true", "True", True, "1", 1))
 
     @property
     def available(self) -> bool:
@@ -230,10 +229,10 @@ class GeelyGCleanSwitch(CoordinatorEntity, SwitchEntity):
             return False
         cs = _walk(self.coordinator.data or {}, _CLIMATE_PATH) or {}
         # Disable when AC pre-cond is active.
-        if _truthy(cs.get("preClimateActive"), ("true", "True", True, "1", 1)):
+        if _state_in(cs.get("preClimateActive"), ("true", "True", True, "1", 1)):
             return False
         # Disable when defrost is active.
-        if _truthy(cs.get("defrost"), ("true", "True", True, "1", 1)):
+        if _state_in(cs.get("defrost"), ("true", "True", True, "1", 1)):
             return False
         return True
 
@@ -256,10 +255,7 @@ class GeelyGCleanSwitch(CoordinatorEntity, SwitchEntity):
             raise HomeAssistantError(f"Geely G-Clean failure: {e}") from e
         _LOGGER.debug("Geely g-clean %s response=%s", command, resp)
 
-        async def delayed_refresh():
-            await asyncio.sleep(8)
-            await self.coordinator.async_request_refresh()
-        self._hass.async_create_task(delayed_refresh())
+        schedule_refresh(self._hass, self.coordinator, 8)
 
 
 class GeelyDefrostSwitch(CoordinatorEntity, SwitchEntity):
@@ -291,7 +287,7 @@ class GeelyDefrostSwitch(CoordinatorEntity, SwitchEntity):
         v = _walk(self.coordinator.data or {}, (*_CLIMATE_PATH, "defrost"))
         if v is None:
             return None
-        return _truthy(v, ("true", "True", True, "1", 1))
+        return _state_in(v, ("true", "True", True, "1", 1))
 
     async def async_turn_on(self, **_: Any) -> None:
         await self._fire("start", 90)
@@ -315,10 +311,7 @@ class GeelyDefrostSwitch(CoordinatorEntity, SwitchEntity):
             raise HomeAssistantError(f"Geely Defrost failure: {e}") from e
         _LOGGER.debug("Geely defrost %s response=%s", command, resp)
 
-        async def delayed_refresh():
-            await asyncio.sleep(8)
-            await self.coordinator.async_request_refresh()
-        self._hass.async_create_task(delayed_refresh())
+        schedule_refresh(self._hass, self.coordinator, 8)
 
 
 class GeelyScheduledChargingSwitch(CoordinatorEntity, SwitchEntity):
@@ -374,7 +367,7 @@ class GeelyScheduledChargingSwitch(CoordinatorEntity, SwitchEntity):
         # missing, the schedule is OFF, not "unknown".
         if v is None:
             return False
-        return _truthy(v, ("true", "True", True, "1", 1))
+        return _state_in(v, ("true", "True", True, "1", 1))
 
     async def async_turn_on(self, **_: Any) -> None:
         await self._fire("start")
@@ -422,17 +415,10 @@ class GeelyScheduledChargingSwitch(CoordinatorEntity, SwitchEntity):
             sched["bcCycleActive"] = "true" if command == "start" else "false"
         self.async_write_ha_state()
 
-        async def delayed_refresh():
-            # First peek at 15s. Real server confirmation usually lands
-            # at 30 to 35s, but doing it twice catches it as soon as
-            # possible without waiting the full 90s coordinator interval.
-            await asyncio.sleep(15)
-            await self.coordinator.async_request_refresh()
-            await asyncio.sleep(20)
-            await self.coordinator.async_request_refresh()
-            await asyncio.sleep(20)
-            await self.coordinator.async_request_refresh()
-        self._hass.async_create_task(delayed_refresh())
+        # First peek at 15s. Real confirmation usually lands at 30-35s, so
+        # three tries catch it as soon as it appears without waiting out the
+        # full coordinator interval. Delays are relative: 15, 35, 55.
+        schedule_refresh(self._hass, self.coordinator, 15, 20, 20)
 
 
 class GeelyWindowVentilationSwitch(CoordinatorEntity, SwitchEntity):
@@ -457,20 +443,9 @@ class GeelyWindowVentilationSwitch(CoordinatorEntity, SwitchEntity):
 
     @property
     def is_on(self) -> bool | None:
-        climate = _walk(self.coordinator.data or {}, _CLIMATE_PATH) or {}
-        any_open = False
-        any_seen = False
-        for w in ("Driver", "Passenger", "DriverRear", "PassengerRear"):
-            v = climate.get(f"winStatus{w}")
-            if v is None:
-                continue
-            any_seen = True
-            if str(v) != "2":
-                any_open = True
-                break
-        if not any_seen:
-            return None
-        return any_open
+        # Ventilation is "on" whenever any window is off its closed stop -
+        # the same four fields the windows cover reads, uninverted.
+        return windows_open(self.coordinator.data)
 
     async def async_turn_on(self, **_: Any) -> None:
         await self._fire("start", [{"key": "target", "value": "ventilate"}])
@@ -491,7 +466,4 @@ class GeelyWindowVentilationSwitch(CoordinatorEntity, SwitchEntity):
         _LOGGER.debug("Geely vent switch %s params=%s response=%s",
                       command, params, resp)
 
-        async def delayed_refresh():
-            await asyncio.sleep(8)
-            await self.coordinator.async_request_refresh()
-        self._hass.async_create_task(delayed_refresh())
+        schedule_refresh(self._hass, self.coordinator, 8)

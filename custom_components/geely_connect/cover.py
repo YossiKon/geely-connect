@@ -27,21 +27,13 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .api import GeelyControlError
 from .const import DOMAIN, SERVICE_WINDOW
+from .helpers import walk as _walk, windows_open, schedule_refresh
 
 _LOGGER = logging.getLogger(__name__)
 
 _CLIMATE_PATH = ("vehicleStatus", "additionalVehicleStatus", "climateStatus")
 
 
-def _walk(d: Any, path: tuple[str, ...]) -> Any:
-    cur = d
-    for k in path:
-        if not isinstance(cur, dict):
-            return None
-        cur = cur.get(k)
-        if cur is None:
-            return None
-    return cur
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entities: AddEntitiesCallback) -> None:
@@ -95,10 +87,7 @@ class _BaseGeelyCover(CoordinatorEntity, CoverEntity):
             raise HomeAssistantError(f"Geely cover failure: {e}") from e
         _LOGGER.debug("Geely cover %s %s response=%s", self._target, command, resp)
 
-        async def delayed_refresh():
-            await asyncio.sleep(8)
-            await self.coordinator.async_request_refresh()
-        self._hass.async_create_task(delayed_refresh())
+        schedule_refresh(self._hass, self.coordinator, 8)
 
 
 class GeelySunshade(_BaseGeelyCover):
@@ -142,18 +131,8 @@ class GeelyWindows(_BaseGeelyCover):
 
     @property
     def is_closed(self) -> bool | None:
-        climate = _walk(self.coordinator.data or {}, _CLIMATE_PATH) or {}
-        # winStatus<Door>: "2" = closed, others = some open.
-        # A car that reports none of these is unknown, NOT open - saying open
-        # would leave a permanently-open window on the device page and fire
-        # every "left open" automation forever. Same guard the ventilation
-        # switch uses in switch.py.
-        any_seen = False
-        for w in ("Driver", "Passenger", "DriverRear", "PassengerRear"):
-            v = climate.get(f"winStatus{w}")
-            if v is None:
-                continue
-            any_seen = True
-            if str(v) != "2":
-                return False
-        return True if any_seen else None
+        # Exact complement of the ventilation switch, which reads the same
+        # four fields - see helpers.windows_open for why a car that reports
+        # none of them is unknown rather than open.
+        opened = windows_open(self.coordinator.data)
+        return None if opened is None else not opened

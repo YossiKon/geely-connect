@@ -66,6 +66,7 @@ from .const import (
     RCE_VAL_DEFROST,
     SERVICE_CLIMATE,
 )
+from .helpers import walk as _walk, truthy as _truthy, schedule_refresh
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -77,19 +78,8 @@ _PRECLIMATE_PATH    = (*_CLIMATE_PATH, "preClimateActive")
 _DEFROST_PATH       = (*_CLIMATE_PATH, "defrost")
 
 
-def _walk(d: Any, path: tuple[str, ...]) -> Any:
-    cur = d
-    for k in path:
-        if not isinstance(cur, dict):
-            return None
-        cur = cur.get(k)
-        if cur is None:
-            return None
-    return cur
 
 
-def _truthy(v: Any) -> bool:
-    return str(v).lower() in ("1", "true", "yes")
 
 
 def _to_float(v: Any) -> float | None:
@@ -104,7 +94,7 @@ def _to_float(v: Any) -> float | None:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entities: AddEntitiesCallback) -> None:
     bundle = hass.data[DOMAIN][entry.entry_id]
     caps = bundle.get("capabilities") or {}
-    if caps and not caps.get("ac.enabled", True):
+    if not caps.get("ac.enabled", True):
         _LOGGER.info("Capability says AC not supported on this trim - skipping climate entity")
         return
     add_entities([GeelyClimate(hass, bundle)])
@@ -378,10 +368,7 @@ class GeelyClimate(CoordinatorEntity, ClimateEntity, RestoreEntity):
         _LOGGER.debug("Geely rapid %s response=%s",
                       "warming" if warming else "cooling", resp)
 
-        async def delayed_refresh():
-            await asyncio.sleep(8)
-            await self.coordinator.async_request_refresh()
-        self._hass.async_create_task(delayed_refresh())
+        schedule_refresh(self._hass, self.coordinator, 8)
         self.async_write_ha_state()
 
     # ---- helpers ----
@@ -407,10 +394,7 @@ class GeelyClimate(CoordinatorEntity, ClimateEntity, RestoreEntity):
             command, params, duration, resp,
         )
 
-        async def delayed_refresh():
-            await asyncio.sleep(8)
-            await self.coordinator.async_request_refresh()
-        self._hass.async_create_task(delayed_refresh())
+        schedule_refresh(self._hass, self.coordinator, 8)
 
 
 def _fmt_temp(t: float) -> str:

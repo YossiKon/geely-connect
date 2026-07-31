@@ -74,13 +74,12 @@ _LOGGER = logging.getLogger(__name__)
 _VIN_RE = re.compile(r"^[A-Za-z0-9]{8,20}$")
 _USER_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
-# Unique-id suffixes of the four tire-pressure sensors, and the mapping from
-# our setup-time codes to Home Assistant's pressure constants. Both mirror
-# sensor.py; kept here so the options flow does not import a platform module.
+# Unique-id suffixes of the four tire-pressure sensors. Mirrors sensor.py,
+# kept here so the options flow does not import a platform module. The unit
+# codes ARE Home Assistant's pressure strings, so no translation is needed.
 _TIRE_UNIQUE_ID_KEYS = (
     "tire_pressure_fl", "tire_pressure_fr", "tire_pressure_rl", "tire_pressure_rr",
 )
-_PRESSURE_UNIT_TO_HA: dict[str, str] = {"psi": "psi", "bar": "bar", "kPa": "kPa"}
 
 
 def _valid_vin(vin: Any) -> bool:
@@ -433,10 +432,9 @@ def _apply_pressure_unit(hass, entry: config_entries.ConfigEntry, unit: str) -> 
     Same mechanism the per-entity settings dialog uses, so history is kept and
     Home Assistant converts the stored kPa readings itself."""
     registry = er.async_get(hass)
-    ha_unit = _PRESSURE_UNIT_TO_HA.get(unit, unit)
     for reg_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
         if not any(reg_entry.unique_id.endswith(f"_{k}") for k in _TIRE_UNIQUE_ID_KEYS):
             continue
         registry.async_update_entity_options(
-            reg_entry.entity_id, "sensor", {"unit_of_measurement": ha_unit}
+            reg_entry.entity_id, "sensor", {"unit_of_measurement": unit}
         )

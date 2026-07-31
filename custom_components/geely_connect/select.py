@@ -62,6 +62,7 @@ from .const import (
     SEAT_REAR_RIGHT,
     SERVICE_CLIMATE,
 )
+from .helpers import walk as _walk, schedule_refresh
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -83,15 +84,6 @@ SEAT_DEFS: list[tuple] = [
 ]
 
 
-def _walk(d: Any, path: tuple[str, ...]) -> Any:
-    cur = d
-    for k in path:
-        if not isinstance(cur, dict):
-            return None
-        cur = cur.get(k)
-        if cur is None:
-            return None
-    return cur
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entities: AddEntitiesCallback) -> None:
@@ -237,9 +229,4 @@ class GeelySeatLevel(CoordinatorEntity, SelectEntity):
 
         # Delayed refresh + a follow-up at 25s in case the first poll
         # caught the still-stale server state.
-        async def delayed_refresh():
-            await asyncio.sleep(8)
-            await self.coordinator.async_request_refresh()
-            await asyncio.sleep(17)
-            await self.coordinator.async_request_refresh()
-        self._hass.async_create_task(delayed_refresh())
+        schedule_refresh(self._hass, self.coordinator, 8, 17)

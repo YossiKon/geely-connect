@@ -311,10 +311,6 @@ def _pinning_ctx() -> ssl.SSLContext:
     return ctx
 
 
-# Back-compat alias (older references to the private ctx helper).
-_legacy_ctx = _strict_ctx
-
-
 def _spki_sha256_b64(der_cert: bytes) -> str:
     """SHA-256 of the certificate's SubjectPublicKeyInfo, base64. This is a
     key pin, not a cert pin, so it survives routine certificate renewals

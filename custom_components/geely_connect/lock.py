@@ -42,6 +42,7 @@ from .const import (
     SERVICE_LOCK_PARAMS,
     SERVICE_UNLOCK,
 )
+from .helpers import walk as _walk, schedule_refresh
 
 SERVICE_UNLOCK_PARAMS = SERVICE_LOCK_PARAMS
 
@@ -58,15 +59,6 @@ _LOCK_STATE_PATH = (
 _TRANSITION_TIMEOUT_S = 12.0
 
 
-def _walk(d: Any, path: tuple[str, ...]) -> Any:
-    cur = d
-    for key in path:
-        if not isinstance(cur, dict):
-            return None
-        cur = cur.get(key)
-        if cur is None:
-            return None
-    return cur
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entities: AddEntitiesCallback) -> None:
@@ -159,10 +151,9 @@ class GeelyLock(CoordinatorEntity, LockEntity):
         self._pending_started_at = time.time()
         self.async_write_ha_state()
         # Refresh after the server has had time to update telemetry.
-        async def delayed_refresh():
-            await asyncio.sleep(8)
-            await self.coordinator.async_request_refresh()
+        def _clear_optimistic() -> None:
             # Drop the optimistic flag once the real state should be in.
             self._pending_target_locked = None
             self.async_write_ha_state()
-        self._hass.async_create_task(delayed_refresh())
+
+        schedule_refresh(self._hass, self.coordinator, 8, after=_clear_optimistic)

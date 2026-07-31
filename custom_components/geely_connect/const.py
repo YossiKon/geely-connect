@@ -13,11 +13,6 @@ Global app's network calls captured live via OkHttp interception.
 
 DOMAIN = "geely_connect"
 
-# App-level credentials - same across all users on the EU region. Kept as
-# module constants for backwards compatibility; REGIONS below is the source of
-# truth and EU resolves to exactly these values.
-APP_ID     = "GEELYE245"
-APP_SECRET = "48d6fff3ea19447bbf6f3ed76a608ff9"
 
 # ---------------------------------------------------------------------------
 # Regional backends
@@ -61,11 +56,9 @@ DEFAULT_REGION = "EU"
 # Vehicle / client metadata sent in headers during control commands.
 CLIENT_ID      = "OOGLE0000APPE64ARM64264T31485278"
 VEHICLE_SERIES = "E245-J1"
-VEHICLE_MODEL  = "E245-J1"
 
 # Polling cadence
 SCAN_INTERVAL_SECONDS = 90
-JWT_REFRESH_SECONDS = 6500   # JWT lasts 7200s - refresh a bit early
 
 # ConfigEntry data keys
 CONF_EMAIL              = "email"
@@ -255,7 +248,6 @@ SERVICE_GCLEAN_PARAMS   = [{"key": "rcc.ventilation", "value": "cabin"}]
 SERVICE_GCLEAN_DURATION = 6
 
 # --- Engine pre-conditioning (verified earlier; not used by Android app) ---
-SERVICE_CLIMATE_ENGINE = "RES"
 
 # --- Parking Comfort (UNVERIFIED on this trim) ---
 SERVICE_PARKING_COMFORT = "RSM"
@@ -291,11 +283,7 @@ SERVICE_CHARGING_STOP_PARAMS = [
     {"key": "operation",     "value": "0"},
     {"key": "rcs.terminate", "value": "1"},
 ]
-SERVICE_CHARGING_START_CMD = "start"
-SERVICE_CHARGING_STOP_CMD  = "stop"
 # Legacy aliases (kept for old switch.py import path)
-SERVICE_CHARGING_SCHED_CMD = "RCS_SETTING"   # deprecated - use bizType=6
-SERVICE_SCHEDULED_CHARGING = SERVICE_CHARGING
 
 # --- Capability discovery endpoint ---
 # GET /geelyTCAccess/tcservices/capability/{VIN}?pageSize=2000&pageIndex=1&vehicleType=0
