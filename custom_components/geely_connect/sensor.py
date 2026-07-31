@@ -707,6 +707,9 @@ class GeelyLastTripSensor(_GeelyTripBase):
     there is no way to learn a journey that finished before we were watching."""
 
     _attr_icon = "mdi:map-marker-path"
+    # Without this Home Assistant records no long-term statistics at all, so a
+    # graph of trip lengths would empty out at the recorder purge window.
+    _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(self, coordinator, vin: str, device_name: str) -> None:
         super().__init__(coordinator, vin, device_name)

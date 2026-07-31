@@ -8,7 +8,6 @@
           "email": "Email",
           "country_code": "Country",
           "pressure_unit": "Tire pressure unit",
-          "language": "Language",
           "poll_mode": "Polling mode"
         }
       },
@@ -38,7 +37,7 @@
       "already_configured": "This Geely vehicle is already set up.",
       "all_configured": "All vehicles on this account are already configured.",
       "cert_failed": "Failed to provision the per-device mTLS certificate. Check the logs.",
-      "wrong_region": "This Geely account is not served by the EU/International cloud. Geely runs separate backends for APAC, North America and South America, each needing its own app credentials, so this integration currently supports EU/International accounts only.",
+      "wrong_region": "This Geely account is served by a regional backend this integration has no credentials for. It supports the EU/International and North-American clouds; APAC and South America need their own app credentials, which are not public. The log line names the region that was detected.",
       "reauth_successful": "Re-authenticated. Token refreshed.",
       "unknown": "Something went wrong. Check the logs."
     }
@@ -51,7 +50,6 @@
         "data": {
           "poll_mode": "Polling mode",
           "pressure_unit": "Tire pressure unit",
-          "language": "Language",
           "full_exposure": "Expose every raw field (adds ~180 diagnostic entities)"
         }
       }

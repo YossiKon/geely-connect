@@ -63,6 +63,7 @@ from .const import (
     RCE_KEY_CONDITIONER,
     RCE_KEY_TEMP,
     RCE_VAL_AC,
+    RCE_VAL_DEFROST,
     SERVICE_CLIMATE,
 )
 
@@ -273,6 +274,17 @@ class GeelyClimate(CoordinatorEntity, ClimateEntity, RestoreEntity):
                 ],
                 duration=0,
             )
+            # hvac_mode reports HEAT_COOL for defrost as well as pre-climate,
+            # so stopping only the AC leaves a defrosting car showing Off for
+            # the length of the optimistic window and then flipping back on its
+            # own. Stop defrost too, but only when the car says it is running -
+            # there is no reason to send a second remote command otherwise.
+            if _truthy(_walk(self.coordinator.data or {}, _DEFROST_PATH)):
+                await self._fire(
+                    "stop",
+                    [{"key": RCE_KEY_CONDITIONER, "value": RCE_VAL_DEFROST}],
+                    duration=0,
+                )
             self._set_optimistic(HVACMode.OFF)
         self.async_write_ha_state()
 

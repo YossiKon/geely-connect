@@ -114,7 +114,6 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._email: str | None = None
         self._country_code: str = ""
         self._pressure_unit: str = DEFAULT_PRESSURE_UNIT
-        self._language: str = DEFAULT_LANGUAGE
         self._poll_mode: str = DEFAULT_POLL_MODE
         self._cidpsso_token: str | None = None
         self._user_id: str | None = None
@@ -133,7 +132,6 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._email = user_input[CONF_EMAIL].strip()
             self._country_code = user_input[CONF_COUNTRY_CODE].strip().upper()
             self._pressure_unit = user_input.get(CONF_PRESSURE_UNIT, DEFAULT_PRESSURE_UNIT)
-            self._language = user_input.get(CONF_LANGUAGE, DEFAULT_LANGUAGE)
             self._poll_mode = user_input.get(CONF_POLL_MODE, DEFAULT_POLL_MODE)
             # Reuse the install's fingerprint on re-auth so the server
             # doesn't see this as a new device on every refresh.
@@ -159,11 +157,18 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 else:
                     return await self.async_step_code()
 
-        # Pre-fill from existing entry on re-auth.
+        # Pre-fill the form. Home Assistant does not carry submitted values
+        # across an error re-render, and the captcha solver behind the OTP send
+        # is ~85% accurate, so retyping the address on every retry is the
+        # normal case rather than the exception.
         defaults: dict[str, Any] = {}
+        if self._email:
+            defaults[CONF_EMAIL] = self._email
+        if self._country_code:
+            defaults[CONF_COUNTRY_CODE] = self._country_code
         if self._reauth_entry is not None:
-            defaults[CONF_EMAIL] = self._reauth_entry.data.get(CONF_EMAIL, "")
-            defaults[CONF_COUNTRY_CODE] = self._reauth_entry.data.get(CONF_COUNTRY_CODE, "")
+            defaults.setdefault(CONF_EMAIL, self._reauth_entry.data.get(CONF_EMAIL, ""))
+            defaults.setdefault(CONF_COUNTRY_CODE, self._reauth_entry.data.get(CONF_COUNTRY_CODE, ""))
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({
@@ -173,7 +178,6 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     default=defaults.get(CONF_COUNTRY_CODE) or DEFAULT_COUNTRY_CODE,
                 ): vol.In(SUPPORTED_COUNTRIES),
                 vol.Required(CONF_PRESSURE_UNIT, default=DEFAULT_PRESSURE_UNIT): vol.In(PRESSURE_UNITS),
-                vol.Required(CONF_LANGUAGE, default=DEFAULT_LANGUAGE): vol.In(LANGUAGES),
                 vol.Required(CONF_POLL_MODE, default=DEFAULT_POLL_MODE): vol.In(POLL_MODES),
             }),
             errors=errors,
@@ -364,7 +368,6 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_VEHICLE_COLOR:      vehicle.get("color") or "",
                 CONF_VEHICLE_POWER_TYPE: vehicle.get("powerType") or "",
                 CONF_PRESSURE_UNIT:      self._pressure_unit,
-                CONF_LANGUAGE:           self._language,
                 CONF_POLL_MODE:          self._poll_mode,
             },
         )
@@ -416,10 +419,6 @@ class GeelyIntlOptionsFlow(config_entries.OptionsFlow):
                     CONF_PRESSURE_UNIT,
                     default=current.get(CONF_PRESSURE_UNIT, DEFAULT_PRESSURE_UNIT),
                 ): vol.In(PRESSURE_UNITS),
-                vol.Required(
-                    CONF_LANGUAGE,
-                    default=current.get(CONF_LANGUAGE, DEFAULT_LANGUAGE),
-                ): vol.In(LANGUAGES),
                 vol.Required(
                     CONF_FULL_EXPOSURE,
                     default=current.get(CONF_FULL_EXPOSURE, False),

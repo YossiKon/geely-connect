@@ -22,17 +22,20 @@ polished setup on top.
 ## ✨ Highlights
 
 - 🔒 **Security-first** — verified TLS plus public-key pinning.
-- 📊 **Everything enabled** — all 55 entities are on from the start, no
+- 📊 **Everything enabled** — all 61 entities are on from the start, no
   duplicates, nothing to switch on by hand.
 - 🧮 **Computed extras** — charge completion time, range at full charge and
   efficiency, none of which the car reports itself.
 - 🔋 **Efficient polling** with selectable modes (Eco / Normal / Live),
   changeable at any time.
 - 🌍 **EU and North-American** backends, detected from the vehicle.
-- 🗣️ **Multi-language** — English, Hebrew, Arabic, Russian, French.
+- 🗣️ **Translated setup** — the configuration dialogs are in English, Hebrew,
+  Arabic, Russian and French. Entity names follow Home Assistant's own
+  language.
 - 🖥️ **Ready-made cards, widgets, a four-view dashboard and Blueprints**, all
   built-in Lovelace cards — no extra HACS frontend packages.
-- 📈 **Long-term statistics** on every numeric entity.
+- 📈 **Long-term statistics** on every numeric entity, so history survives the
+  recorder's purge window.
 
 ---
 
@@ -120,8 +123,8 @@ Location (device tracker) — GPS position on the map, with altitude.
 Every other field the server returns can be exposed as an auto-generated
 diagnostic sensor. It is **off by default** — on an EX5 it is around 180
 entities, which buries the ones worth looking at. Turn it on under
-**Configure** if you are hunting for a field that isn't exposed yet, then turn
-it back off; the generated entities are removed again.
+**Configure** if you are hunting for a field that isn't exposed yet. Turning it
+back off removes the generated entities again.
 
 ---
 
@@ -175,12 +178,12 @@ climate before departure).
 ## 🔒 Security
 
 Security was a first-class goal of this build. Every connection is validated
-against the public CAs; the one Geely gateway that uses Geely's own private CA
-(`apis.ecloudeu.com`) is verified against a public-key pin that ships with the
-integration, so it is checked from the very first connection and a
-man-in-the-middle is refused rather than trusted. No other host may use that
-fallback, and a host that has validated publicly once can never be pushed onto
-it. Credentials are stored with owner-only access, secrets are masked in logs
+against the public CAs. The two Geely control gateways that use Geely's own
+private CA — `apis.ecloudeu.com` and `apis.ecloudus.com` — are each verified
+against a public-key pin that ships with the integration, so they are checked
+from the very first connection and a man-in-the-middle is refused rather than
+trusted. No other host may use that fallback, and a host that has validated
+publicly once can never be pushed onto it. Credentials are stored with owner-only access, secrets are masked in logs
 and in the diagnostics report, and all traffic goes only to Geely's own servers
 — no telemetry, no third parties.
 
@@ -204,8 +207,8 @@ Or manually:
 2. In HACS, search **Geely Connect**, open it and press **Download**, then
    **restart Home Assistant**
 3. Settings → Devices & Services → **Add Integration** → **Geely Connect**
-4. Enter your email, pick **country / tire-pressure unit / language / polling
-   mode**, then enter the 6-digit code sent to your inbox
+4. Enter your email, pick **country / tire-pressure unit / polling mode**, then
+   enter the 6-digit code sent to your inbox
 
 ### The repository doesn't show up in HACS?
 
@@ -257,8 +260,12 @@ everything else.
 ## 🖥️ Dashboards & cards
 
 First, find your **entity suffix**: Settings → Devices & Services → Geely Connect
-→ your car. IDs look like `sensor.my_geely_ex5_battery`, so the suffix is
-`my_geely_ex5`. If yours differs, search-replace `my_geely_ex5` in any file below.
+→ your car → click any entity. Your ids will look like
+`sensor.geely_ex5_4143_battery` — the device name always ends in the last four
+VIN characters — so there the suffix is `geely_ex5_4143`.
+
+`my_geely_ex5` in every file below is a **placeholder**, not a real id.
+Search-replace it with your own suffix before saving anything.
 
 There are two kinds of file — **use the matching paste location**, or you'll get
 a `Cannot read properties of undefined (reading 'startsWith')` error:
@@ -483,13 +490,13 @@ project reports. Adding APAC or SA needs that area's app id and secret.
 ## 🎚️ Changing settings later
 
 Settings → Devices & Services → **Geely Connect** → **Configure** changes the
-**polling mode**, **tire-pressure unit** and **language** at any time — no
-reinstall, no restart. Changing the pressure unit also re-points the four
+**polling mode** and **tire-pressure unit** at any time — no reinstall, no
+restart. Changing the pressure unit also re-points the four
 existing tire sensors, so history is kept rather than restarting.
 
 ### Which entities appear
 
-**All 55 are on from the start** — nothing is hidden and nothing needs enabling.
+**All 61 are on from the start** — nothing is hidden and nothing needs enabling.
 Everything the car reports, plus the computed extras above.
 
 The only thing not created is the raw full-exposure pass (see below), because

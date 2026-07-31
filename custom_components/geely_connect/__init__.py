@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import socket
 from datetime import timedelta
@@ -27,6 +28,9 @@ from .const import (
     CONF_CERT_PATH,
     CONF_CIDPSSO_TOKEN,
     CONF_DEVICE_ID,
+    CONF_DEVICE_IDFA,
+    CONF_DEVICE_IDFV,
+    CONF_FULL_EXPOSURE,
     CONF_KEY_PATH,
     CONF_POLL_MODE,
     CONF_REGION,
@@ -106,10 +110,11 @@ _OBSOLETE_UNIQUE_ID_PATTERNS: tuple[str, ...] = (
     "_btn_rapid_warming", "_btn_rapid_cooling", "_btn_g_clean",
     # Old gear sensor - gearPosition not in current API response
     "_gear",
-    # Removed after EX5 feature audit: no rear seat heat hardware,
-    # no sentry mode (no cabin camera).
-    "_sel_seat_heat_rear_left",
-    "_sel_seat_heat_rear_right",
+    # Removed after EX5 feature audit: no sentry mode (no cabin camera).
+    # The rear seat-heat selects are NOT listed here: select.py still creates
+    # them whenever the capability catalog reports rear positions, so listing
+    # them made every restart delete and re-register a live entity, losing its
+    # recorded history and any customisation each time.
     "_sw_sentry_mode",
     # `charge_state` (chargeSts) field is unreliable.
     "_charge_state",
@@ -144,11 +149,20 @@ async def _maybe_refetch_vehicle_metadata(hass: HomeAssistant, entry: ConfigEntr
     if have and have_series:
         return
     try:
+        # The install fingerprint has to go with it. Without idfa/idfv,
+        # _ios_headers invents a fresh random device identity, and Geely
+        # allows one session per account - so this self-heal call would kick
+        # the phone app off, which is the exact thing the v1 -> v2 migration
+        # generated a stable fingerprint to avoid.
         all_v = await hass.async_add_executor_job(
-            geely_api.list_vehicles,
-            entry.data.get(CONF_CIDPSSO_TOKEN),
-            entry.data.get(CONF_USER_ID),
-            entry.data.get(CONF_COUNTRY_CODE, DEFAULT_COUNTRY_CODE),
+            functools.partial(
+                geely_api.list_vehicles,
+                entry.data.get(CONF_CIDPSSO_TOKEN),
+                entry.data.get(CONF_USER_ID),
+                entry.data.get(CONF_COUNTRY_CODE, DEFAULT_COUNTRY_CODE),
+                idfa=entry.data.get(CONF_DEVICE_IDFA),
+                idfv=entry.data.get(CONF_DEVICE_IDFV),
+            )
         )
     except Exception as e:  # noqa: BLE001
         _LOGGER.debug("metadata refetch failed (non-fatal): %s", e)
@@ -473,6 +487,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    # Turning full exposure off has to clear the entities it created. The
+    # sensor platform simply stops adding them, and nothing else removes them,
+    # so without this they linger in the registry as ~180 unavailable rows.
+    # The migration cannot do it: fresh entries are created at the current
+    # VERSION and never run one.
+    if not (entry.options.get(CONF_FULL_EXPOSURE)
+            or entry.data.get(CONF_FULL_EXPOSURE, False)):
+        _purge_raw_exposure_entities(hass, entry)
     await hass.config_entries.async_reload(entry.entry_id)
 
 

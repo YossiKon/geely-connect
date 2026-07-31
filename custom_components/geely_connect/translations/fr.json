@@ -8,7 +8,6 @@
           "email": "Email",
           "country_code": "Pays",
           "pressure_unit": "Unité de pression des pneus",
-          "language": "Langue",
           "poll_mode": "Mode d'interrogation"
         }
       },
@@ -38,7 +37,7 @@
       "already_configured": "Ce véhicule est déjà configuré.",
       "all_configured": "Tous les véhicules du compte sont déjà configurés.",
       "cert_failed": "Échec de l'émission du certificat mTLS.",
-      "wrong_region": "Ce compte Geely n'est pas géré par le cloud EU/International. Geely exploite des backends distincts pour l'APAC, l'Amérique du Nord et l'Amérique du Sud, chacun avec ses propres identifiants d'application ; cette intégration ne prend donc en charge que les comptes EU/International.",
+      "wrong_region": "Ce compte Geely est géré par un backend régional pour lequel cette intégration n'a pas d'identifiants. Les clouds EU/International et nord-américain sont pris en charge ; l'APAC et l'Amérique du Sud nécessitent leurs propres identifiants d'application, non publics. La ligne de journal indique la région détectée.",
       "reauth_successful": "Ré-authentification réussie.",
       "unknown": "Une erreur s'est produite."
     }
@@ -51,7 +50,6 @@
         "data": {
           "poll_mode": "Mode d'interrogation",
           "pressure_unit": "Unité de pression des pneus",
-          "language": "Langue",
           "full_exposure": "Exposer tous les champs bruts (ajoute ~180 entités de diagnostic)"
         }
       }

@@ -143,8 +143,17 @@ class GeelyWindows(_BaseGeelyCover):
     @property
     def is_closed(self) -> bool | None:
         climate = _walk(self.coordinator.data or {}, _CLIMATE_PATH) or {}
-        # winStatus<Door>: "2" = closed, others = some open
+        # winStatus<Door>: "2" = closed, others = some open.
+        # A car that reports none of these is unknown, NOT open - saying open
+        # would leave a permanently-open window on the device page and fire
+        # every "left open" automation forever. Same guard the ventilation
+        # switch uses in switch.py.
+        any_seen = False
         for w in ("Driver", "Passenger", "DriverRear", "PassengerRear"):
-            if str(climate.get(f"winStatus{w}")) != "2":
+            v = climate.get(f"winStatus{w}")
+            if v is None:
+                continue
+            any_seen = True
+            if str(v) != "2":
                 return False
-        return True
+        return True if any_seen else None
