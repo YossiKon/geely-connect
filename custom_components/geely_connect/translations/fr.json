@@ -51,7 +51,8 @@
         "data": {
           "poll_mode": "Mode d'interrogation",
           "pressure_unit": "Unité de pression des pneus",
-          "language": "Langue"
+          "language": "Langue",
+          "full_exposure": "Exposer tous les champs bruts (ajoute ~180 entités de diagnostic)"
         }
       }
     }

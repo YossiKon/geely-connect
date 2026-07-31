@@ -81,10 +81,22 @@ Driver seatbelt.
 | **Connected** | Is the integration reaching the car right now *(ours)* |
 | **Last Updated** | Timestamp of the last successful poll *(ours)* |
 
-### 🔍 Full exposure
-Beyond the curated entities above, **every field the server returns** is exposed
-as an auto-generated diagnostic sensor (disabled by default — enable the ones you
-want). New fields appear automatically, so nothing is hidden.
+### 🧮 Computed (not reported by the car)
+| Entity | Description |
+|---|---|
+| **Efficiency** | km per kWh, derived from average consumption |
+| **Charge Complete** | When charging will finish, as a time — not a minute count |
+| **Lowest Tire Pressure** | The lowest of the four, so one alert covers all; attributes name the corner |
+| **Service Due** | The next service as a date, from the days-remaining counter |
+| **Connected** | Is the integration reaching the car right now |
+| **Last Updated** | Timestamp of the last successful poll |
+
+### 🔍 Full exposure (optional)
+Every other field the server returns can be exposed as an auto-generated
+diagnostic sensor. It is **off by default** — on an EX5 it is around 180
+entities, which buries the ones worth looking at. Turn it on under
+**Configure** if you are hunting for a field that isn't exposed yet, then turn
+it back off; the generated entities are removed again.
 
 ---
 

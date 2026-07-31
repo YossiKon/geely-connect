@@ -51,7 +51,8 @@
         "data": {
           "poll_mode": "Polling mode",
           "pressure_unit": "Tire pressure unit",
-          "language": "Language"
+          "language": "Language",
+          "full_exposure": "Expose every raw field (adds ~180 diagnostic entities)"
         }
       }
     }

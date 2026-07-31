@@ -598,15 +598,38 @@ def _disable_off_by_default_entities(hass: HomeAssistant, entry: ConfigEntry) ->
     return disabled
 
 
+def _purge_raw_exposure_entities(hass: HomeAssistant, entry: ConfigEntry) -> int:
+    """Remove the auto-generated full-exposure sensors.
+
+    They are recreated on demand when full exposure is switched back on under
+    Configure, so nothing is lost by clearing them: on an EX5 there are around
+    180, and even disabled they bury the entities worth looking at."""
+    registry = er.async_get(hass)
+    stale = [
+        e.entity_id
+        for e in er.async_entries_for_config_entry(registry, entry.entry_id)
+        if "_raw_" in e.unique_id
+    ]
+    for entity_id in stale:
+        registry.async_remove(entity_id)
+    if stale:
+        _LOGGER.info(
+            "Removed %d full-exposure diagnostic sensors; re-enable them under "
+            "Configure if you need to inspect a raw field", len(stale),
+        )
+    return len(stale)
+
+
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Migrate older entries forward.
 
     v1 -> v2: generate per-install idfa/idfv so future logins don't kick the
     iPhone off. v2 -> v3: switch off the window, sunroof, sunshade and
     window-ventilation entities, which now ship disabled because opening them
-    by accident from a dashboard leaves the car exposed. Everything else keeps
-    working; missing fields fall back to safe defaults."""
-    if entry.version >= 3:
+    by accident from a dashboard leaves the car exposed. v3 -> v4: clear the
+    ~180 auto-generated full-exposure sensors, now opt-in under Configure.
+    Everything else keeps working; missing fields fall back to safe defaults."""
+    if entry.version >= 4:
         return True
 
     new_data = dict(entry.data)
@@ -618,6 +641,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             new_data["device_idfv"] = idfv
 
     _disable_off_by_default_entities(hass, entry)
-    hass.config_entries.async_update_entry(entry, data=new_data, version=3)
-    _LOGGER.info("Migrated geely_connect entry %s to v3", entry.entry_id)
+    _purge_raw_exposure_entities(hass, entry)
+    hass.config_entries.async_update_entry(entry, data=new_data, version=4)
+    _LOGGER.info("Migrated geely_connect entry %s to v4", entry.entry_id)
     return True

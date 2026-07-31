@@ -89,6 +89,9 @@ CONF_VEHICLE_POWER_TYPE = "vehicle_power_type"
 CONF_PRESSURE_UNIT = "pressure_unit"
 CONF_LANGUAGE      = "language"
 CONF_POLL_MODE     = "poll_mode"
+# Opt-in: expose every raw field the server returns as a diagnostic sensor.
+# Off by default - it is ~180 entities on an EX5 and buries the useful ones.
+CONF_FULL_EXPOSURE = "full_exposure"
 
 # Polling profiles. The Geely backend allows one session per account, so each
 # poll briefly logs the phone app out — the mode lets the user trade freshness

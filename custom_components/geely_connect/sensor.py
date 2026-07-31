@@ -14,6 +14,7 @@ The server sends every numeric value as a string - we coerce here.
 from __future__ import annotations
 
 import re
+from datetime import timedelta
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -37,6 +38,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as _dt_util
 
 from .const import (
+    CONF_FULL_EXPOSURE,
     CONF_PRESSURE_UNIT,
     DEFAULT_PRESSURE_UNIT,
     DOMAIN,
@@ -255,11 +257,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
     add_entities([
         GeelyEfficiencySensor(coordinator, vin, device_name),
         GeelyLastUpdatedSensor(coordinator, vin, device_name),
+        GeelyChargeCompleteSensor(coordinator, vin, device_name),
+        GeelyLowestTirePressureSensor(coordinator, vin, device_name, pressure_unit),
+        GeelyServiceDueSensor(coordinator, vin, device_name),
     ])
 
-    # 2) Dynamic full exposure: one diagnostic sensor for EVERY field the server
-    #    returns that isn't already covered above. New fields that appear on a
-    #    later poll are added automatically.
+    # 2) Full exposure: one diagnostic sensor for EVERY field the server
+    #    returns that isn't already covered above. Off unless asked for - on an
+    #    EX5 it is around 180 entities, which buries the useful ones on the
+    #    device page even though they are all disabled. Turn it on under
+    #    Configure if you are hunting for a field we do not expose yet.
+    if not (entry.options.get(CONF_FULL_EXPOSURE)
+            or entry.data.get(CONF_FULL_EXPOSURE, False)):
+        return
+
     known: set[str] = set()
 
     def _discover_and_add() -> None:
@@ -456,3 +467,128 @@ class GeelyLastUpdatedSensor(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self):
         return self._ts
+
+
+class GeelyChargeCompleteSensor(CoordinatorEntity, SensorEntity):
+    """When charging is expected to finish, as a timestamp.
+
+    The server reports minutes remaining, which the UI renders as a bare
+    number; a timestamp reads as "in 2 hours" and can drive a notification.
+    Unknown while the car is not drawing current."""
+
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_icon = "mdi:battery-clock"
+
+    def __init__(self, coordinator, vin: str, device_name: str) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"geely_{vin}_charge_complete"
+        self._attr_name = "Charge Complete"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, vin)}, manufacturer="Geely", name=device_name)
+
+    @property
+    def native_value(self):
+        status = _walk(self.coordinator.data or {}, (*_EV, "statusOfChargerConnection"))
+        if str(status) != "3":          # 3 = actively drawing current
+            return None
+        try:
+            minutes = float(_walk(self.coordinator.data or {}, (*_EV, "timeToFullyCharged")))
+        except (TypeError, ValueError):
+            return None
+        if minutes <= 0:
+            return None
+        # Rounded to the minute so a stable estimate does not rewrite itself
+        # every poll with a few seconds of drift.
+        done = _dt_util.utcnow() + timedelta(minutes=minutes)
+        return done.replace(second=0, microsecond=0)
+
+
+class GeelyLowestTirePressureSensor(CoordinatorEntity, SensorEntity):
+    """The lowest of the four tire pressures.
+
+    One number to alert on instead of four separate thresholds; the attributes
+    name the corner it came from and how far apart the tires are."""
+
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.PRESSURE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfPressure.KPA
+    _attr_icon = "mdi:car-tire-alert"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    _CORNERS = {
+        "Front-Left":  (*_MAINT, "tyreStatusDriver"),
+        "Front-Right": (*_MAINT, "tyreStatusPassenger"),
+        "Rear-Left":   (*_MAINT, "tyreStatusDriverRear"),
+        "Rear-Right":  (*_MAINT, "tyreStatusPassengerRear"),
+    }
+
+    def __init__(self, coordinator, vin: str, device_name: str,
+                 pressure_unit: str = DEFAULT_PRESSURE_UNIT) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"geely_{vin}_lowest_tire_pressure"
+        self._attr_name = "Lowest Tire Pressure"
+        self._attr_suggested_unit_of_measurement = _PRESSURE_UNIT_TO_HA.get(
+            pressure_unit, UnitOfPressure.KPA)
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, vin)}, manufacturer="Geely", name=device_name)
+
+    def _readings(self) -> dict:
+        data = self.coordinator.data or {}
+        out = {}
+        for corner, path in self._CORNERS.items():
+            try:
+                value = float(_walk(data, path))
+            except (TypeError, ValueError):
+                continue
+            if value > 0:
+                out[corner] = value
+        return out
+
+    @property
+    def native_value(self):
+        readings = self._readings()
+        return min(readings.values()) if readings else None
+
+    @property
+    def extra_state_attributes(self):
+        readings = self._readings()
+        if not readings:
+            return None
+        lowest = min(readings, key=readings.get)
+        return {
+            "lowest_corner": lowest,
+            "spread_kpa": round(max(readings.values()) - readings[lowest], 1),
+        }
+
+
+class GeelyServiceDueSensor(CoordinatorEntity, SensorEntity):
+    """The next service date, derived from the days-remaining counter.
+
+    A date lands on a calendar and still means something when glanced at once
+    a month; a countdown of days does not."""
+
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_icon = "mdi:car-wrench"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator, vin: str, device_name: str) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"geely_{vin}_service_due"
+        self._attr_name = "Service Due"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, vin)}, manufacturer="Geely", name=device_name)
+
+    @property
+    def native_value(self):
+        try:
+            days = float(_walk(self.coordinator.data or {}, (*_MAINT, "daysToService")))
+        except (TypeError, ValueError):
+            return None
+        if days < 0:
+            return None
+        # Midnight, so the value only moves when the counter does.
+        due = _dt_util.utcnow() + timedelta(days=days)
+        return due.replace(hour=0, minute=0, second=0, microsecond=0)

@@ -27,6 +27,7 @@ from homeassistant.helpers import entity_registry as er
 
 from . import api as geely_api
 from .const import (
+    CONF_FULL_EXPOSURE,
     CONF_REGION,
     DEFAULT_COUNTRY_CODE,
     DEFAULT_REGION,
@@ -107,7 +108,7 @@ def _already_configured_vins(hass) -> set[str]:
 class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Geely (international)."""
 
-    VERSION = 3
+    VERSION = 4
 
     def __init__(self) -> None:
         self._email: str | None = None
@@ -419,6 +420,10 @@ class GeelyIntlOptionsFlow(config_entries.OptionsFlow):
                     CONF_LANGUAGE,
                     default=current.get(CONF_LANGUAGE, DEFAULT_LANGUAGE),
                 ): vol.In(LANGUAGES),
+                vol.Required(
+                    CONF_FULL_EXPOSURE,
+                    default=current.get(CONF_FULL_EXPOSURE, False),
+                ): bool,
             }),
         )
 
