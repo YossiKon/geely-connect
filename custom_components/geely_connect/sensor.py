@@ -56,6 +56,22 @@ _PRESSURE_UNIT_TO_HA: dict[str, str] = {
     "kPa": UnitOfPressure.KPA,
 }
 
+# kPa (what the car sends) -> the unit picked at setup, and how many decimals
+# that unit deserves.
+_PRESSURE_FROM_KPA: dict[str, tuple[float, int]] = {
+    "psi": (0.1450377, 1),
+    "bar": (0.01, 2),
+    "kPa": (1.0, 0),
+}
+
+# The four corners, in the order they sit on the car.
+_TIRE_CORNERS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("front_left",  "Tire Front-Left",  ("tyreStatusDriver",)),
+    ("front_right", "Tire Front-Right", ("tyreStatusPassenger",)),
+    ("rear_left",   "Tire Rear-Left",   ("tyreStatusDriverRear",)),
+    ("rear_right",  "Tire Rear-Right",  ("tyreStatusPassengerRear",)),
+)
+
 # Long-term statistics: measurement for live values, total_increasing for odo.
 # Anything not listed here records no statistics at all, so a sensor that holds
 # a number belongs in one of these sets. The enum-valued ones (engine_state,
@@ -259,6 +275,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
         GeelyLastUpdatedSensor(coordinator, vin, device_name),
         GeelyChargeCompleteSensor(coordinator, vin, device_name),
         GeelyFullRangeSensor(coordinator, vin, device_name),
+        *(GeelyTireSensor(coordinator, vin, device_name, key, name, path,
+                          pressure_unit)
+          for key, name, path in _TIRE_CORNERS),
     ])
 
     # 2) Full exposure: one diagnostic sensor for EVERY field the server
@@ -534,3 +553,50 @@ class GeelyFullRangeSensor(CoordinatorEntity, SensorEntity):
         if charge < 10 or rng <= 0:
             return None
         return round(rng * 100.0 / charge)
+
+
+class GeelyTireSensor(CoordinatorEntity, SensorEntity):
+    """A tire pressure already converted to the unit picked at setup.
+
+    The four "Tire Pressure FL/FR/RL/RR" sensors carry
+    device_class: pressure, which means Home Assistant owns their display unit:
+    it takes suggested_unit_of_measurement at first registration and the unit
+    system's preference after that, so an install created before the unit was
+    chosen keeps showing kPa no matter what the integration reports.
+
+    These four sidestep that by having NO device_class. With no converter in
+    play Home Assistant shows exactly the number and unit given here, so the
+    setup choice is honoured on a fresh install and on an existing one alike,
+    and it follows a later change under Configure because the entry reloads.
+
+    The originals are left in place - anything already pointing at them keeps
+    working."""
+
+    _attr_has_entity_name = True
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:car-tire-alert"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator, vin: str, device_name: str, key: str,
+                 friendly_name: str, field: tuple[str, ...],
+                 pressure_unit: str = DEFAULT_PRESSURE_UNIT) -> None:
+        super().__init__(coordinator)
+        self._path = (*_MAINT, *field)
+        self._factor, self._digits = _PRESSURE_FROM_KPA.get(
+            pressure_unit, _PRESSURE_FROM_KPA["kPa"])
+        self._attr_unique_id = f"geely_{vin}_tire_{key}"
+        self._attr_name = friendly_name
+        self._attr_native_unit_of_measurement = _PRESSURE_UNIT_TO_HA.get(
+            pressure_unit, UnitOfPressure.KPA)
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, vin)}, manufacturer="Geely", name=device_name)
+
+    @property
+    def native_value(self):
+        try:
+            kpa = float(_walk(self.coordinator.data or {}, self._path))
+        except (TypeError, ValueError):
+            return None
+        if kpa <= 0:                    # a sleeping TPMS reports 0
+            return None
+        return round(kpa * self._factor, self._digits)

@@ -65,8 +65,23 @@ All of these are created **enabled** — nothing to switch on by hand.
 | Interior Temperature | Cabin temp (°C) |
 | Exterior Temperature | Outside temp (°C) |
 
-### Tires (unit chosen at setup: PSI / bar / kPa)
-Tire Pressure — Front-Left, Front-Right, Rear-Left, Rear-Right.
+### Tires
+Two sets of four, one reading each corner:
+
+| Entity | Unit |
+|---|---|
+| **Tire Front-Left / Front-Right / Rear-Left / Rear-Right** | Always the unit you picked at setup |
+| Tire Pressure FL / FR / RL / RR | Whatever Home Assistant decides |
+
+Use the first set. The second carries `device_class: pressure`, which hands the
+display unit to Home Assistant: it reads `suggested_unit_of_measurement` only
+when the entity is **first registered** and falls back to the unit system after
+that, so an install created before you picked psi keeps showing kPa forever no
+matter what the integration reports. The first set has no device class, so
+nothing converts it and the setup choice is honoured — on a fresh install, on
+an existing one, and again whenever you change the unit under **Configure**.
+
+The originals stay, so anything already pointing at them keeps working.
 
 ### Body (open / closed)
 Driver door, Passenger door, Rear-Left door, Rear-Right door, Trunk, Hood,

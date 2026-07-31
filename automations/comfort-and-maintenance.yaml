@@ -167,22 +167,22 @@
     # "above: 0" means a parked car whose TPMS sensors are asleep and report 0
     # is ignored; the trade-off is that a tire reading exactly 0 never alerts.
     - trigger: numeric_state
-      entity_id: sensor.my_geely_ex5_tire_pressure_fl
+      entity_id: sensor.my_geely_ex5_tire_front_left
       above: 0
       below: 28
       for: "00:02:00"
     - trigger: numeric_state
-      entity_id: sensor.my_geely_ex5_tire_pressure_fr
+      entity_id: sensor.my_geely_ex5_tire_front_right
       above: 0
       below: 28
       for: "00:02:00"
     - trigger: numeric_state
-      entity_id: sensor.my_geely_ex5_tire_pressure_rl
+      entity_id: sensor.my_geely_ex5_tire_rear_left
       above: 0
       below: 28
       for: "00:02:00"
     - trigger: numeric_state
-      entity_id: sensor.my_geely_ex5_tire_pressure_rr
+      entity_id: sensor.my_geely_ex5_tire_rear_right
       above: 0
       below: 28
       for: "00:02:00"
