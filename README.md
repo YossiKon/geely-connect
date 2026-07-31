@@ -132,8 +132,8 @@ profile at setup:
 | ⚖️ **Normal** — balanced | every 30 s | 90 s → 15 min | every 4th cycle | every 6th |
 | ⚡ **Live** — freshest | every 15 s | 45 s → 5 min | every 3rd cycle | every 3rd |
 
-The mode is **not fixed at setup** — change it any time under
-[Configure](#️-changing-settings-later).
+The mode is **not fixed at setup** — change it any time from **Configure** on
+the device page (see *Changing settings later* below).
 
 Everything is per-mode: the active-polling rate, the parked back-off, the cap,
 and how often secondary/GPS calls run.
