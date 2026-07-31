@@ -591,12 +591,26 @@ class GeelyTireSensor(CoordinatorEntity, SensorEntity):
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, vin)}, manufacturer="Geely", name=device_name)
 
-    @property
-    def native_value(self):
+    def _kpa(self) -> float | None:
         try:
             kpa = float(_walk(self.coordinator.data or {}, self._path))
         except (TypeError, ValueError):
             return None
-        if kpa <= 0:                    # a sleeping TPMS reports 0
+        return kpa if kpa > 0 else None   # a sleeping TPMS reports 0
+
+    @property
+    def native_value(self):
+        kpa = self._kpa()
+        return None if kpa is None else round(kpa * self._factor, self._digits)
+
+    @property
+    def extra_state_attributes(self):
+        """Every unit, always - so a card or template can pick one without
+        depending on what was chosen at setup."""
+        kpa = self._kpa()
+        if kpa is None:
             return None
-        return round(kpa * self._factor, self._digits)
+        return {
+            unit: round(kpa * factor, digits)
+            for unit, (factor, digits) in _PRESSURE_FROM_KPA.items()
+        }

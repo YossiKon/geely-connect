@@ -83,6 +83,15 @@ an existing one, and again whenever you change the unit under **Configure**.
 
 The originals stay, so anything already pointing at them keeps working.
 
+**All three units are always there.** Each of the four carries `psi`, `bar` and
+`kPa` attributes, whatever the state itself is showing — so a card or template
+can take whichever it wants without depending on the setup choice:
+
+```yaml
+# psi regardless of what the sensor's own unit is
+{{ state_attr('sensor.my_geely_ex5_tire_front_left', 'psi') }}
+```
+
 ### Body (open / closed)
 Driver door, Passenger door, Rear-Left door, Rear-Right door, Trunk, Hood,
 Driver seatbelt.
