@@ -34,6 +34,9 @@ jobs:
         uses: hacs/action@main
         with:
           category: integration
-          # This repo is not (yet) registered in home-assistant/brands,
-          # which is only required for inclusion in the HACS default store.
-          ignore: brands
+          # No "ignore:" here on purpose. Submitting to the HACS default
+          # store requires this action to pass "without any errors or
+          # ignores", so an ignore would quietly disqualify the repo.
+          # The brands check is satisfied by
+          # custom_components/geely_connect/brand/icon.png - it only falls
+          # back to home-assistant/brands when that folder is absent.
