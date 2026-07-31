@@ -1,0 +1,24 @@
+{#- Geely Connect - SINGLE LINE for a narrow home-screen widget.
+    Paste the whole file into the companion app's Template widget, then
+    search-replace my_geely_ex5 with your own entity suffix.
+    Fits a 2x1 widget at text size 14-16. -#}
+{%- set batt = 'sensor.my_geely_ex5_battery' -%}
+{%- set rng = 'sensor.my_geely_ex5_electric_range' -%}
+{#- Three states, not two: an unreported lock must not look unlocked. -#}
+{%- set lock_state = states('lock.my_geely_ex5_doors') -%}
+{%- set lock_icon = '🔒' if lock_state == 'locked'
+    else ('🔓' if lock_state in ['unlocked', 'open'] else '🔒❓') -%}
+{%- set charging = 'charging' in (states('sensor.my_geely_ex5_charger_connection') | lower) -%}
+{%- set open_now = expand(
+  'binary_sensor.my_geely_ex5_door_driver',
+  'binary_sensor.my_geely_ex5_door_passenger',
+  'binary_sensor.my_geely_ex5_door_rear_left',
+  'binary_sensor.my_geely_ex5_door_rear_right',
+  'binary_sensor.my_geely_ex5_trunk',
+  'binary_sensor.my_geely_ex5_hood')
+  | selectattr('state', 'eq', 'on') | list | count -%}
+{{ lock_icon }}
+{%- if open_now %} ⚠️{{ open_now }}{% endif %}
+{%- if has_value(batt) %} {{ states(batt) | float(0) | round | int }}%{% else %} ?%{% endif %}
+{%- if charging %}⚡{% endif %}
+{%- if has_value(rng) %} · {{ states(rng) | float(0) | round | int }}km{% endif -%}

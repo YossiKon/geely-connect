@@ -1,0 +1,104 @@
+{#- Geely Connect - home-screen NEEDS ATTENTION widget.
+    Shows nothing but a tick unless something wants doing.
+    Paste the whole file into the companion app's Template widget, then
+    search-replace my_geely_ex5 with your own entity suffix.
+
+    Thresholds - the only numbers worth changing:
+      tire_min_psi  soft-tire warning IN PSI. Read from the psi attribute,
+                    so it holds whichever unit your sensors display.
+      batt_min      traction battery %
+      v12_min       12V battery %
+      svc_days      warn when service is this close
+      svc_km        ...or this close in km
+-#}
+{%- set tire_min_psi = 28 -%}
+{%- set batt_min = 20 -%}
+{%- set v12_min = 60 -%}
+{%- set svc_days = 30 -%}
+{%- set svc_km = 1000 -%}
+
+{#- Every field has to be declared up front: each line below reads the field
+    before writing it, and reading an undeclared namespace field raises. -#}
+{%- set ns = namespace(items=[], open=[], soft=[]) -%}
+
+{%- if is_state('binary_sensor.my_geely_ex5_connected', 'off') -%}
+  {%- set ns.items = ns.items + ['⚠️ <b>No contact with the car</b> - everything below may be stale'] -%}
+{%- endif -%}
+
+{%- set openings = {
+  'binary_sensor.my_geely_ex5_door_driver': 'driver door',
+  'binary_sensor.my_geely_ex5_door_passenger': 'passenger door',
+  'binary_sensor.my_geely_ex5_door_rear_left': 'rear left door',
+  'binary_sensor.my_geely_ex5_door_rear_right': 'rear right door',
+  'binary_sensor.my_geely_ex5_trunk': 'trunk',
+  'binary_sensor.my_geely_ex5_hood': 'hood'} -%}
+{%- for eid, label in openings.items() -%}
+  {%- if is_state(eid, 'on') -%}{%- set ns.open = ns.open + [label] -%}{%- endif -%}
+{%- endfor -%}
+{%- if ns.open -%}
+  {%- set ns.items = ns.items + ['🚪 <b>Open:</b> ' ~ (ns.open | join(', '))] -%}
+{%- endif -%}
+
+{#- Only the two states that definitely mean "not secure", so unavailable or
+    unknown never raises a false alarm. -#}
+{%- if states('lock.my_geely_ex5_doors') in ['unlocked', 'open'] -%}
+  {%- set ns.items = ns.items + ['🔓 <b>Doors unlocked</b>'] -%}
+{%- endif -%}
+
+{#- Fallbacks are always the SAFE end, never 0: a car that has not reported
+    must never read as empty. -#}
+{%- if has_value('sensor.my_geely_ex5_battery') -%}
+  {%- set b = states('sensor.my_geely_ex5_battery') | float(100) -%}
+  {%- if b < batt_min -%}
+    {%- set ns.items = ns.items + ['🔋 Battery ' ~ (b | round | int) ~ '% - worth plugging in'] -%}
+  {%- endif -%}
+{%- endif -%}
+
+{#- "p > 0" skips a parked car whose TPMS is asleep, and covers a missing
+    attribute, which float(0) turns into 0. -#}
+{%- set tires = {
+  'sensor.my_geely_ex5_tire_front_left': 'front left',
+  'sensor.my_geely_ex5_tire_front_right': 'front right',
+  'sensor.my_geely_ex5_tire_rear_left': 'rear left',
+  'sensor.my_geely_ex5_tire_rear_right': 'rear right'} -%}
+{%- for eid, label in tires.items() -%}
+  {%- set p = state_attr(eid, 'psi') | float(0) -%}
+  {%- if p > 0 and p < tire_min_psi -%}
+    {%- set ns.soft = ns.soft + [label ~ ' ' ~ (p | round(1))] -%}
+  {%- endif -%}
+{%- endfor -%}
+{%- if ns.soft -%}
+  {%- set ns.items = ns.items + ['🛞 <b>Tire low:</b> ' ~ (ns.soft | join(', ')) ~ ' psi'] -%}
+{%- endif -%}
+
+{%- if has_value('sensor.my_geely_ex5_12v_battery') -%}
+  {%- set v = states('sensor.my_geely_ex5_12v_battery') | float(100) -%}
+  {%- if v > 0 and v < v12_min -%}
+    {%- set ns.items = ns.items + ['🪫 12V battery ' ~ (v | round | int) ~ '%'] -%}
+  {%- endif -%}
+{%- endif -%}
+
+{#- Both service figures go negative once overdue, so there is no lower
+    bound on the test - only the wording changes. -#}
+{%- set ns2 = namespace(svc=[]) -%}
+{%- if has_value('sensor.my_geely_ex5_days_to_service') -%}
+  {%- set d = states('sensor.my_geely_ex5_days_to_service') | float(9999) -%}
+  {%- if d < svc_days -%}
+    {%- set ns2.svc = ns2.svc + [((d | abs | round | int) ~ 'd overdue') if d < 0 else ((d | round | int) ~ 'd')] -%}
+  {%- endif -%}
+{%- endif -%}
+{%- if has_value('sensor.my_geely_ex5_distance_to_service') -%}
+  {%- set k = states('sensor.my_geely_ex5_distance_to_service') | float(99999) -%}
+  {%- if k < svc_km -%}
+    {%- set ns2.svc = ns2.svc + [((k | abs | round | int) ~ ' km overdue') if k < 0 else ((k | round | int) ~ ' km')] -%}
+  {%- endif -%}
+{%- endif -%}
+{%- if ns2.svc -%}
+  {%- set ns.items = ns.items + ['🔧 Service in ' ~ (ns2.svc | join(' / '))] -%}
+{%- endif -%}
+
+{%- if ns.items -%}
+  {{ ns.items | join('<br>') }}
+{%- else -%}
+  ✅ <b>All good</b><br><i>Nothing needs your attention.</i>
+{%- endif -%}

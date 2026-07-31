@@ -1,0 +1,77 @@
+{#- Geely Connect - home-screen STATUS widget.
+    Paste the whole file into the companion app's Template widget, then
+    search-replace my_geely_ex5 with your own entity suffix.
+    Text size 12-14 fits a 4x2 widget. -#}
+{%- set lock = states('lock.my_geely_ex5_doors') -%}
+{%- set batt = 'sensor.my_geely_ex5_battery' -%}
+{%- set rng = 'sensor.my_geely_ex5_electric_range' -%}
+{%- set conn = states('sensor.my_geely_ex5_charger_connection') | lower -%}
+{%- set done = 'sensor.my_geely_ex5_charge_complete' -%}
+
+{#- Line 1: lock, charge, range -#}
+{%- set lock_txt = {'locked': '🔒 Locked', 'unlocked': '🔓 UNLOCKED',
+    'jammed': '⚠️ JAMMED', 'locking': 'Locking…', 'unlocking': 'Unlocking…',
+    'open': '🔓 Open', 'opening': 'Opening…'}.get(lock, '🔒? unknown') -%}
+<b>{{ lock_txt }}</b>
+{%- if has_value(batt) %} · {{ states(batt) | float(0) | round | int }}%{% endif -%}
+{%- if has_value(rng) %} · {{ states(rng) | float(0) | round | int }} km{% endif %}<br>
+
+{#- Line 2: charging. as_timestamp with a 0 default, then test the number -
+    has_value() only rules out unknown, it cannot promise the string parses,
+    and an unparseable one would otherwise print a 1970 clock time. -#}
+{%- set eta = as_timestamp(states(done), 0) -%}
+{%- if 'charging' in conn -%}
+  {%- if eta > 0 -%}
+    {%- set mins = [((eta - as_timestamp(now())) / 60) | round | int, 0] | max -%}
+    ⚡ Full at {{ eta | timestamp_custom('%H:%M', true) }}
+    {%- if mins >= 60 %} (in {{ mins // 60 }}h {{ mins % 60 }}m)
+    {%- elif mins > 0 %} (in {{ mins }} min){% endif -%}
+  {%- else -%}
+    ⚡ Charging
+  {%- endif -%}
+{%- elif 'plug' in conn -%}
+  🔌 Plugged in, not charging
+{%- elif conn == 'disconnected' -%}
+  Not plugged in
+{%- else -%}
+  Charging status unknown
+{%- endif %}<br>
+
+{#- Line 3: name what is open. A sensor that is not reporting is listed as
+    quiet rather than counted as shut. -#}
+{%- set openings = {
+  'binary_sensor.my_geely_ex5_door_driver': 'driver door',
+  'binary_sensor.my_geely_ex5_door_passenger': 'passenger door',
+  'binary_sensor.my_geely_ex5_door_rear_left': 'rear left',
+  'binary_sensor.my_geely_ex5_door_rear_right': 'rear right',
+  'binary_sensor.my_geely_ex5_trunk': 'trunk',
+  'binary_sensor.my_geely_ex5_hood': 'hood'} -%}
+{%- set ns = namespace(open=[], quiet=0) -%}
+{%- for eid, label in openings.items() -%}
+  {%- if is_state(eid, 'on') -%}{%- set ns.open = ns.open + [label] -%}
+  {%- elif not has_value(eid) -%}{%- set ns.quiet = ns.quiet + 1 -%}{%- endif -%}
+{%- endfor -%}
+{%- if ns.open -%}
+  <b>⚠️ Open: {{ ns.open | join(', ') }}</b>
+{%- elif ns.quiet == openings | count -%}
+  No door sensors reporting
+{%- elif ns.quiet -%}
+  Everything reporting is shut
+{%- else -%}
+  ✅ All shut
+{%- endif %}<br>
+
+{#- Line 4: how stale is this. Same guard as the finish time. -#}
+{%- set seen = as_timestamp(states('sensor.my_geely_ex5_last_updated'), 0) -%}
+<i>
+{%- if seen > 0 -%}
+  {%- set age = [((as_timestamp(now()) - seen) / 60) | round | int, 0] | max -%}
+  {%- if age < 1 %}Updated just now
+  {%- elif age < 60 %}Updated {{ age }} min ago
+  {%- elif age < 1440 %}Updated {{ age // 60 }}h ago
+  {%- else %}Updated {{ age // 1440 }}d ago{% endif -%}
+{%- else -%}
+  No update time yet
+{%- endif -%}
+{%- if is_state('binary_sensor.my_geely_ex5_connected', 'off') %} · ⚠️ offline{% endif -%}
+</i>

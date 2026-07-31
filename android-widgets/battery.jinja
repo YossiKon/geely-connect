@@ -1,0 +1,49 @@
+{#- Geely Connect - home-screen BATTERY widget.
+    Paste the whole file into the companion app's Template widget, then
+    search-replace my_geely_ex5 with your own entity suffix.
+    Fits a 2x2 widget at text size 14. -#}
+{%- set batt = 'sensor.my_geely_ex5_battery' -%}
+{%- set rng = 'sensor.my_geely_ex5_electric_range' -%}
+{%- set conn = states('sensor.my_geely_ex5_charger_connection') | lower -%}
+{%- set done = 'sensor.my_geely_ex5_charge_complete' -%}
+
+{%- if has_value(batt) -%}
+  {%- set pct = states(batt) | float(0) | round | int -%}
+  {#- Ten blocks, one per 10%. Filled blocks show charge at a glance in a
+      widget too small for a real gauge. -#}
+  {%- set filled = (pct / 10) | round(0, 'floor') | int -%}
+  <b>{{ pct }}%</b>
+  {%- if 'charging' in conn %} ⚡{% endif %}<br>
+  {{ '█' * filled }}{{ '░' * (10 - filled) }}<br>
+{%- else -%}
+  <b>Battery not reported</b><br>
+{%- endif -%}
+
+{%- if has_value(rng) -%}
+  {{ states(rng) | float(0) | round | int }} km left
+{%- else -%}
+  Range not reported
+{%- endif %}<br>
+
+{#- as_timestamp with a 0 default, then test the number: has_value() only
+    rules out unknown and cannot promise the string parses. -#}
+{%- set eta = as_timestamp(states(done), 0) -%}
+<i>
+{%- if 'charging' in conn -%}
+  {%- if eta > 0 -%}
+    {%- set mins = [((eta - as_timestamp(now())) / 60) | round | int, 0] | max -%}
+    Full at {{ eta | timestamp_custom('%H:%M', true) }}
+    {%- if mins >= 60 %}, in {{ mins // 60 }}h {{ mins % 60 }}m
+    {%- elif mins > 0 %}, in {{ mins }} min
+    {%- else %}, any moment{% endif -%}
+  {%- else -%}
+    Charging
+  {%- endif -%}
+{%- elif 'plug' in conn -%}
+  Plugged in, idle
+{%- elif conn == 'disconnected' -%}
+  Not plugged in
+{%- else -%}
+  Charger state unknown
+{%- endif -%}
+</i>
