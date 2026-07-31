@@ -108,7 +108,7 @@ def _already_configured_vins(hass) -> set[str]:
 class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Geely (international)."""
 
-    VERSION = 4
+    VERSION = 5
 
     def __init__(self) -> None:
         self._email: str | None = None

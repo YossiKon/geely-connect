@@ -379,13 +379,25 @@ existing tire sensors, so history is kept rather than restarting.
 
 ### Which entities appear
 
-Anything that could leave the car exposed if pressed by accident is created but
-**disabled by default**: the window, sunroof and sunshade covers, and the
-window-ventilation switch. Turn on the ones you want under **Entities** on the
-device page. The full-exposure raw sensors are disabled by default too, and the
-readings that are only occasionally interesting (tire pressures, 12V, trip
-meter, service counters, engine state) sit in the collapsed **Diagnostic**
-section rather than the main list.
+**38 entities are on by default** — the ones you'd actually look at or press:
+battery, range, odometer, both temperatures, charger status, efficiency, charge
+complete, lowest tire pressure, service due, every door plus trunk and hood, the
+lock, climate, charging and scheduled charging, defrost, G-Clean, parking
+comfort, the seat heat and vent selects, find car, unlock trunk, refresh, and
+the location tracker.
+
+**18 more are created but switched off.** Two reasons:
+
+- *Safety* — the window, sunroof and sunshade covers and the window-ventilation
+  switch are easy to hit by accident and leave the car exposed.
+- *Noise* — readings that duplicate a better entity (12V voltage vs 12V
+  percentage; the four corner pressures vs Lowest Tire Pressure; days and
+  distance to service vs Service Due) or that say little when polled every 90
+  seconds (speed, engine state, park brake, trip meter, average speed, driver
+  seatbelt).
+
+Nothing is deleted — turn on whichever you want under **Entities** on the device
+page.
 
 ---
 

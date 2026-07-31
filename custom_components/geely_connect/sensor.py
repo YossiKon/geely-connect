@@ -154,6 +154,19 @@ SENSOR_SPECS: tuple[tuple, ...] = (
 
 # Sensors marked diagnostic appear in HA's collapsed "Diagnostic" section
 # on the device page rather than the main entity list.
+# Created but switched off. Each is either a duplicate of something already
+# shown (12V voltage vs 12V percentage; the four corner pressures vs Lowest
+# Tire Pressure; days/distance to service vs Service Due) or near-useless from
+# a cloud poll every 90 seconds (speed, engine state, seatbelt). Nothing is
+# removed - turn on whichever you want under Entities on the device page.
+_OFF_BY_DEFAULT_KEYS: set[str] = {
+    "speed", "engine_state", "park_brake",
+    "12v_voltage", "avg_speed", "trip_meter",
+    "tire_pressure_fl", "tire_pressure_fr", "tire_pressure_rl", "tire_pressure_rr",
+    "days_to_service", "distance_to_service",
+    "time_to_full_min",
+}
+
 _DIAGNOSTIC_KEYS: set[str] = {
     "park_brake",
     "12v_battery", "12v_voltage",
@@ -329,6 +342,8 @@ class GeelySensor(CoordinatorEntity, SensorEntity):
             self._attr_icon = icon
         if key in _DIAGNOSTIC_KEYS:
             self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        if key in _OFF_BY_DEFAULT_KEYS:
+            self._attr_entity_registry_enabled_default = False
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, vin)},
             manufacturer="Geely",

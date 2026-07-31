@@ -566,10 +566,21 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 # registered, so an install that predates that change keeps them switched on;
 # the v3 migration below turns them off once.
 _OFF_BY_DEFAULT_UNIQUE_ID_PATTERNS: tuple[str, ...] = (
+    # Safety-relevant controls - easy to hit by accident from a dashboard.
     "_cover_sunroof",            # cover.py _key = "sunroof"
     "_cover_sunshade",           # cover.py _key = "sunshade"
     "_cover_windows",            # cover.py _key = "windows"
     "_sw_window_ventilation",    # switch.py
+    # Readings that duplicate a better entity or say little from a 90-second
+    # cloud poll. Mirrors _OFF_BY_DEFAULT_KEYS in sensor.py; unique ids are
+    # "geely_<vin>_<key>", so the leading underscore anchors the match.
+    "_speed", "_engine_state", "_park_brake",
+    "_12v_voltage", "_avg_speed", "_trip_meter",
+    "_tire_pressure_fl", "_tire_pressure_fr",
+    "_tire_pressure_rl", "_tire_pressure_rr",
+    "_days_to_service", "_distance_to_service",
+    "_time_to_full_min",
+    "_bs_driver_seatbelt",
 )
 
 
@@ -628,8 +639,10 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     window-ventilation entities, which now ship disabled because opening them
     by accident from a dashboard leaves the car exposed. v3 -> v4: clear the
     ~180 auto-generated full-exposure sensors, now opt-in under Configure.
-    Everything else keeps working; missing fields fall back to safe defaults."""
-    if entry.version >= 4:
+    v4 -> v5: switch off the readings that duplicate a better entity or say
+    little from a cloud poll, leaving a core set on. Everything else keeps
+    working; missing fields fall back to safe defaults."""
+    if entry.version >= 5:
         return True
 
     new_data = dict(entry.data)
@@ -642,6 +655,6 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     _disable_off_by_default_entities(hass, entry)
     _purge_raw_exposure_entities(hass, entry)
-    hass.config_entries.async_update_entry(entry, data=new_data, version=4)
-    _LOGGER.info("Migrated geely_connect entry %s to v4", entry.entry_id)
+    hass.config_entries.async_update_entry(entry, data=new_data, version=5)
+    _LOGGER.info("Migrated geely_connect entry %s to v5", entry.entry_id)
     return True
