@@ -10,6 +10,7 @@ already fetched, plus two Home Assistant conveniences.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
 from contextlib import contextmanager
 from typing import Any
@@ -20,6 +21,8 @@ from homeassistant.helpers.entity import DeviceInfo
 
 from .api import GeelyControlError
 from .const import DOMAIN
+
+_LOGGER = logging.getLogger(__name__)
 
 # The four window corners, in the order the protocol names them.
 WINDOW_CORNERS: tuple[str, ...] = ("Driver", "Passenger", "DriverRear", "PassengerRear")
@@ -91,12 +94,21 @@ def schedule_refresh(hass: HomeAssistant, coordinator, *delays: float,
     re-read the old state.
 
     `after` runs once the last refresh is done - used to drop an optimistic
-    override at the point real state is finally available.
+    override at the point real state is finally available. It runs even if a
+    refresh fails: `after` is what releases the optimistic override, and
+    skipping it would pin the entity to a guessed state until the next command.
+    Cancellation (config entry unloaded, Home Assistant stopping) is the one
+    case where it must not run - there is no entity left to write to.
     """
     async def _run() -> None:
-        for delay in delays:
-            await asyncio.sleep(delay)
-            await coordinator.async_request_refresh()
+        try:
+            for delay in delays:
+                await asyncio.sleep(delay)
+                await coordinator.async_request_refresh()
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - a background poll must not raise
+            _LOGGER.debug("post-command refresh failed", exc_info=True)
         if after is not None:
             after()
 
