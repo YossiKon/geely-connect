@@ -31,6 +31,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from homeassistant.components.climate import (
@@ -46,8 +47,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.helpers.restore_state import ExtraStoredData, RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util.unit_conversion import TemperatureConverter
 
 from .api import GeelyControlError, redact
 
@@ -98,6 +100,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
         _LOGGER.info("Capability says AC not supported on this trim - skipping climate entity")
         return
     add_entities([GeelyClimate(hass, bundle)])
+
+
+@dataclass
+class GeelyClimateExtraData(ExtraStoredData):
+    """Setpoint carried across restarts in native Celsius, unconverted."""
+
+    target_temp_c: float
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"target_temp_c": self.target_temp_c}
 
 
 class GeelyClimate(CoordinatorEntity, ClimateEntity, RestoreEntity):
@@ -155,6 +167,16 @@ class GeelyClimate(CoordinatorEntity, ClimateEntity, RestoreEntity):
         self._optimistic_hvac_mode: HVACMode | None = None
         self._optimistic_until: float = 0.0
 
+    @property
+    def extra_restore_state_data(self) -> GeelyClimateExtraData:
+        """Persist the setpoint in native Celsius.
+
+        The `temperature` state attribute is written in the *display* unit, so
+        restoring from it on a Fahrenheit install reads 72 as 72 °C. Extra
+        restore data is stored verbatim and is not unit-converted.
+        """
+        return GeelyClimateExtraData(self._cached_target_temp)
+
     async def async_added_to_hass(self) -> None:
         """Restore last target temp from HA's recorder on startup.
 
@@ -163,6 +185,22 @@ class GeelyClimate(CoordinatorEntity, ClimateEntity, RestoreEntity):
         restarts and shows the default 22°C.
         """
         await super().async_added_to_hass()
+
+        extra = await self.async_get_last_extra_data()
+        if extra is not None:
+            stored = (extra.as_dict() or {}).get("target_temp_c")
+            if stored is not None:
+                try:
+                    self._cached_target_temp = self._clamp_temp(float(stored))
+                except (TypeError, ValueError):
+                    pass
+                else:
+                    _LOGGER.debug("Restored target temp: %.1f °C",
+                                  self._cached_target_temp)
+                    return
+
+        # Entries written before the native value was stored only have the
+        # display-unit attribute. Convert it back rather than trusting it.
         last_state = await self.async_get_last_state()
         if last_state is None:
             return
@@ -173,9 +211,17 @@ class GeelyClimate(CoordinatorEntity, ClimateEntity, RestoreEntity):
             t = float(last_temp)
         except (TypeError, ValueError):
             return
-        clamped = max(self._attr_min_temp, min(self._attr_max_temp, t))
-        self._cached_target_temp = clamped
-        _LOGGER.debug("Restored target temp from last state: %.1f", clamped)
+        display_unit = self.hass.config.units.temperature_unit
+        if display_unit != UnitOfTemperature.CELSIUS:
+            t = TemperatureConverter.convert(
+                t, display_unit, UnitOfTemperature.CELSIUS
+            )
+        self._cached_target_temp = self._clamp_temp(t)
+        _LOGGER.debug("Restored target temp from legacy attribute: %.1f °C",
+                      self._cached_target_temp)
+
+    def _clamp_temp(self, value: float) -> float:
+        return max(self._attr_min_temp, min(self._attr_max_temp, value))
 
     # ---- read state ----
 
