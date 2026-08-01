@@ -49,7 +49,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .api import GeelyControlError
+from .api import GeelyControlError, redact
 
 from .const import (
     CLIMATE_MAX_TEMP_C,
@@ -366,7 +366,7 @@ class GeelyClimate(CoordinatorEntity, ClimateEntity, RestoreEntity):
         )
         self._optimistic_preset_until = time.time() + 30
         _LOGGER.debug("Geely rapid %s response=%s",
-                      "warming" if warming else "cooling", resp)
+                      "warming" if warming else "cooling", redact(resp))
 
         schedule_refresh(self._hass, self.coordinator, 8)
         self.async_write_ha_state()
@@ -391,7 +391,7 @@ class GeelyClimate(CoordinatorEntity, ClimateEntity, RestoreEntity):
             raise HomeAssistantError(f"Geely climate failure: {e}") from e
         _LOGGER.debug(
             "Geely climate %s params=%s duration=%d response=%s",
-            command, params, duration, resp,
+            command, redact(params), duration, redact(resp),
         )
 
         schedule_refresh(self._hass, self.coordinator, 8)

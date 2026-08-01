@@ -35,7 +35,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 
-from .api import GeelyControlError
+from .api import GeelyControlError, redact
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -181,7 +181,7 @@ class GeelySwitch(CoordinatorEntity, SwitchEntity):
             _LOGGER.exception("switch %s %s failed", self._service_id, command)
             raise HomeAssistantError(f"Geely {self._service_id} failure: {e}") from e
         _LOGGER.debug("Geely switch %s %s params=%s response=%s",
-                      self._service_id, command, params, resp)
+                      self._service_id, command, redact(params), redact(resp))
 
         schedule_refresh(self._hass, self.coordinator, 8)
 
@@ -253,7 +253,7 @@ class GeelyGCleanSwitch(CoordinatorEntity, SwitchEntity):
         except Exception as e:
             _LOGGER.exception("g-clean %s failed", command)
             raise HomeAssistantError(f"Geely G-Clean failure: {e}") from e
-        _LOGGER.debug("Geely g-clean %s response=%s", command, resp)
+        _LOGGER.debug("Geely g-clean %s response=%s", command, redact(resp))
 
         schedule_refresh(self._hass, self.coordinator, 8)
 
@@ -309,7 +309,7 @@ class GeelyDefrostSwitch(CoordinatorEntity, SwitchEntity):
         except Exception as e:
             _LOGGER.exception("defrost %s failed", command)
             raise HomeAssistantError(f"Geely Defrost failure: {e}") from e
-        _LOGGER.debug("Geely defrost %s response=%s", command, resp)
+        _LOGGER.debug("Geely defrost %s response=%s", command, redact(resp))
 
         schedule_refresh(self._hass, self.coordinator, 8)
 
@@ -399,7 +399,7 @@ class GeelyScheduledChargingSwitch(CoordinatorEntity, SwitchEntity):
         except Exception as e:
             _LOGGER.exception("scheduled charging %s failed", command)
             raise HomeAssistantError(f"Geely Scheduled Charging failure: {e}") from e
-        _LOGGER.debug("Geely scheduled-charging %s response=%s", command, resp)
+        _LOGGER.debug("Geely scheduled-charging %s response=%s", command, redact(resp))
 
         # Set the optimistic flag so is_on returns the new state for up
         # to 60s. The Geely server takes about 30s to propagate scheduled
@@ -464,6 +464,6 @@ class GeelyWindowVentilationSwitch(CoordinatorEntity, SwitchEntity):
             _LOGGER.exception("vent switch %s failed", command)
             raise HomeAssistantError(f"Geely Window Ventilation failure: {e}") from e
         _LOGGER.debug("Geely vent switch %s params=%s response=%s",
-                      command, params, resp)
+                      command, redact(params), redact(resp))
 
         schedule_refresh(self._hass, self.coordinator, 8)

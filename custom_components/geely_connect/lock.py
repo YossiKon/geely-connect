@@ -34,7 +34,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .api import GeelyControlError
+from .api import GeelyControlError, redact
 
 from .const import (
     DOMAIN,
@@ -146,7 +146,7 @@ class GeelyLock(CoordinatorEntity, LockEntity):
         except Exception as e:
             _LOGGER.exception("lock %s failed", service_id)
             raise HomeAssistantError(f"Geely {service_id} failure: {e}") from e
-        _LOGGER.debug("Geely lock %s response: %s", service_id, resp)
+        _LOGGER.debug("Geely lock %s response: %s", service_id, redact(resp))
         self._pending_target_locked = target_locked
         self._pending_started_at = time.time()
         self.async_write_ha_state()

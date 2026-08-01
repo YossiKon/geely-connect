@@ -21,7 +21,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from . import api as geely_api
-from .api import GeelyApi, GeelyAuthError, GeelyControlError, GeelyTLSPinError
+from .api import GeelyApi, GeelyAuthError, GeelyControlError, GeelyTLSPinError, redact
 from .const import (
     CLIENT_ID,
     VEHICLE_SERIES,
@@ -393,7 +393,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 f"keys={sorted(resp.keys())}"
             )
         if not isinstance(data, dict):
-            _LOGGER.debug("vehicle_status returned non-dict data: top-level=%r", resp)
+            _LOGGER.debug("vehicle_status returned non-dict data: top-level=%r", redact(resp))
             data = {}
 
         charging, driving = _poll_flags(data)
@@ -570,7 +570,8 @@ def _register_debug_service(hass: HomeAssistant) -> None:
         except Exception as e:
             raise HomeAssistantError(f"fire_control {sid} failed: {e}") from e
         _LOGGER.debug(
-            "fire_control %s %s params=%s → response=%s", sid, cmd, params, resp,
+            "fire_control %s %s params=%s → response=%s",
+            sid, cmd, redact(params), redact(resp),
         )
 
     hass.services.async_register(DOMAIN, "fire_control", _handle, schema=schema)

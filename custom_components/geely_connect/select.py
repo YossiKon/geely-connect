@@ -47,7 +47,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .api import GeelyControlError
+from .api import GeelyControlError, redact
 
 from .const import (
     CLIMATE_SEAT_LEVELS,
@@ -219,7 +219,7 @@ class GeelySeatLevel(CoordinatorEntity, SelectEntity):
             ) from e
         _LOGGER.debug(
             "Geely seat %s seat=%s level=%d response=%s",
-            self._mode, self._seat_name, level, resp,
+            self._mode, self._seat_name, level, redact(resp),
         )
         # Server accepted - set optimistic so the UI doesn't flicker
         # while the next status poll catches up to the real state.

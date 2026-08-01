@@ -96,9 +96,28 @@ _REGION_MISMATCH_CODES: set = {"1501", "1445"}
 # so every entry here must be in that separator-free form.
 _SECRET_KEYS: set = {
     "token", "accesstoken", "accesscode", "authcode", "refreshtoken",
-    "cert", "csr", "key", "privatekey", "password",
+    "cert", "csr", "privatekey", "password",
     "passtoken", "captchaoutput", "sessionid",
     "cidpssotoken", "jwt", "secret", "appsecret",
+    # The scheduled-charging body sends the VIN in "pin", but the field is a
+    # PIN by contract and a future firmware could put a real one there.
+    "pin",
+}
+
+# "key" is ambiguous: it holds PEM material in provisioning responses, but the
+# control API uses {"key": "operation", "value": "1"} name/value pairs, where
+# the value is a parameter *name* and masking it makes a debug log useless.
+# Decide from the value, not the key.
+_AMBIGUOUS_KEYS: set = {"key"}
+
+# Not secrets, but they identify a specific person or car, and a debug log is
+# the single most-shared artefact when someone opens an issue. Kept partially
+# visible - the last four characters are enough to tell two vehicles apart in
+# a log without publishing the identifier. Mirrors diagnostics.py, which
+# already masks these; the two lists must not drift apart.
+_IDENTIFYING_KEYS: set = {
+    "vin", "userid", "deviceid", "devicehardwareidfa", "devicehardwareidfv",
+    "deviceidfa", "deviceidfv", "email", "mobile", "phone", "username",
 }
 
 
@@ -112,24 +131,47 @@ def _no_crlf(value: str, what: str) -> str:
     return value
 
 
-def _redact(obj: Any):
+def _mask_tail(value: Any) -> Any:
+    """Show only the last four characters of an identifier."""
+    text = str(value)
+    return f"...{text[-4:]}" if len(text) > 4 else "***"
+
+
+def _looks_like_key_material(value: Any) -> bool:
+    """True if a "key" field holds a credential rather than a parameter name.
+
+    Control params carry short identifiers like "operation" or "rcs.restart";
+    PEM blocks and base64 key blobs are long and have tell-tale markers.
+    """
+    if not isinstance(value, str):
+        return True                       # dict/list under "key" - do not risk it
+    return "-----BEGIN" in value or len(value) > 40
+
+
+def redact(obj: Any):
     """Return a copy of a server response / dict with secret values masked.
 
     Used anywhere a raw response is folded into a log line or exception
     message. Prevents tokens, JWTs, and certificate material from being
     written to Home Assistant's log file, which is often shared when a
-    user asks for help.
+    user asks for help. Identifiers in _IDENTIFYING_KEYS are reduced to their
+    last four characters rather than removed, so a log stays readable.
     """
     if isinstance(obj, dict):
         out = {}
         for k, v in obj.items():
-            if isinstance(k, str) and k.lower().replace("-", "").replace("_", "") in _SECRET_KEYS:
+            norm = k.lower().replace("-", "").replace("_", "") if isinstance(k, str) else None
+            if norm in _SECRET_KEYS or (
+                norm in _AMBIGUOUS_KEYS and _looks_like_key_material(v)
+            ):
                 out[k] = "***redacted***"
+            elif norm in _IDENTIFYING_KEYS and not isinstance(v, (dict, list, tuple)):
+                out[k] = _mask_tail(v)
             else:
-                out[k] = _redact(v)
+                out[k] = redact(v)
         return out
     if isinstance(obj, (list, tuple)):
-        return [_redact(v) for v in obj]
+        return [redact(v) for v in obj]
     return obj
 
 
@@ -696,9 +738,9 @@ class GeelyApi:
         )
         j = json.loads(resp_bytes)
         if _is_auth_failure(j):
-            raise GeelyAuthError(f"cidpsso token rejected: {_redact(j)}")
+            raise GeelyAuthError(f"cidpsso token rejected: {redact(j)}")
         if j.get("code") != 10000000:
-            raise RuntimeError(f"getCode failed: {_redact(j)}")
+            raise RuntimeError(f"getCode failed: {redact(j)}")
         return j["data"]["accessCode"]
 
     def refresh_jwt(self) -> dict:
@@ -712,9 +754,9 @@ class GeelyApi:
         )
         j = json.loads(resp)
         if _is_auth_failure(j):
-            raise GeelyAuthError(f"session/secure rejected our auth: {_redact(j)}")
+            raise GeelyAuthError(f"session/secure rejected our auth: {redact(j)}")
         if j.get("code") not in (1000, "1000"):
-            raise RuntimeError(f"session/secure failed: {_redact(j)}")
+            raise RuntimeError(f"session/secure failed: {redact(j)}")
         d = j["data"]
         self._jwt = d["accessToken"]
         self._jwt_uid = d["userId"]
@@ -763,7 +805,7 @@ class GeelyApi:
             )
             j = json.loads(resp)
         if _is_auth_failure(j):
-            raise GeelyAuthError(f"{method} {path} auth-rejected: {_redact(j)}")
+            raise GeelyAuthError(f"{method} {path} auth-rejected: {redact(j)}")
         return j
 
     def vehicle_status(self) -> dict:
@@ -1050,7 +1092,7 @@ def provision_user_cert(*, app_id: str, app_secret: str, user_id: str,
                 "(APAC, North America or South America), which needs its own "
                 "app credentials this integration does not have."
             )
-        raise RuntimeError(f"cert/info failed: {_redact(j)}")
+        raise RuntimeError(f"cert/info failed: {redact(j)}")
     check_code = j["data"]["checkCode"]
 
     # 3. POST /auth/cert/file → signed cert
@@ -1080,7 +1122,7 @@ def provision_user_cert(*, app_id: str, app_secret: str, user_id: str,
                 "(APAC, North America or South America), which needs its own "
                 "app credentials this integration does not have."
             )
-        raise RuntimeError(f"cert/file failed: {_redact(j)}")
+        raise RuntimeError(f"cert/file failed: {redact(j)}")
     cert_pem = j["data"]["cert"]
 
     # 4. Save to disk with owner-only permissions.
@@ -1228,8 +1270,8 @@ def cidpsso_send_otp(email: str, country_code: str = "GB", *,
             continue
         if not (captcha.get("status") == "success"
                 and captcha.get("data", {}).get("result") == "success"):
-            last_error = f"captcha solve rejected by /verify: {_redact(captcha)}"
-            _LOGGER.debug("captcha attempt %d rejected: %s", attempt, _redact(captcha))
+            last_error = f"captcha solve rejected by /verify: {redact(captcha)}"
+            _LOGGER.debug("captcha attempt %d rejected: %s", attempt, redact(captcha))
             continue
         v = captcha["data"]
         body = {
@@ -1248,7 +1290,7 @@ def cidpsso_send_otp(email: str, country_code: str = "GB", *,
         last_response = resp
         if resp.get("success") or resp.get("code") == 10000000:
             return resp
-        _LOGGER.debug("getCaptcha attempt %d server-rejected: %s", attempt, _redact(resp))
+        _LOGGER.debug("getCaptcha attempt %d server-rejected: %s", attempt, redact(resp))
 
     if last_response is not None:
         return last_response

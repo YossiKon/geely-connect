@@ -25,7 +25,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .api import GeelyControlError
+from .api import GeelyControlError, redact
 
 from .const import (
     DOMAIN,
@@ -119,6 +119,6 @@ class GeelyTelematicsButton(ButtonEntity):
         except Exception as e:
             _LOGGER.exception("Button %s failed", self._service_id)
             raise HomeAssistantError(f"Geely {self._service_id} failure: {e}") from e
-        _LOGGER.debug("Geely button %s response: %s", self._service_id, resp)
+        _LOGGER.debug("Geely button %s response: %s", self._service_id, redact(resp))
 
 

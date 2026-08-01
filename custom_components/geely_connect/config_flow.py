@@ -151,7 +151,7 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "send_code_failed"
             else:
                 if resp.get("code") and resp.get("code") != 10000000:
-                    _LOGGER.warning("OTP send response: %s", geely_api._redact(resp))
+                    _LOGGER.warning("OTP send response: %s", geely_api.redact(resp))
                     errors["base"] = "send_code_failed"
                 else:
                     return await self.async_step_code()
@@ -199,7 +199,7 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["code"] = "invalid_code"
             else:
                 if login_resp.get("code") != 10000000:
-                    _LOGGER.warning("login resp: %s", geely_api._redact(login_resp))
+                    _LOGGER.warning("login resp: %s", geely_api.redact(login_resp))
                     errors["code"] = "invalid_code"
                 else:
                     data = login_resp.get("data") or {}

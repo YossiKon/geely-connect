@@ -25,7 +25,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .api import GeelyControlError
+from .api import GeelyControlError, redact
 from .const import DOMAIN, SERVICE_WINDOW
 from .helpers import walk as _walk, windows_open, schedule_refresh
 
@@ -85,7 +85,7 @@ class _BaseGeelyCover(CoordinatorEntity, CoverEntity):
         except Exception as e:
             _LOGGER.exception("cover %s %s failed", self._target, command)
             raise HomeAssistantError(f"Geely cover failure: {e}") from e
-        _LOGGER.debug("Geely cover %s %s response=%s", self._target, command, resp)
+        _LOGGER.debug("Geely cover %s %s response=%s", self._target, command, redact(resp))
 
         schedule_refresh(self._hass, self.coordinator, 8)
 

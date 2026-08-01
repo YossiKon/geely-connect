@@ -34,7 +34,7 @@ from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .api import GeelyControlError
+from .api import GeelyControlError, redact
 from .const import DOMAIN
 from .helpers import truthy as _truthy, schedule_refresh
 
@@ -137,7 +137,7 @@ class GeelyScheduledChargingTime(CoordinatorEntity, TimeEntity):
             _LOGGER.exception("scheduled-charging set time failed")
             raise HomeAssistantError(f"Geely Scheduled Charging time failure: {e}") from e
         _LOGGER.debug("Set scheduled charging %s=%s response=%s",
-                      self._kind, _fmt_hhmm(value), resp)
+                      self._kind, _fmt_hhmm(value), redact(resp))
 
         # Optimistic local value: holds for 60s, until the slow server
         # propagation (about 30s) catches up.
