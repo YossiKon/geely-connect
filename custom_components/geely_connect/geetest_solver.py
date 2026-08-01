@@ -143,17 +143,28 @@ def make_session() -> requests.Session:
 def _to_grayscale(png: bytes) -> np.ndarray:
     """Load PNG as grayscale, ignoring alpha (cv2.IMREAD_ANYCOLOR behavior).
     Alpha-compositing against black would create spurious edges along the
-    slice's transparent boundary and break template matching."""
+    slice's transparent boundary and break template matching.
+
+    Palette images are expanded first: a "P"-mode array holds palette indices,
+    and their numeric order is arbitrary, so treating them as luminance makes
+    the gradient meaningless.
+    """
     img = Image.open(io.BytesIO(png))
+    if img.mode in ("P", "PA"):
+        img = img.convert("RGBA")
     arr = np.asarray(img)
-    if arr.ndim == 2:
+    if arr.ndim == 2:                       # already single-channel ("L", "1", "I")
         return arr.astype(np.float32)
-    if arr.shape[-1] == 4:
-        arr = arr[..., :3]   # drop alpha - do NOT composite
+    if arr.shape[-1] in (2, 4):
+        arr = arr[..., :-1]                 # drop alpha - do NOT composite
+    if arr.shape[-1] == 1:                  # "LA" once alpha is dropped
+        return arr[..., 0].astype(np.float32)
     if arr.shape[-1] == 3:
-        # BT.601 luma - same weights cv2 uses for COLOR_BGR2GRAY
-        return (0.299 * arr[..., 2] + 0.587 * arr[..., 1] + 0.114 * arr[..., 0]).astype(np.float32)
-    return arr.astype(np.float32)
+        # BT.601 luma. PIL hands back RGB, so R is index 0 - the cv2 formula
+        # this was ported from indexes a BGR array and must not be copied
+        # verbatim, or the red and blue weights end up swapped.
+        return (0.299 * arr[..., 0] + 0.587 * arr[..., 1] + 0.114 * arr[..., 2]).astype(np.float32)
+    return arr[..., 0].astype(np.float32)
 
 
 def _canny_edges(im: np.ndarray, low: float = 50.0, high: float = 100.0) -> np.ndarray:
