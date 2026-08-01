@@ -38,7 +38,8 @@
       "cert_failed": "Failed to provision the per-device mTLS certificate. Check the logs.",
       "wrong_region": "This Geely account is served by a regional backend this integration has no credentials for. It supports the EU/International and North-American clouds; APAC and South America need their own app credentials, which are not public. The log line names the region that was detected.",
       "reauth_successful": "Re-authenticated. Token refreshed.",
-      "unknown": "Something went wrong. Check the logs."
+      "unknown": "Something went wrong. Check the logs.",
+      "reauth_account_mismatch": "Re-authentication used a different Geely account than the one this entry was created with. Sign in with the original account, or remove the entry and add the vehicle again."
     }
   },
   "options": {

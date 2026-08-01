@@ -38,7 +38,8 @@
       "cert_failed": "Échec de l'émission du certificat mTLS.",
       "wrong_region": "Ce compte Geely est géré par un backend régional pour lequel cette intégration n'a pas d'identifiants. Les clouds EU/International et nord-américain sont pris en charge ; l'APAC et l'Amérique du Sud nécessitent leurs propres identifiants d'application, non publics. La ligne de journal indique la région détectée.",
       "reauth_successful": "Ré-authentification réussie.",
-      "unknown": "Une erreur s'est produite."
+      "unknown": "Une erreur s'est produite.",
+      "reauth_account_mismatch": "La ré-authentification a utilisé un compte Geely différent de celui avec lequel cette entrée a été créée. Connectez-vous avec le compte d'origine, ou supprimez l'entrée et ajoutez à nouveau le véhicule."
     }
   },
   "options": {

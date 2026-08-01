@@ -296,6 +296,19 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # On re-auth: update the existing entry's token instead of creating
         # a new entry - preserves entity history, automations, and unique IDs.
         if self._reauth_entry is not None:
+            # The entry's unique_id is "email:vin" and is not recomputed here,
+            # so re-authenticating as a different account would leave the entry
+            # labelled with one address while it operates as another. Requiring
+            # the VIN to exist in the new account does not catch this: a second
+            # household account normally lists the same car.
+            previous_email = self._reauth_entry.data.get(CONF_EMAIL) or ""
+            if previous_email and (self._email or "").lower() != previous_email.lower():
+                _LOGGER.error(
+                    "re-authentication used a different Geely account than the "
+                    "one this entry was created with; aborting"
+                )
+                return self.async_abort(reason="reauth_account_mismatch")
+
             new_data = dict(self._reauth_entry.data)
             new_data[CONF_CIDPSSO_TOKEN] = self._cidpsso_token
             new_data[CONF_USER_ID] = self._user_id
