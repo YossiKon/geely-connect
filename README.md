@@ -1,7 +1,7 @@
 # Geely Connect
 
 [![Add to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=YossiKon&repository=geely-connect&category=integration)
-[![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz/docs/faq/custom_repositories)
+[![HACS Default](https://img.shields.io/badge/HACS-Default-41BDF5.svg)](https://github.com/hacs/default)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 > ⚠️ **Unofficial, community-built integration.** Not affiliated with, endorsed
@@ -198,30 +198,30 @@ can ship. To unblock yourself in the meantime, add the reported key to the
 
 ## 📥 Installation (HACS)
 
+Geely Connect is in the **HACS default store**, so there is no repository URL
+to add.
+
 **One-click:** [![Add to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=YossiKon&repository=geely-connect&category=integration)
 
 Or manually:
 
-1. HACS → ⋮ (top-right) → **Custom repositories** → paste
-   `https://github.com/YossiKon/geely-connect`, category **Integration** → **Add**
-2. In HACS, search **Geely Connect**, open it and press **Download**, then
-   **restart Home Assistant**
-3. Settings → Devices & Services → **Add Integration** → **Geely Connect**
-4. Enter your email, pick **country / tire-pressure unit / polling mode**, then
+1. HACS → search **Geely Connect** → open it → **Download**, then **restart
+   Home Assistant**
+2. Settings → Devices & Services → **Add Integration** → **Geely Connect**
+3. Enter your email, pick **country / tire-pressure unit / polling mode**, then
    enter the 6-digit code sent to your inbox
 
 ### The repository doesn't show up in HACS?
 
-- Make sure you picked category **Integration** when adding the custom
-  repository.
-- After adding it, it does **not** appear automatically — type "Geely Connect"
-  in the HACS search box (and clear any active filters).
-- If you added the repository **before** the integration files were pushed,
-  HACS may have cached the old state: remove the custom repository
-  (HACS → ⋮ → Custom repositories → 🗑), restart Home Assistant, then add it
-  again.
-- A GitHub API rate-limit can delay new repositories — wait a few minutes and
-  try again.
+- Clear any active filters in the HACS search box, and make sure you are
+  looking under **Integrations**.
+- HACS caches its repository list. Force a refresh with ⋮ → **Reload data** on
+  the HACS main page.
+
+> **Added it as a custom repository before?** It still works, but you can tidy
+> up: HACS → ⋮ → **Custom repositories** → 🗑 next to this repository. Removing
+> the *custom repository entry* does not uninstall the integration — the store
+> copy takes over and updates continue normally.
 
 ### Manual installation
 Copy `custom_components/geely_connect/` into `config/custom_components/` and
