@@ -18,6 +18,7 @@ from datetime import timedelta
 from typing import Any
 
 from homeassistant.components.sensor import (
+    RestoreSensor,
     SensorDeviceClass,
     SensorEntity,
     SensorStateClass,
@@ -34,9 +35,9 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as _dt_util
+from homeassistant.util.unit_conversion import DistanceConverter
 
 from .const import (
     CONF_FULL_EXPOSURE,
@@ -632,7 +633,7 @@ def _odometer(data: dict) -> float | None:
     return km if km > 0 else None
 
 
-class _GeelyTripBase(CoordinatorEntity, SensorEntity, RestoreEntity):
+class _GeelyTripBase(CoordinatorEntity, RestoreSensor):
     """Shared bookkeeping for the two trip sensors.
 
     The car's own tripMeter1 is the trip meter A on the dash - the driver
@@ -662,10 +663,25 @@ class _GeelyTripBase(CoordinatorEntity, SensorEntity, RestoreEntity):
             attrs = last.attributes or {}
             self._start_km = attrs.get("trip_start_odometer")
             self._was_running = attrs.get("engine_was_running")
-            try:
-                self._last_trip = float(last.state)
-            except (TypeError, ValueError):
-                self._last_trip = None
+
+        # Read the distance back through the sensor channel, not from
+        # `last.state`. A DISTANCE sensor's state is written in the display
+        # unit, so on a miles install restoring it as kilometres shrank the
+        # trip by a factor of 1.609 on every restart, compounding.
+        self._last_trip = None
+        if (stored := await self.async_get_last_sensor_data()) is not None:
+            value, unit = stored.native_value, stored.native_unit_of_measurement
+            if value is not None:
+                try:
+                    km = float(value)
+                except (TypeError, ValueError):
+                    km = None
+                else:
+                    if unit and unit != UnitOfLength.KILOMETERS:
+                        km = DistanceConverter.convert(
+                            km, unit, UnitOfLength.KILOMETERS
+                        )
+                self._last_trip = km
 
     def _advance(self) -> None:
         """Fold the newest poll into the trip bookkeeping.
