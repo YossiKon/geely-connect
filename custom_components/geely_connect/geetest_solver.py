@@ -197,11 +197,15 @@ def _canny_edges(im: np.ndarray, low: float = 50.0, high: float = 100.0) -> np.n
     center = mp[1:1 + h, 1:1 + w]
     n_h1 = mp[1:1 + h, 0:w]; n_h2 = mp[1:1 + h, 2:2 + w]
     n_v1 = mp[0:h, 1:1 + w]; n_v2 = mp[2:2 + h, 1:1 + w]
-    n_d1 = mp[0:h, 2:2 + w]; n_d2 = mp[2:2 + h, 0:w]      # 45° neighbors
-    n_a1 = mp[0:h, 0:w];     n_a2 = mp[2:2 + h, 2:2 + w]  # 135° neighbors
+    # gy is the derivative along increasing *row* index, so the angle above is
+    # measured in a y-points-down frame. 45° therefore runs down-right (the
+    # main diagonal) and 135° runs down-left (the anti-diagonal) - the opposite
+    # of the y-points-up convention these offsets are usually written for.
+    n_m1 = mp[0:h, 0:w];     n_m2 = mp[2:2 + h, 2:2 + w]  # 45°: up-left / down-right
+    n_a1 = mp[0:h, 2:2 + w]; n_a2 = mp[2:2 + h, 0:w]      # 135°: up-right / down-left
     keep = np.zeros_like(mag, dtype=bool)
     keep |= bin0 & (center >= n_h1) & (center >= n_h2)
-    keep |= bin1 & (center >= n_d1) & (center >= n_d2)
+    keep |= bin1 & (center >= n_m1) & (center >= n_m2)
     keep |= bin2 & (center >= n_v1) & (center >= n_v2)
     keep |= bin3 & (center >= n_a1) & (center >= n_a2)
     nms[keep] = mag[keep]
