@@ -188,11 +188,23 @@ and in the diagnostics report, and all traffic goes only to Geely's own servers
 — no telemetry, no third parties.
 
 If Geely ever rotates that gateway's key you will see a `GeelyTLSPinError`
-naming the host and the key it presented. That is the pin doing its job: please
-[open an issue](https://github.com/YossiKon/geely-connect/issues) so a new pin
-can ship. To unblock yourself in the meantime, add the reported key to the
-`pins` list for that host in
-`.storage/geely_connect/<VIN>/server_pins.json` and restart.
+naming the host and the key it presented. That is the pin doing its job — it
+cannot tell a legitimate rotation from an attacker, and neither can you from
+the error alone. So:
+
+1. **Do not pin the reported key.** If the error was caused by someone
+   intercepting your connection, that key is *theirs*, and pinning it would
+   hand them exactly the trust the pin exists to withhold.
+2. [Open an issue](https://github.com/YossiKon/geely-connect/issues) with the
+   host and key from the error. A rotation hits everyone at once, so it is
+   quickly confirmed from other reports and networks, and a release with the
+   new pin ships. The integration keeps showing the last known data meanwhile
+   — you lose remote commands, not the car.
+3. Only if you must unblock yourself sooner: confirm the same key is reported
+   from a **different network** (e.g. mobile hotspot instead of home Wi-Fi —
+   an attacker rarely controls both), and only then add it to the `pins` list
+   for that host in `.storage/geely_connect/<VIN>/server_pins.json` and
+   restart.
 
 ### What "hardened" means here
 
