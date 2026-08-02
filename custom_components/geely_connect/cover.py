@@ -2,8 +2,8 @@
 
 Service `RWS_2` with `target=sunshade|window` - same on Geely / Zeekr."""
 # -----------------------------------------------------------------------------
-# Portions of this file — the reverse-engineered Geely protocol / field mappings
-# (the parts that required protocol research) — are derived from
+# Portions of this file - the reverse-engineered Geely protocol / field mappings
+# (the parts that required protocol research) - are derived from
 # nitaybz/geely-global-ha, used under the MIT License. See NOTICE.txt.
 # Original framework, security hardening and transport are our own work.
 # -----------------------------------------------------------------------------

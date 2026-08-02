@@ -5,11 +5,11 @@ Coordinate encoding: lat/lon come back as integer strings in arc-milliseconds
 `marsCoordinates` says whether they're GCJ-02 ("Mars", Chinese-system) or
 WGS-84; we surface that as an attribute and don't transform either way -
 HA's map can render either, but distance comparisons against home will be
-off by ~50–500 m if mars-coords are reported in non-China territory.
+off by ~50-500 m if mars-coords are reported in non-China territory.
 """
 # -----------------------------------------------------------------------------
-# Portions of this file — the reverse-engineered Geely protocol / field mappings
-# (the parts that required protocol research) — are derived from
+# Portions of this file - the reverse-engineered Geely protocol / field mappings
+# (the parts that required protocol research) - are derived from
 # nitaybz/geely-global-ha, used under the MIT License. See NOTICE.txt.
 # Original framework, security hardening and transport are our own work.
 # -----------------------------------------------------------------------------

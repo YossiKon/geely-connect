@@ -1,5 +1,5 @@
 # =====================================================================
-#  Geely Connect — COMPACT CLIMATE WIDGET (one built-in card).
+#  Geely Connect - COMPACT CLIMATE WIDGET (one built-in card).
 #
 #  WHERE TO PASTE:
 #    Open your dashboard → pencil (Edit) → "+ Add card" → scroll to the
@@ -12,7 +12,7 @@
 #    your car → click any entity → the id looks like
 #    sensor.<your_suffix>_battery.
 #
-#  Anything your trim does not report shows as "unavailable" —
+#  Anything your trim does not report shows as "unavailable" -
 #  just delete that row or tile.
 # =====================================================================
 type: vertical-stack
@@ -73,7 +73,7 @@ cards:
   # Seat heating / ventilation.
   # NOTE: the four REAR selects (rear_left / rear_right, heat and vent)
   # only exist on trims fitted with heated or ventilated rear seats.
-  # On every other car they stay "unavailable" — delete those rows.
+  # On every other car they stay "unavailable" - delete those rows.
   - type: entities
     title: Seats
     show_header_toggle: false

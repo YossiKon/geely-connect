@@ -27,8 +27,8 @@ Empirical proof: across the AVD session, drvHeatSts went
   '0' (initial) → '3' (after level=3 fire) → '1' (after level=1 fire) → '0' (after stop fire)
 """
 # -----------------------------------------------------------------------------
-# Portions of this file — the reverse-engineered Geely protocol / field mappings
-# (the parts that required protocol research) — are derived from
+# Portions of this file - the reverse-engineered Geely protocol / field mappings
+# (the parts that required protocol research) - are derived from
 # nitaybz/geely-global-ha, used under the MIT License. See NOTICE.txt.
 # Original framework, security hardening and transport are our own work.
 # -----------------------------------------------------------------------------
@@ -137,7 +137,7 @@ class GeelySeatLevel(CoordinatorEntity, SelectEntity):
             name=bundle.get("device_name") or f"Geely ({self._vin})",
         )
         # Optimistic state - shown briefly after a fire so the UI doesn't
-        # flicker through stale server status during the ~10–30s the car
+        # flicker through stale server status during the ~10-30s the car
         # takes to actually update.
         self._optimistic_option: str | None = None
         self._optimistic_until: float = 0.0

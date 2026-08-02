@@ -371,7 +371,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             except Exception as e:  # noqa: BLE001
                 _LOGGER.debug("position-refresh PAI non-fatal failure: %s", e)
 
-        # Primary status — the one call we always make.
+        # Primary status - the one call we always make.
         try:
             resp = await _call_with_retry(api.vehicle_status)
         except GeelyAuthError as e:

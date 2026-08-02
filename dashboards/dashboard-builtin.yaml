@@ -1,5 +1,5 @@
 # =====================================================================
-#  Geely Connect — dashboard using ONLY built-in Home Assistant cards.
+#  Geely Connect - dashboard using ONLY built-in Home Assistant cards.
 #  No HACS / custom cards needed. Copy-paste and it works.
 #
 #  HOW TO USE:
@@ -11,7 +11,7 @@
 #      → open it → ⋮ → Edit → ⋮ → Raw configuration editor →
 #      paste everything below → Save.
 #
-#  Any entity your car doesn't have shows as "unavailable" — just delete
+#  Any entity your car doesn't have shows as "unavailable" - just delete
 #  that card.
 # =====================================================================
 title: Geely
@@ -128,25 +128,25 @@ views:
             grid_options: {columns: 4}
           - type: tile
             entity: select.my_geely_ex5_seat_heat_driver
-            name: Seat heat — driver
+            name: Seat heat - driver
             features:
               - type: select-options
             grid_options: {columns: 6}
           - type: tile
             entity: select.my_geely_ex5_seat_heat_passenger
-            name: Seat heat — passenger
+            name: Seat heat - passenger
             features:
               - type: select-options
             grid_options: {columns: 6}
           - type: tile
             entity: select.my_geely_ex5_seat_vent_driver
-            name: Seat vent — driver
+            name: Seat vent - driver
             features:
               - type: select-options
             grid_options: {columns: 6}
           - type: tile
             entity: select.my_geely_ex5_seat_vent_passenger
-            name: Seat vent — passenger
+            name: Seat vent - passenger
             features:
               - type: select-options
             grid_options: {columns: 6}

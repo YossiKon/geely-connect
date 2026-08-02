@@ -1,4 +1,4 @@
-"""Diagnostics support — downloads a full state dump with secrets redacted.
+"""Diagnostics support - downloads a full state dump with secrets redacted.
 
 Lets users share a diagnostics report for troubleshooting without exposing
 tokens, certificates, VIN or GPS location.

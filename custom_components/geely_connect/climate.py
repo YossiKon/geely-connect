@@ -21,8 +21,8 @@ remote_status temp query) as returning `temperature_in_car` only.
 We track the user-set value locally and surface it as `target_temperature`.
 """
 # -----------------------------------------------------------------------------
-# Portions of this file — the reverse-engineered Geely protocol / field mappings
-# (the parts that required protocol research) — are derived from
+# Portions of this file - the reverse-engineered Geely protocol / field mappings
+# (the parts that required protocol research) - are derived from
 # nitaybz/geely-global-ha, used under the MIT License. See NOTICE.txt.
 # Original framework, security hardening and transport are our own work.
 # -----------------------------------------------------------------------------

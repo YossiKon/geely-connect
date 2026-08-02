@@ -1,5 +1,5 @@
 # =====================================================================
-#  Geely Connect — SECURITY WIDGET (compact, built-in cards only).
+#  Geely Connect - SECURITY WIDGET (compact, built-in cards only).
 #  Lock control + every opening at a glance + a red banner whenever
 #  the car is left open.
 #
@@ -7,7 +7,7 @@
 #  Replace  my_geely_ex5  with your entity suffix if it differs
 #  (Settings → Devices & Services → Geely Connect → your car → entity_id).
 #
-#  Needs Home Assistant 2024.9 or newer — that is the heading card, which
+#  Needs Home Assistant 2024.9 or newer - that is the heading card, which
 #  is the newest thing used here. The warning banner additionally needs
 #  the "or" condition (2024.2+). On an older core the heading renders as
 #  an error card and/or the banner never appears; the lock tile and the
@@ -75,7 +75,7 @@ cards:
   # --- Everything that can be open, plus the link to the car -------
   # state_color lights up any tile that is "on". For the openings and
   # the seatbelt that means "look at me"; for Car link a lit tile is
-  # the good state — Home Assistant is reaching the vehicle.
+  # the good state - Home Assistant is reaching the vehicle.
   - type: glance
     columns: 4
     state_color: true

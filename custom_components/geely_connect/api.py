@@ -7,8 +7,8 @@ runtime.
 All public methods are sync - HA wraps them with async_add_executor_job.
 """
 # -----------------------------------------------------------------------------
-# Portions of this file — the reverse-engineered Geely protocol / field mappings
-# (the parts that required protocol research) — are derived from
+# Portions of this file - the reverse-engineered Geely protocol / field mappings
+# (the parts that required protocol research) - are derived from
 # nitaybz/geely-global-ha, used under the MIT License. See NOTICE.txt.
 # Original framework, security hardening and transport are our own work.
 # -----------------------------------------------------------------------------
@@ -820,7 +820,7 @@ class GeelyApi:
         return self._authed_apis_call("GET", path, b"")
 
     def request_position_refresh(self) -> dict:
-        """Fire PAI/operation:4/pai:1 — the Geely app fires this every time the
+        """Fire PAI/operation:4/pai:1 - the Geely app fires this every time the
         map view opens to wake the car and request a fresh GPS upload. After
         the cloud ACKs (code=1000), wait a few seconds then re-fetch
         vehicle_status with `?...&latest=&target=` to read the new position.

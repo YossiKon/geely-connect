@@ -1,5 +1,5 @@
 # =====================================================================
-#  Geely Connect — SINGLE built-in card (vertical-stack).
+#  Geely Connect - SINGLE built-in card (vertical-stack).
 #  No HACS needed. Add via:  Edit dashboard → Add card → Manual → paste.
 #  Replace  my_geely_ex5  with your entity suffix if it differs.
 # =====================================================================
@@ -91,22 +91,22 @@ cards:
     cards:
       - type: tile
         entity: select.my_geely_ex5_seat_heat_driver
-        name: Seat heat — driver
+        name: Seat heat - driver
         features:
           - type: select-options
       - type: tile
         entity: select.my_geely_ex5_seat_heat_passenger
-        name: Seat heat — passenger
+        name: Seat heat - passenger
         features:
           - type: select-options
       - type: tile
         entity: select.my_geely_ex5_seat_vent_driver
-        name: Seat vent — driver
+        name: Seat vent - driver
         features:
           - type: select-options
       - type: tile
         entity: select.my_geely_ex5_seat_vent_passenger
-        name: Seat vent — passenger
+        name: Seat vent - passenger
         features:
           - type: select-options
 

@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Geely Connect",
-        "description": "Unofficial community integration — not affiliated with Geely. Enter your Geely account email and pick your country, and we'll send a 6-digit code to your inbox.",
+        "description": "Unofficial community integration - not affiliated with Geely. Enter your Geely account email and pick your country, and we'll send a 6-digit code to your inbox.",
         "data": {
           "email": "Email",
           "country_code": "Country",

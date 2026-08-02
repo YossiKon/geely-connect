@@ -1,5 +1,5 @@
 blueprint:
-  name: Geely Connect — Charging complete notification
+  name: Geely Connect - Charging complete notification
   description: Notify when the car finishes charging (battery reaches a target %).
   domain: automation
   input:
@@ -24,6 +24,6 @@ trigger:
 action:
   - service: !input notify_target
     data:
-      title: "🔋 Geely — charging done"
+      title: "🔋 Geely - charging done"
       message: "Battery reached {{ states(trigger.entity_id) }}%."
 mode: single

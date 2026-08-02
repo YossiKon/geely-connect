@@ -6,8 +6,8 @@ GET /remote-control/vehicle/status/{VIN}. Live keys are nested under
 The server sends every numeric value as a string - we coerce here.
 """
 # -----------------------------------------------------------------------------
-# Portions of this file — the reverse-engineered Geely protocol / field mappings
-# (the parts that required protocol research) — are derived from
+# Portions of this file - the reverse-engineered Geely protocol / field mappings
+# (the parts that required protocol research) - are derived from
 # nitaybz/geely-global-ha, used under the MIT License. See NOTICE.txt.
 # Original framework, security hardening and transport are our own work.
 # -----------------------------------------------------------------------------
@@ -204,7 +204,7 @@ def _coerce(v: Any, kind: str, value_map: dict | None = None) -> Any:
     return v
 
 
-# Paths already covered by a curated sensor above — skip them in the dynamic
+# Paths already covered by a curated sensor above - skip them in the dynamic
 # full-exposure pass so we don't create duplicates.
 _CURATED_PATHS: set[str] = {".".join(spec[2]) for spec in SENSOR_SPECS}
 
@@ -415,7 +415,7 @@ class GeelyRawSensor(CoordinatorEntity, SensorEntity):
 
 
 # ---------------------------------------------------------------------------
-# Computed / meta sensors (our own additions — not raw server fields)
+# Computed / meta sensors (our own additions - not raw server fields)
 # ---------------------------------------------------------------------------
 
 
@@ -448,7 +448,7 @@ class GeelyEfficiencySensor(CoordinatorEntity, SensorEntity):
 
 
 class GeelyLastUpdatedSensor(CoordinatorEntity, SensorEntity):
-    """Timestamp of the last successful poll — HA shows it as a relative age."""
+    """Timestamp of the last successful poll - HA shows it as a relative age."""
 
     _attr_has_entity_name = True
     _attr_device_class = SensorDeviceClass.TIMESTAMP

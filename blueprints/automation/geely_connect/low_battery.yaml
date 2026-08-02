@@ -1,5 +1,5 @@
 blueprint:
-  name: Geely Connect — Low battery alert
+  name: Geely Connect - Low battery alert
   description: Notify when the car battery drops below a threshold.
   domain: automation
   input:
@@ -21,6 +21,6 @@ trigger:
 action:
   - service: !input notify_target
     data:
-      title: "🔋 Geely — low battery"
+      title: "🔋 Geely - low battery"
       message: "Battery is at {{ states(trigger.entity_id) }}%. Time to charge."
 mode: single

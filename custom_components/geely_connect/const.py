@@ -5,8 +5,8 @@ ServiceId catalog and parameter shapes are AVD-Frida-verified
 Global app's network calls captured live via OkHttp interception.
 """
 # -----------------------------------------------------------------------------
-# Portions of this file — the reverse-engineered Geely protocol / field mappings
-# (the parts that required protocol research) — are derived from
+# Portions of this file - the reverse-engineered Geely protocol / field mappings
+# (the parts that required protocol research) - are derived from
 # nitaybz/geely-global-ha, used under the MIT License. See NOTICE.txt.
 # Original framework, security hardening and transport are our own work.
 # -----------------------------------------------------------------------------
@@ -87,7 +87,7 @@ CONF_POLL_MODE     = "poll_mode"
 CONF_FULL_EXPOSURE = "full_exposure"
 
 # Polling profiles. The Geely backend allows one session per account, so each
-# poll briefly logs the phone app out — the mode lets the user trade freshness
+# poll briefly logs the phone app out - the mode lets the user trade freshness
 # for fewer interruptions. All values are seconds / cycle-counts.
 #   base            = interval when parked and something recently changed
 #   fast            = interval while charging or driving

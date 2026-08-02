@@ -1,7 +1,7 @@
 """Binary sensors for Geely (international): door/lock/trunk/hood/seatbelt states."""
 # -----------------------------------------------------------------------------
-# Portions of this file — the reverse-engineered Geely protocol / field mappings
-# (the parts that required protocol research) — are derived from
+# Portions of this file - the reverse-engineered Geely protocol / field mappings
+# (the parts that required protocol research) - are derived from
 # nitaybz/geely-global-ha, used under the MIT License. See NOTICE.txt.
 # Original framework, security hardening and transport are our own work.
 # -----------------------------------------------------------------------------
@@ -83,7 +83,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
 
 
 class GeelyConnectivity(CoordinatorEntity, BinarySensorEntity):
-    """On when the last poll succeeded — a live 'can we reach the car' signal."""
+    """On when the last poll succeeded - a live 'can we reach the car' signal."""
 
     _attr_has_entity_name = True
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY

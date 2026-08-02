@@ -1,5 +1,5 @@
 blueprint:
-  name: Geely Connect — Left unlocked away from home
+  name: Geely Connect - Left unlocked away from home
   description: Alert (or auto-lock) if the car is unlocked while not at home.
   domain: automation
   input:
@@ -39,10 +39,10 @@ action:
           - service: lock.lock
             target: { entity_id: !input lock_entity }
           - service: !input notify_target
-            data: { title: "🔒 Geely — auto-locked", message: "Car was unlocked away from home; locked it." }
+            data: { title: "🔒 Geely - auto-locked", message: "Car was unlocked away from home; locked it." }
     default:
       - service: !input notify_target
-        data: { title: "🔓 Geely — unlocked away", message: "Your car is unlocked and not at home." }
+        data: { title: "🔓 Geely - unlocked away", message: "Your car is unlocked and not at home." }
     variables:
       auto_lock: !input auto_lock
 mode: single

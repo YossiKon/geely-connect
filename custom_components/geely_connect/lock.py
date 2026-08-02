@@ -7,15 +7,15 @@ Unlock action: RDU_2 with door=all
 UX:
   * Optimistic state - the entity flips to the requested state immediately
     so HA's lock-card animation is responsive (HA defaults are slow when a
-    command takes 5–10 s to round-trip).
+    command takes 5-10 s to round-trip).
   * Transitional state - `is_locking` / `is_unlocking` are True while we
     wait for the next poll to confirm. HA shows a spinner during this.
   * On polling refresh (~8 s after fire) we drop the optimistic flag and
     show whatever the server actually reports.
 """
 # -----------------------------------------------------------------------------
-# Portions of this file — the reverse-engineered Geely protocol / field mappings
-# (the parts that required protocol research) — are derived from
+# Portions of this file - the reverse-engineered Geely protocol / field mappings
+# (the parts that required protocol research) - are derived from
 # nitaybz/geely-global-ha, used under the MIT License. See NOTICE.txt.
 # Original framework, security hardening and transport are our own work.
 # -----------------------------------------------------------------------------

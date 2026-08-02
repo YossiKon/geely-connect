@@ -1,5 +1,5 @@
 blueprint:
-  name: Geely Connect — Tire pressure out of range
+  name: Geely Connect - Tire pressure out of range
   description: Alert when any tire pressure goes below/above safe limits.
   domain: automation
   input:
@@ -28,6 +28,6 @@ trigger:
 action:
   - service: !input notify_target
     data:
-      title: "⚠️ Geely — tire pressure"
+      title: "⚠️ Geely - tire pressure"
       message: "{{ state_attr(trigger.entity_id,'friendly_name') or trigger.entity_id }} is {{ states(trigger.entity_id) }}."
 mode: single

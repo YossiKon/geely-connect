@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Geely Connect",
-        "description": "Intégration communautaire non officielle — non affiliée à Geely. Saisissez l'email du compte Geely, choisissez le pays, l'unité de pression des pneus et la langue. Un code à 6 chiffres sera envoyé.",
+        "description": "Intégration communautaire non officielle - non affiliée à Geely. Saisissez l'email du compte Geely, choisissez le pays, l'unité de pression des pneus et la langue. Un code à 6 chiffres sera envoyé.",
         "data": {
           "email": "Email",
           "country_code": "Pays",

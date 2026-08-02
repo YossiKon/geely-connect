@@ -1,4 +1,4 @@
-THIRD-PARTY NOTICES — Geely Connect
+THIRD-PARTY NOTICES - Geely Connect
 ===================================
 
 This project is released under the MIT License (see LICENSE). Its own
@@ -7,7 +7,7 @@ reverse-engineered Geely protocol implementation and vehicle field mappings
 (the parts that required protocol research) are derived from the following
 MIT-licensed project, and its license is reproduced below as required:
 
-  nitaybz/geely-global-ha  —  https://github.com/nitaybz/geely-global-ha
+  nitaybz/geely-global-ha  -  https://github.com/nitaybz/geely-global-ha
 
 -------------------------------------------------------------------------
 

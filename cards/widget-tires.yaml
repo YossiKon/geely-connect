@@ -1,5 +1,5 @@
 # =====================================================================
-#  Geely Connect — COMPACT TIRE-PRESSURE WIDGET (single built-in card).
+#  Geely Connect - COMPACT TIRE-PRESSURE WIDGET (single built-in card).
 #  The four tiles are laid out like the car seen from above:
 #    front-left | front-right
 #    rear-left  | rear-right
@@ -14,7 +14,7 @@
 #  suffix (see Settings → Devices & services → Geely Connect → your car).
 #
 #  The pressure unit (psi / bar / kPa) is whatever you picked during
-#  setup — it comes from the entities themselves, so nothing here needs
+#  setup - it comes from the entities themselves, so nothing here needs
 #  changing if you switch units later.
 # =====================================================================
 type: vertical-stack

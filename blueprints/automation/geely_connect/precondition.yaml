@@ -1,5 +1,5 @@
 blueprint:
-  name: Geely Connect — Pre-condition climate before departure
+  name: Geely Connect - Pre-condition climate before departure
   description: Turn on the car climate at a set time on selected days.
   domain: automation
   input:

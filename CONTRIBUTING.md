@@ -11,7 +11,7 @@ and include:
 - Home Assistant version and integration version (HACS → Geely Connect)
 - Your vehicle model and country
 - The one-click **diagnostics** download (Settings → Devices & Services →
-  Geely Connect → ⋮ → Download diagnostics) — secrets are masked automatically
+  Geely Connect → ⋮ → Download diagnostics) - secrets are masked automatically
 
 If setup stops with *"this Geely account is not served by the EU/International
 cloud"*, see [Supported regions](README.md#-supported-regions) first: adding a
@@ -27,16 +27,16 @@ one file per platform, a `config_flow.py`, `strings.json` + `translations/`,
 needed).
 
 To test a change, copy or symlink `custom_components/geely_connect/` into a
-Home Assistant `config/custom_components/` folder and **restart** — Python
+Home Assistant `config/custom_components/` folder and **restart** - Python
 caches imported modules, so *Reload* on the integration will not pick up new
 code.
 
 ### Guidelines
 
-- Match Home Assistant core conventions — this repo aims to be ready for a
+- Match Home Assistant core conventions - this repo aims to be ready for a
   future submission as an official integration.
 - User-facing text goes through `strings.json` and every file in
-  `translations/` (en, he, ar, fr, ru) — never hard-code UI strings. The five
+  `translations/` (en, he, ar, fr, ru) - never hard-code UI strings. The five
   files must have identical key sets.
 - Every numeric sensor needs a `state_class`, or Home Assistant records no
   long-term statistics for it.
@@ -46,12 +46,12 @@ code.
 - Prefer removing a duplicate over hiding it. An aggregate that restates
   entities already on the list is a duplicate.
 - Changing the set of entities an existing install has usually needs an entry
-  migration in `async_migrate_entry` — bump `VERSION` in `config_flow.py` to
+  migration in `async_migrate_entry` - bump `VERSION` in `config_flow.py` to
   match. Migrations must never delete anything a user could have history on.
 - Bump `version` in `manifest.json` and cut a matching GitHub release, or HACS
   has nothing to offer users as an update.
 - CI runs [hassfest](https://developers.home-assistant.io/blog/2020/04/16/hassfest)
-  and [HACS validation](https://hacs.xyz/docs/publish/action) on every push —
+  and [HACS validation](https://hacs.xyz/docs/publish/action) on every push -
   keep both green.
 
 ### Things that are easy to get wrong

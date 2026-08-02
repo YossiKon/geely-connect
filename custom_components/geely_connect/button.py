@@ -9,8 +9,8 @@ climate.py - because they're a "set the climate to a mode" action, not
 a true one-shot, so the preset UX is cleaner.
 """
 # -----------------------------------------------------------------------------
-# Portions of this file — the reverse-engineered Geely protocol / field mappings
-# (the parts that required protocol research) — are derived from
+# Portions of this file - the reverse-engineered Geely protocol / field mappings
+# (the parts that required protocol research) - are derived from
 # nitaybz/geely-global-ha, used under the MIT License. See NOTICE.txt.
 # Original framework, security hardening and transport are our own work.
 # -----------------------------------------------------------------------------
@@ -61,7 +61,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
             continue
         entities.append(GeelyTelematicsButton(hass, bundle, key, name, icon, sid, params))
 
-    # Manual "Refresh now" — forces an immediate poll, bypassing the back-off.
+    # Manual "Refresh now" - forces an immediate poll, bypassing the back-off.
     entities.append(GeelyRefreshButton(hass, bundle))
 
     add_entities(entities)
