@@ -194,6 +194,22 @@ can ship. To unblock yourself in the meantime, add the reported key to the
 `pins` list for that host in
 `.storage/geely_connect/<VIN>/server_pins.json` and restart.
 
+### What "hardened" means here
+
+Because this account can unlock and start your car, the transport gets treated
+like a credential path rather than a convenience:
+
+| | How this integration handles it |
+|---|---|
+| **Certificate validation** | Strict public-CA validation with hostname checking on every connection. The private-CA fallback is allowlisted to two known gateways, requires a private-CA verify code, and is permanently disabled for any host that has ever validated publicly — so a bad certificate cannot force a downgrade |
+| **Server identity** | SPKI public-key pins ship with the integration and are remembered on disk, so a swapped server key is caught across restarts, before any credential is sent |
+| **Logs & diagnostics** | Tokens, certificates and the captcha secret are masked; VIN, user ID, e-mail and device IDs are reduced to their last four characters. The diagnostics download is redacted separately, so a bug report is safe to attach |
+| **Request building** | The VIN, user ID and server-supplied headers are rejected if they contain CR/LF, so a hostile backend value cannot smuggle a second request onto the authenticated socket |
+| **Stored secrets** | The mTLS private key is created `0600` from the first byte — never briefly world-readable — inside a `0700` directory |
+| **Identifiers** | VIN and user ID must match a strict charset before they reach a filesystem path or a request line |
+| **Re-authentication** | Signing in as a different Geely account is refused rather than silently rebinding the entry |
+| **Where data goes** | Only Geely's own servers. No telemetry, no analytics, no third-party host |
+
 ---
 
 ## 📥 Installation (HACS)
@@ -542,10 +558,27 @@ is needed. On older versions the folder is simply ignored.
 
 ## 📜 License & credits
 
-MIT for the original parts (framework, hardening, transport, packaging) — see
-`LICENSE`. The reverse-engineered Geely protocol and vehicle field mappings are
-derived from [`nitaybz/geely-global-ha`](https://github.com/nitaybz/geely-global-ha)
-under the MIT License; that credit and license text are in `NOTICE.txt`.
+The reverse-engineered Geely protocol and vehicle field mappings are derived
+from [`nitaybz/geely-global-ha`](https://github.com/nitaybz/geely-global-ha)
+under the MIT License — the protocol research that made any of this possible.
+That credit and the full license text are in `NOTICE.txt`.
+
+Everything built on top of it is original work under MIT (see `LICENSE`):
+
+- **Transport and security** — strict CA validation with allowlisted public-key
+  pinning, a persistent pin store, log and diagnostics redaction, CR/LF request
+  guards, owner-only key storage and identifier validation (see
+  [Security](#-security))
+- **Multi-region support** — EU and North-American backends with per-vehicle
+  region detection, and a clear error for regions with no public credentials
+- **Adaptive polling** — Eco / Normal / Live profiles with idle back-off and
+  quiet hours, which matters because Geely allows one session per account
+- **Computed sensors** — efficiency, trip distance, charge-completion time and
+  range-at-full-charge, none of which the car reports directly
+- **Setup and upkeep** — options flow, config-entry migrations, diagnostics,
+  tyre-pressure unit choice, and five translations
+- **Ready-made dashboards** — cards, views, blueprints, automations and
+  home-screen widgets
 
 Unofficial, provided "as is" with no warranty. Not affiliated with Geely or
 ECARX. Remote commands are used at your own risk.
