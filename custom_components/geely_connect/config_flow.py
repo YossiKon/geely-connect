@@ -325,13 +325,19 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # record, not from the country the user picked: the two can differ, and
         # signing against the wrong one is what produces the opaque 1501
         # "geelyos verify error".
-        _LOGGER.error("vehicle region debug: tspInfo=%s edgeInfo=%s "
-                      "serviceRegion=%s saleMarket=%s dcCode=%s "
-                      "deliveryCountryCode=%s tcamMarket=%s",
-                      vehicle.get("tspInfo"), vehicle.get("edgeInfo"),
-                      vehicle.get("serviceRegion"), vehicle.get("saleMarket"),
-                      vehicle.get("dcCode"), vehicle.get("deliveryCountryCode"),
-                      vehicle.get("tcamMarket"))
+        # The fields region resolution reads, logged so an unrecognised market
+        # can be diagnosed from a normal debug log. Region/market codes only -
+        # but the record also carries the VIN and nickname, so it goes through
+        # redact() rather than being printed whole.
+        _LOGGER.debug(
+            "vehicle region fields: %s",
+            geely_api.redact({
+                k: vehicle.get(k) for k in (
+                    "tspInfo", "edgeInfo", "serviceRegion", "saleMarket",
+                    "dcCode", "deliveryCountryCode", "tcamMarket",
+                )
+            }),
+        )
         region = resolve_vehicle_region(vehicle) or DEFAULT_REGION
         if region in UNSUPPORTED_REGIONS:
             _LOGGER.error(
@@ -341,8 +347,8 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
             return self.async_abort(reason="wrong_region")
         backend = region_config(region)
-        _LOGGER.error("provisioning against the %s backend (%s) - detected "
-                      "vehicle region code %r", region, backend["cert_host"], region)
+        _LOGGER.debug("provisioning against the %s backend (%s)",
+                      region, backend["cert_host"])
 
         device_id = hashlib.md5(f"ha:{self._user_id}:{vin}".encode()).hexdigest()
         cert_path, key_path = _storage_paths(self.hass, vin)

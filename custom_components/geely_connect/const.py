@@ -180,6 +180,7 @@ SUPPORTED_COUNTRIES: dict[str, str] = {
     "AU": "🇦🇺 Australia (AU)",
     "HK": "🇭🇰 Hong Kong (HK)",
     "ID": "🇮🇩 Indonesia (ID)",
+    "JP": "🇯🇵 Japan (JP)",
     "KR": "🇰🇷 South Korea (KR)",
     "MY": "🇲🇾 Malaysia (MY)",
     "NZ": "🇳🇿 New Zealand (NZ)",

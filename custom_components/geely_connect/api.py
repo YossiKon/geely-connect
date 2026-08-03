@@ -817,9 +817,20 @@ class GeelyApi:
         j = json.loads(resp_bytes)
         # APAC success envelope: {"resultCode": "0", "resultMessage":
         # "Success", "accessToken": ..., "userId": ..., "expiresIn": 7200}
-        if str(j.get("resultCode")) != "0":
-            raise GeelyAuthError(f"APAC session exchange failed: {redact(j)}")
-        return j
+        code = j.get("resultCode")
+        if str(code) == "0":
+            return j
+        # Split auth failure from server failure, as the EU branch does.
+        # GeelyAuthError is not retried and becomes ConfigEntryAuthFailed, which
+        # costs the user a captcha and a fresh email code - far too harsh for
+        # the transient failures this endpoint actually returns (8500 server
+        # internal exception, 1445 signature rejected). The cidpsso token has
+        # already been validated by _get_access_code above, so a failure here
+        # is the session service's problem, not a dead credential. RuntimeError
+        # surfaces as UpdateFailed instead: retried, last snapshot kept.
+        if _is_auth_failure({"code": code}):
+            raise GeelyAuthError(f"APAC session exchange rejected our auth: {redact(j)}")
+        raise RuntimeError(f"APAC session exchange failed: {redact(j)}")
 
     def refresh_jwt(self) -> dict:
         """Exchange a cidpsso accessCode for an apis.ecloudeu.com JWT.
