@@ -473,6 +473,26 @@ def _secure_tls_connect(host: str, port: int, *, pin_path: str | None,
         _close_quietly(raw)
         raise
     else:
+        # A pin is a requirement, not a fallback. Chain validation succeeding
+        # is not enough for a host we ship a key for: an interception proxy
+        # whose root is in the OS trust store - a corporate middlebox, an
+        # antivirus TLS scanner, a mis-issuing CA - produces a chain that
+        # validates here, and checking the pin only on the failure path would
+        # let exactly the attacker pinning exists to stop walk straight
+        # through. So verify it on this path too whenever we have one.
+        if accepted:
+            der = ssock.getpeercert(binary_form=True)
+            spki = _spki_sha256_b64(der) if der else None
+            if spki not in accepted:
+                ssock.close()
+                raise GeelyTLSPinError(
+                    f"{host} presented a publicly-trusted certificate whose key "
+                    f"{spki} is not one we expect {sorted(accepted)}. A valid "
+                    "chain is not sufficient for this host - refusing to send "
+                    "credentials. This is what an intercepting proxy looks "
+                    "like. If Geely has genuinely moved this host to a public "
+                    "CA, please open an issue so the pin can be updated."
+                )
         # Remember that this host validates publicly, so no later connection
         # can be pushed into the pinning fallback by a bad certificate.
         if pin_path and not entry.get("strict"):

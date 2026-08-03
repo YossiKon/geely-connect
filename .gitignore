@@ -17,3 +17,6 @@ venv/
 *.swp
 .DS_Store
 Thumbs.db
+
+# Browser automation artifacts (page snapshots, console logs)
+.playwright-mcp/

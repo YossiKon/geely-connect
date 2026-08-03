@@ -17,6 +17,7 @@ from homeassistant.exceptions import (
     ServiceValidationError,
 )
 from homeassistant.helpers import config_validation as cv, device_registry as dr, entity_registry as er
+from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -583,8 +584,13 @@ def _register_debug_service(hass: HomeAssistant) -> None:
             sid, cmd, redact(params), redact(resp),
         )
 
-    hass.services.async_register(DOMAIN, "fire_control", _handle, schema=schema)
-    _LOGGER.info("Registered geely_connect.fire_control debug service")
+    # Admin-only. The entities are the supported surface and stay available to
+    # every Home Assistant user; this one forwards an arbitrary serviceId and
+    # parameter list straight to the car, including commands no entity exposes,
+    # so it is a raw escape hatch rather than a feature and is gated to
+    # administrators the way Home Assistant gates its other raw services.
+    async_register_admin_service(hass, DOMAIN, "fire_control", _handle, schema=schema)
+    _LOGGER.info("Registered geely_connect.fire_control debug service (admin only)")
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
