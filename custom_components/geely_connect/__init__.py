@@ -4,6 +4,8 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+import os
+import shutil
 import socket
 from datetime import timedelta
 
@@ -598,6 +600,38 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN].pop(entry.entry_id, None)
         return True
     return False
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Delete the vehicle's mTLS material when the integration is removed.
+
+    The private key authenticates Home Assistant to Geely as this car's
+    controller - whoever holds it can unlock and pre-condition the vehicle.
+    Removing the config entry drops the account token, so without this the key
+    and certificate would outlive the integration on disk, unreferenced and
+    unnoticed, including inside every backup taken afterwards.
+    """
+    cert_path = entry.data.get(CONF_CERT_PATH)
+    if not cert_path:
+        return
+    vin_dir = os.path.dirname(cert_path)
+    # Only ever inside our own storage directory, never a path the server chose.
+    expected_root = os.path.join(hass.config.path(".storage"), DOMAIN)
+    if os.path.commonpath([os.path.abspath(vin_dir),
+                           os.path.abspath(expected_root)]) != os.path.abspath(expected_root):
+        _LOGGER.warning("refusing to remove %s: outside the integration's storage",
+                        geely_api.mask_path(vin_dir))
+        return
+    try:
+        await hass.async_add_executor_job(
+            functools.partial(shutil.rmtree, vin_dir, ignore_errors=True)
+        )
+    except Exception as e:  # noqa: BLE001 - removal is best-effort
+        _LOGGER.warning("could not remove %s (%s); delete it by hand to be sure "
+                        "the vehicle key is gone", geely_api.mask_path(vin_dir), e)
+    else:
+        _LOGGER.info("Removed stored certificate and key for %s",
+                     geely_api.mask_path(vin_dir))
 
 
 # Unique-id fragments of the entities that ship disabled from v3 onwards.

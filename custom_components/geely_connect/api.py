@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import random
+import re
 import secrets
 import socket
 import ssl
@@ -135,6 +136,23 @@ def _mask_tail(value: Any) -> Any:
     """Show only the last four characters of an identifier."""
     text = str(value)
     return f"...{text[-4:]}" if len(text) > 4 else "***"
+
+
+# A VIN is a path segment in both the storage tree
+# (.storage/geely_connect/<VIN>/key.pem) and every control URL
+# (/remote-control/vehicle/telematics/<VIN>). Those strings end up in exception
+# text, and GeelyAuthError text is shown on Home Assistant's re-authentication
+# card as well as written to the log - so redacting response bodies is not
+# enough on its own. Config_flow accepts [A-Za-z0-9]{8,20} for a VIN; requiring
+# 11 here keeps real path components ("geely_connect", "server_pins.json",
+# "telematics", ".storage") intact, since they all carry a separator or are
+# shorter.
+_VIN_LIKE_SEGMENT = re.compile(r"(?<![A-Za-z0-9])[A-Za-z0-9]{11,20}(?![A-Za-z0-9])")
+
+
+def mask_path(value: Any) -> str:
+    """Replace VIN-shaped segments of a path or URL with their last 4 chars."""
+    return _VIN_LIKE_SEGMENT.sub(lambda m: f"...{m.group(0)[-4:]}", str(value))
 
 
 def _looks_like_key_material(value: Any) -> bool:
@@ -396,11 +414,11 @@ def _load_pin_store(pin_path: str | None) -> dict[str, dict]:
             raw = json.load(fh)
     except (OSError, ValueError) as e:
         raise GeelyTLSPinError(
-            f"{pin_path} exists but could not be read ({e}). Refusing to "
+            f"{mask_path(pin_path)} exists but could not be read ({e}). Refusing to "
             "continue without the pins it should contain - fix or delete it."
         ) from e
     if not isinstance(raw, dict):
-        raise GeelyTLSPinError(f"{pin_path} is not a JSON object; refusing to use it")
+        raise GeelyTLSPinError(f"{mask_path(pin_path)} is not a JSON object; refusing to use it")
 
     store: dict[str, dict] = {}
     for host, entry in raw.items():
@@ -409,7 +427,7 @@ def _load_pin_store(pin_path: str | None) -> dict[str, dict]:
         elif isinstance(entry, dict):
             pins, strict = entry.get("pins") or [], bool(entry.get("strict"))
         else:
-            raise GeelyTLSPinError(f"{pin_path}: malformed entry for {host}")
+            raise GeelyTLSPinError(f"{mask_path(pin_path)}: malformed entry for {host}")
         store[host] = {
             "pins": [p for p in pins if isinstance(p, str)],
             "strict": strict,
@@ -573,7 +591,7 @@ def _secure_tls_connect(host: str, port: int, *, pin_path: str | None,
     except OSError as e:
         ssock.close()
         raise GeelyTLSPinError(
-            f"{host}: could not persist the first-use pin to {pin_path} ({e}); "
+            f"{host}: could not persist the first-use pin to {mask_path(pin_path)} ({e}); "
             "refusing to continue unverified."
         ) from e
     _LOGGER.warning(
@@ -924,7 +942,7 @@ class GeelyApi:
             )
             j = json.loads(resp)
         if _is_auth_failure(j):
-            raise GeelyAuthError(f"{method} {path} auth-rejected: {redact(j)}")
+            raise GeelyAuthError(f"{method} {mask_path(path)} auth-rejected: {redact(j)}")
         return j
 
     def vehicle_status(self) -> dict:
@@ -1255,11 +1273,18 @@ def provision_user_cert(*, app_id: str, app_secret: str, user_id: str,
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption(),
     )
-    os.makedirs(os.path.dirname(cert_out_path), mode=0o700, exist_ok=True)
-    try:
-        os.chmod(os.path.dirname(cert_out_path), 0o700)
-    except OSError:
-        pass
+    vin_dir = os.path.dirname(cert_out_path)
+    os.makedirs(vin_dir, mode=0o700, exist_ok=True)
+    # makedirs applies `mode` to the leaf only - intermediate directories get
+    # the default umask. The intermediate here is .storage/geely_connect, whose
+    # entries are named after the VIN, so leaving it 0755 lets any local account
+    # list it and read the VIN off the directory name even though the key inside
+    # is unreadable. Tighten both.
+    for d in (vin_dir, os.path.dirname(vin_dir)):
+        try:
+            os.chmod(d, 0o700)
+        except OSError:
+            pass
     with open(cert_out_path, "w") as fh:
         fh.write(cert_pem)
     try:
