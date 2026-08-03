@@ -545,19 +545,31 @@ Geely runs a separate backend per area, each with its **own app credentials**:
 |---|---|---|
 | **EU / International** | `api.ecloudeu.com` | ✅ supported |
 | **NA** (US, CA, MX - and Brazilian accounts, which resolve here) | `api.ecloudus.com` | ✅ supported |
-| **APAC** (AU, NZ, JP, KR, SG, TH…) | `api.ecloudkr.com` | ❌ credentials not public |
+| **APAC** (AU, NZ, JP, KR, SG, TH…) | `api.ecloudkr.com` | ✅ supported |
 | **SA** | `tsp-geely-api-sa.xcloudsvc.com` | ❌ credentials not public |
 
 The area belongs to the **vehicle**, not to the country you pick at setup - the
 two can differ - so it is read from the login response
-(`tspInfo[].serviceRegion`, falling back to `edgeInfo.code`) and stored on the
+(`tspInfo[].serviceRegion`, falling back to `edgeInfo.code`, then the vehicle
+record's top-level `serviceRegion`, then `saleMarket`/`tcamMarket` - APAC
+accounts have `"AP"` - and finally a safe EU default) and stored on the
 config entry. Login, the email code and the vehicle list are not regional in
-practice; only certificate provisioning and control commands are.
+practice; only certificate provisioning, the session exchange and control
+commands are.
+
+APAC specifics: the session exchange runs on the **public** host
+`api.ecloudkr.com` at `/auth-center/account/session` (not on the mTLS control
+host), requires `receiverId` (the login email) in the body, an
+`Accept: application/json; charset=utf-8` header and **uppercase**
+`X-SIGNATURE`/`X-TIMESTAMP` signature headers, and the access code must be
+minted by the APAC regional host (`m-lcmsam-kr.geely.com`) - codes from the
+EU/global hosts make the APAC session service crash with `8500`. See
+`docs/APAC-SUPPORT.md` for the full write-up.
 
 A car in an area whose credentials are unknown stops the setup with a clear
 message naming the area, rather than being signed against the European backend
 and failing with the opaque `1501 geelyos verify error` that the upstream
-project reports. Adding APAC or SA needs that area's app id and secret.
+project reports. Adding SA needs that area's app id and secret.
 
 ---
 

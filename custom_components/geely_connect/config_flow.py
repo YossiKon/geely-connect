@@ -325,6 +325,19 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # record, not from the country the user picked: the two can differ, and
         # signing against the wrong one is what produces the opaque 1501
         # "geelyos verify error".
+        # The fields region resolution reads, logged so an unrecognised market
+        # can be diagnosed from a normal debug log. Region/market codes only -
+        # but the record also carries the VIN and nickname, so it goes through
+        # redact() rather than being printed whole.
+        _LOGGER.debug(
+            "vehicle region fields: %s",
+            geely_api.redact({
+                k: vehicle.get(k) for k in (
+                    "tspInfo", "edgeInfo", "serviceRegion", "saleMarket",
+                    "dcCode", "deliveryCountryCode", "tcamMarket",
+                )
+            }),
+        )
         region = resolve_vehicle_region(vehicle) or DEFAULT_REGION
         if region in UNSUPPORTED_REGIONS:
             _LOGGER.error(
