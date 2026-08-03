@@ -363,7 +363,11 @@ def fetch_load(s: requests.Session, captcha_id: str, *, client_type: str = "web"
     )
 
 
-_CAPTCHA_HOST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.\-]{0,252}$")
+# \Z, not $: `$` also matches before a trailing newline, so "host\n" would pass
+# this check. Today the suffix test below rejects it anyway - "x.geely.com\n"
+# does not end with ".geely.com" - but that is luck, not design, and it would
+# stop protecting us the moment the suffix check changed.
+_CAPTCHA_HOST_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9.\-]{0,252}\Z")
 _CAPTCHA_HOST_SUFFIXES = (".geely.com", ".geetest.com")
 
 _FALLBACK_CAPTCHA_HOST = "captcha4.geely.com"

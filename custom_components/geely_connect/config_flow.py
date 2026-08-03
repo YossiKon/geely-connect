@@ -71,8 +71,12 @@ _LOGGER = logging.getLogger(__name__)
 # could return a VIN like "../../config/..." (path traversal / arbitrary file
 # write) or one containing CR/LF (HTTP request-line injection). We accept only
 # conservative identifier characters and reject anything else.
-_VIN_RE = re.compile(r"^[A-Za-z0-9]{8,20}$")
-_USER_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+# \Z, not $: in Python `$` also matches immediately before a trailing newline,
+# so "L6T...\n" satisfied `^[A-Za-z0-9]{8,20}$` and passed this gate. The
+# transport's CR/LF guard caught it downstream, but this is meant to be the
+# first line of defence, not the second.
+_VIN_RE = re.compile(r"\A[A-Za-z0-9]{8,20}\Z")
+_USER_ID_RE = re.compile(r"\A[A-Za-z0-9._-]{1,64}\Z")
 
 # Unique-id suffixes of the four tire-pressure sensors. Mirrors sensor.py,
 # kept here so the options flow does not import a platform module. The unit
