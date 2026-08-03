@@ -31,6 +31,7 @@ from .const import (
     CONF_DEVICE_ID,
     CONF_DEVICE_IDFA,
     CONF_DEVICE_IDFV,
+    CONF_EMAIL,
     CONF_FULL_EXPOSURE,
     CONF_KEY_PATH,
     CONF_POLL_MODE,
@@ -304,6 +305,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         cert_path=d[CONF_CERT_PATH],
         key_path=d[CONF_KEY_PATH],
         control_host=backend["control_host"],
+        email=d.get(CONF_EMAIL),
     )
 
     _SUCCESS_CODES = {1000, "1000", 10000000, "10000000", None}

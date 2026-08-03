@@ -40,6 +40,12 @@ REGIONS: dict[str, dict[str, str]] = {
         "cert_host":    "api.ecloudus.com",
         "control_host": "apis.ecloudus.com",
     },
+    "APAC": {
+        "app_id":       "GEELYE245",
+        "app_secret":   "5b2e7f2f569e4173a9aea65e0c9133e3",
+        "cert_host":    "api.ecloudkr.com",
+        "control_host": "apis.ecloudkr.com",
+    },
 }
 
 # Areas whose hosts are known but whose app credentials have never been
@@ -47,7 +53,6 @@ REGIONS: dict[str, dict[str, str]] = {
 # message instead of being silently signed against the European backend, which
 # only produces the confusing "geelyos verify error".
 UNSUPPORTED_REGIONS: dict[str, str] = {
-    "APAC": "api.ecloudkr.com",
     "SA":   "tsp-geely-api-sa.xcloudsvc.com",
 }
 
@@ -170,6 +175,18 @@ SUPPORTED_COUNTRIES: dict[str, str] = {
     "CA": "🇨🇦 Canada (CA)",
     "MX": "🇲🇽 Mexico (MX)",
     "US": "🇺🇸 United States (US)",
+    # APAC backend (api.ecloudkr.com). The vehicle's actual area still comes
+    # from the login response; these countries are the common APAC ones.
+    "AU": "🇦🇺 Australia (AU)",
+    "HK": "🇭🇰 Hong Kong (HK)",
+    "ID": "🇮🇩 Indonesia (ID)",
+    "KR": "🇰🇷 South Korea (KR)",
+    "MY": "🇲🇾 Malaysia (MY)",
+    "NZ": "🇳🇿 New Zealand (NZ)",
+    "PH": "🇵🇭 Philippines (PH)",
+    "SG": "🇸🇬 Singapore (SG)",
+    "TH": "🇹🇭 Thailand (TH)",
+    "VN": "🇻🇳 Vietnam (VN)",
 }
 
 
@@ -183,11 +200,25 @@ def region_config(region: str | None) -> dict[str, str]:
     return REGIONS.get((region or DEFAULT_REGION).upper(), REGIONS[DEFAULT_REGION])
 
 
+# Market-area codes seen on /controlCars records that do NOT match the
+# backend region codes used elsewhere (REGIONS keys). saleMarket/tcamMarket
+# on APAC-market cars report "AP" (Asia-Pacific) while the backend key is
+# "APAC"; EU/NA records report codes that already match, so they pass
+# through unchanged.
+MARKET_TO_REGION: dict[str, str] = {
+    "AP": "APAC",
+}
+
+
 def resolve_vehicle_region(vehicle: dict) -> str | None:
     """Read the telematics area out of a /controlCars vehicle record.
 
     `tspInfo` is a list of per-service entries that each carry a
-    `serviceRegion`; `edgeInfo.code` carries the same area on some accounts."""
+    `serviceRegion`; `edgeInfo.code` carries the same area on some accounts.
+    Some backends (e.g. APAC/Korea) return a top-level `serviceRegion` field
+    instead of either of those, so fall back to it, and finally to the
+    `saleMarket` / `tcamMarket` market codes (e.g. "AP" -> APAC).
+    """
     tsp = vehicle.get("tspInfo")
     if isinstance(tsp, list):
         for entry in tsp:
@@ -196,6 +227,14 @@ def resolve_vehicle_region(vehicle: dict) -> str | None:
     edge = vehicle.get("edgeInfo")
     if isinstance(edge, dict) and edge.get("code"):
         return str(edge["code"]).upper()
+    top = vehicle.get("serviceRegion")
+    if top:
+        return str(top).upper()
+    for key in ("saleMarket", "tcamMarket"):
+        mkt = vehicle.get(key)
+        if mkt:
+            code = str(mkt).upper()
+            return MARKET_TO_REGION.get(code, code)
     return None
 
 

@@ -307,6 +307,7 @@ _TLS_LEGACY_RENEG = 0x4   # OP_LEGACY_SERVER_CONNECT - old handshake mode only
 _PRIVATE_PKI_HOSTS: frozenset = frozenset({
     "apis.ecloudeu.com",
     "apis.ecloudus.com",
+    "apis.ecloudkr.com",
 })
 
 # SubjectPublicKeyInfo SHA-256 pins (base64) for those hosts. Captured
@@ -317,6 +318,11 @@ _PRIVATE_PKI_HOSTS: frozenset = frozenset({
 _BUNDLED_TLS_PINS: dict[str, tuple[str, ...]] = {
     "apis.ecloudeu.com": ("Hm0olBoClunXgMp4wFvdrr8SC5iSt+LX6iyB4N828C8=",),
     "apis.ecloudus.com": ("yTrWM8YjYq6ivb6HP1usQiBdgZYGiCwR6yuQYOm2KVs=",),
+    # Captured 2026-08-03 from all three published A records
+    # (3.34.148.140, 3.36.84.152, 3.39.68.203) - same SPKI on all, cross-checked
+    # against the strict-failure chain (Geely Trust Center / EU-CA leaf,
+    # subject CN=apis.ecloudkr.com, valid 2022-2032).
+    "apis.ecloudkr.com": ("XFUV7VhyECWtALG5wEQoAj3FSWtsf3IpBq6l2mBgVWA=",),
 }
 
 # OpenSSL verify codes that mean "the chain is fine, we just don't have this
@@ -618,6 +624,7 @@ class GeelyApi:
         cert_path: str,
         key_path: str,
         control_host: str = "apis.ecloudeu.com",
+        email: str | None = None,
     ) -> None:
         self.app_id = app_id
         self.app_secret = app_secret
@@ -632,6 +639,9 @@ class GeelyApi:
         self.key_path = key_path
         # Regional control endpoint; see const.REGIONS.
         self.control_host = control_host
+        # Login email: the APAC session exchange authenticates with it as
+        # receiverId in the request body (the EU exchange does not).
+        self.email = email
         # Server-key pin store lives next to the mTLS material for this VIN.
         self.pin_path = os.path.join(os.path.dirname(cert_path), "server_pins.json") \
             if cert_path else None
@@ -723,11 +733,16 @@ class GeelyApi:
 
     # ---- high-level operations ----
 
-    def _get_access_code(self) -> str:
-        """1-time accessCode from cidpsso (used to fetch apis JWT)."""
+    def _get_access_code(self, host: str = "m-lcmsam-eu.geely.com") -> str:
+        """1-time accessCode from cidpsso (used to fetch apis JWT).
+
+        The code must be minted by the SAME regional backend that will later
+        exchange it: the APAC session service only recognises codes issued by
+        m-lcmsam-kr.geely.com (EU-minted codes make it crash with 8500).
+        """
         body = json.dumps({"state": str(uuid.uuid4())}).encode()
         resp_bytes = _raw_https(
-            "m-lcmsam-eu.geely.com", "POST",
+            host, "POST",
             "/cidpsso/oauth2/v1/getCode",
             {
                 "token": self.cidpsso_token,
@@ -743,8 +758,81 @@ class GeelyApi:
             raise RuntimeError(f"getCode failed: {redact(j)}")
         return j["data"]["accessCode"]
 
+    # ---- APAC session exchange (api.ecloudkr.com, NO mTLS) ----
+    #
+    # The EU flow exchanges the accessCode on the mTLS control host
+    # (apis.ecloudeu.com /auth/account/session/secure). The APAC backend
+    # instead runs the exchange on the PUBLIC host api.ecloudkr.com at
+    # /auth-center/account/session with a receiverId body field, a
+    # charset=utf-8 Accept, and UPPERCASE X-SIGNATURE/X-TIMESTAMP headers
+    # (the lowercase variants are rejected with 1445 by the APAC gateway).
+    # Verified end-to-end 2026-08-03: getCode via m-lcmsam-kr -> JWT
+    # (HS256, uid, appId=GEELYE245) -> vehicle_status via mTLS = code 1000.
+
+    def _apac_session_exchange(self) -> dict:
+        """Exchange a KR-minted accessCode for the apis.ecloudkr.com JWT."""
+        if not self.email:
+            raise GeelyAuthError(
+                "APAC session exchange needs the login email (receiverId) "
+                "but the config entry has none - re-add the integration."
+            )
+        ac = self._get_access_code(host="m-lcmsam-kr.geely.com")
+        body = json.dumps({
+            "identityType": "geelyos",
+            "authCode": ac,
+            "receiverId": self.email,
+        }, separators=(",", ":")).encode()
+
+        host = "api.ecloudkr.com"
+        path = "/auth-center/account/session"
+        nonce = _make_nonce()
+        ts_ms = int(time.time() * 1000)
+        # Sign string uses the charset=utf-8 Accept; headers are UPPERCASE.
+        ss = _build_sign_string(
+            method="POST", path=path, query="",
+            accept="application/json; charset=utf-8",
+            nonce=nonce, sig_version="1.0", timestamp_ms=ts_ms, body=body,
+        )
+        sig = base64.b64encode(
+            hmac.new(self.app_secret.encode(), ss.encode(), hashlib.sha1).digest()
+        ).decode()
+        headers = {
+            "Accept": "application/json; charset=utf-8",
+            "X-APP-ID": self.app_id,
+            "X-CLIENT-TYPE": "2",
+            "X-ENV-TYPE": "production",
+            "X-OPERATOR-CODE": "GEELY",
+            "X-VIN-ID": self.vin,
+            "urlname": "user-api",
+            "Authorization": self.cidpsso_token,
+            "Content-Type": "application/json; charset=utf-8",
+            "X-api-signature-version": "1.0",
+            "X-api-signature-nonce": nonce,
+            "X-TIMESTAMP": str(ts_ms),
+            "X-SIGNATURE": sig,
+            "user-agent": "okhttp/4.11.0",
+        }
+        resp_bytes = _raw_https(host, "POST", path, headers, body,
+                                pin_path=self.pin_path, timeout=15)
+        j = json.loads(resp_bytes)
+        # APAC success envelope: {"resultCode": "0", "resultMessage":
+        # "Success", "accessToken": ..., "userId": ..., "expiresIn": 7200}
+        if str(j.get("resultCode")) != "0":
+            raise GeelyAuthError(f"APAC session exchange failed: {redact(j)}")
+        return j
+
     def refresh_jwt(self) -> dict:
-        """Exchange a cidpsso accessCode for an apis.ecloudeu.com JWT."""
+        """Exchange a cidpsso accessCode for an apis.ecloudeu.com JWT.
+
+        APAC uses a different exchange (public host, receiverId body); see
+        _apac_session_exchange.
+        """
+        if self.control_host == "apis.ecloudkr.com":
+            d = self._apac_session_exchange()
+            self._jwt = d["accessToken"]
+            self._jwt_uid = d.get("userId") or self.user_id
+            self._jwt_exp = int(time.time()) + int(d.get("expiresIn", 7200))
+            return d
         ac = self._get_access_code()
         body = json.dumps({"authCode": ac}).encode()
         status, resp = self._mtls_send(
