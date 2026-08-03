@@ -1,11 +1,11 @@
-# Geely Connect — APAC region support (complete solution)
+# Geely Connect - APAC region support (complete solution)
 
 **Status: working end-to-end, verified live (2026-08-03)**
 
 The [YossiKon/geely-connect](https://github.com/YossiKon/geely-connect) Home
 Assistant integration previously supported only **EU** and **NA**. This work
-adds full **APAC** support — region resolution, certificate provisioning and
-the runtime session exchange — verified live against a production account and
+adds full **APAC** support - region resolution, certificate provisioning and
+the runtime session exchange - verified live against a production account and
 vehicle (Australian-market Geely EX5).
 
 This document describes what was broken, the root causes, and the exact fix,
@@ -13,7 +13,7 @@ so the same changes can be reviewed and merged.
 
 ---
 
-## TL;DR — three independent problems
+## TL;DR - three independent problems
 
 1. **Region resolution.** APAC accounts' vehicle records carry no
    `tspInfo` / `edgeInfo` / top-level `serviceRegion`, so region resolution
@@ -43,13 +43,13 @@ so the same changes can be reviewed and merged.
      "receiverId": <login email>}`
    - Success envelope differs from EU:
      `{"resultCode": "0", "resultMessage": "Success", "accessToken": <JWT>,
-     "userId": <id>, "expiresIn": 7200}` — note `userId` here is the
+     "userId": <id>, "expiresIn": 7200}` - note `userId` here is the
      session-service id, which differs from the cidpsso `user_id`; that is
      normal.
    - **The access code must be minted by the same regional backend that
      exchanges it**: `POST /cidpsso/oauth2/v1/getCode` on
      `m-lcmsam-kr.geely.com` (the APAC host). Codes minted on the EU/global
-     hosts do not exist in the APAC session store — the server crashes with
+     hosts do not exist in the APAC session store - the server crashes with
      `8500` (`服务器端内部异常`). This was the root cause of the runtime
      setup failure, and it is invisible from the client side: a garbage code
      produces the identical `8500`, so the failure happens **before** code
@@ -69,7 +69,7 @@ OTP login (region-agnostic; unchanged)
 
 The mTLS client certificate is provisioned during config flow against
 `api.ecloudkr.com` (`/auth/cert/info` + `/auth/cert/file`) with
-`identityType: "geelyos"` — the same identity the session exchange uses.
+`identityType: "geelyos"` - the same identity the session exchange uses.
 The APAC server pin for `apis.ecloudkr.com` is bundled (Geely private PKI,
 issuer "Geely Trust Center / External Services Issuing EU-CA").
 
