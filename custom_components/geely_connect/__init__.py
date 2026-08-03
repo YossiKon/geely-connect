@@ -411,6 +411,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # change rarely, so we only fetch them when charging or every Nth cycle;
         # otherwise we carry the previous values forward. This roughly halves the
         # calls per cycle when the car is just parked.
+        # Carry the last known values forward FIRST, then overwrite them if a
+        # fetch succeeds. Doing it the other way round meant an attempted-but-
+        # failed fetch dropped the keys entirely - strictly worse than skipping
+        # the call - and because the next cycle reads `prev` from this same
+        # damaged snapshot, the loss repaired itself only when a fetch finally
+        # succeeded. Parking comfort, scheduled charging and both schedule-time
+        # entities read unknown for that whole window.
+        if "_state" in prev:
+            data["_state"] = prev["_state"]
+        if "_scheduled_charging" in prev:
+            data["_scheduled_charging"] = prev["_scheduled_charging"]
+
         if charging or was_charging or (cyc % _SECONDARY_EVERY == 1):
             try:
                 state_resp = await _call_with_retry(api.vehicle_status_state)
@@ -434,11 +446,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 _LOGGER.error("scheduled-charging fetch: TLS pin check failed: %s", e)
             except Exception as e:  # noqa: BLE001
                 _LOGGER.debug("scheduled-charging fetch non-fatal failure: %s", e)
-        else:
-            if "_state" in prev:
-                data["_state"] = prev["_state"]
-            if "_scheduled_charging" in prev:
-                data["_scheduled_charging"] = prev["_scheduled_charging"]
 
         fail_state["consecutive"] = 0
 

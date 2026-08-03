@@ -13,6 +13,25 @@ permissions:
   contents: read
 
 jobs:
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      # The offline tests - redaction, transport invariants, request shapes,
+      # region resolution - need nothing but the standard library, so they run
+      # first and fail fast. The entity tests import Home Assistant and skip
+      # themselves without it.
+      - name: Run tests
+        run: python tests/run.py
+
   hassfest:
     name: Hassfest
     runs-on: ubuntu-latest

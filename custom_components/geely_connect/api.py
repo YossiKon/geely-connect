@@ -26,6 +26,7 @@ import secrets
 import socket
 import ssl
 import string
+import threading
 import time
 import uuid
 from typing import Any
@@ -683,10 +684,12 @@ class GeelyApi:
         # Server-key pin store lives next to the mTLS material for this VIN.
         self.pin_path = os.path.join(os.path.dirname(cert_path), "server_pins.json") \
             if cert_path else None
-        # JWT cache
+        # JWT cache. Guarded by _jwt_lock: every public method runs in a Home
+        # Assistant executor thread, so refreshes can overlap (see _ensure_jwt).
         self._jwt: str | None = None
         self._jwt_uid: str | None = None
         self._jwt_exp: int = 0   # unix ms
+        self._jwt_lock = threading.Lock()
 
     # ---- low-level helpers ----
 
@@ -901,9 +904,30 @@ class GeelyApi:
         return d
 
     def _ensure_jwt(self) -> str:
-        if not self._jwt or time.time() > self._jwt_exp - 60:
-            self.refresh_jwt()
-        return self._jwt   # type: ignore[return-value]
+        """Return a live JWT, refreshing it at most once across all threads.
+
+        Home Assistant runs every call here in an executor thread, so a
+        coordinator poll and a user pressing unlock can arrive together. Without
+        the lock both see a stale token and both run the full refresh: two
+        access codes burned, two sessions opened - and Geely allows one session
+        per account, so each one signs the owner's phone app out. Whichever
+        refresh finishes second also overwrites _jwt with a token the server has
+        already replaced.
+
+        Double-checked: the fast path stays lock-free once a valid token is
+        cached, and the second thread re-tests expiry inside the lock so it
+        reuses what the first one just fetched.
+        """
+        if self._jwt and time.time() <= self._jwt_exp - 60:
+            return self._jwt
+        with self._jwt_lock:
+            if not self._jwt or time.time() > self._jwt_exp - 60:
+                self.refresh_jwt()
+            if not self._jwt:
+                # refresh_jwt returned without setting a token; better to fail
+                # here than to format None into an Authorization header.
+                raise GeelyAuthError("JWT refresh produced no token")
+            return self._jwt
 
     def _headers_with_jwt(self) -> dict:
         return {
@@ -975,27 +999,15 @@ class GeelyApi:
             "userId": str(self.user_id),
         }
         path = f"/remote-control/vehicle/telematics/{self.vin}"
-        status, resp = self._mtls_send(
-            self.control_host, "PUT", path, json.dumps(body).encode(),
-            extra_headers=self._headers_with_jwt(),
-        )
-        return json.loads(resp)
+        return self._authed_apis_call("PUT", path, json.dumps(body).encode())
 
     def vehicle_status_state(self) -> dict:
         path = f"/remote-control/vehicle/status/state/{self.vin}"
-        status, resp = self._mtls_send(
-            self.control_host, "GET", path, b"",
-            extra_headers=self._headers_with_jwt(),
-        )
-        return json.loads(resp)
+        return self._authed_apis_call("GET", path, b"")
 
     def charging_reservation(self) -> dict:
         path = f"/remote-control/charging/reservation/{self.vin}"
-        status, resp = self._mtls_send(
-            self.control_host, "GET", path, b"",
-            extra_headers=self._headers_with_jwt(),
-        )
-        return json.loads(resp)
+        return self._authed_apis_call("GET", path, b"")
 
     def charge_server_get(self, biz_type: str) -> dict:
         """GET /charge-server/ecarx_charge_set/{VIN}?bizType=N.
@@ -1007,11 +1019,7 @@ class GeelyApi:
         Returns the full response dict ({"code":"1000","data":{...}}).
         """
         path = f"/charge-server/ecarx_charge_set/{self.vin}?bizType={biz_type}"
-        status, resp = self._mtls_send(
-            self.control_host, "GET", path, b"",
-            extra_headers=self._headers_with_jwt(),
-        )
-        return json.loads(resp)
+        return self._authed_apis_call("GET", path, b"")
 
     def scheduled_charging_set(self, *, command: str, start_time: str,
                                 end_time: str, rbc_target: str = "2",
@@ -1046,12 +1054,8 @@ class GeelyApi:
         }
         body_bytes = json.dumps(body, separators=(",", ":")).encode()
         path = f"/charge-server/ecarx_charge_set/{self.vin}"
-        status, resp = self._mtls_send(
-            self.control_host, "POST", path, body_bytes,
-            extra_headers=self._headers_with_jwt(),
-        )
-        j = json.loads(resp)
-        return _check_control_resp(j)
+        return _check_control_resp(
+            self._authed_apis_call("POST", path, body_bytes))
 
     # ---- WRITE (control) ----
 
@@ -1076,12 +1080,8 @@ class GeelyApi:
         }
         body = json.dumps(body_dict, separators=(",", ":")).encode()
         path = f"/remote-control/vehicle/telematics/{self.vin}"
-        status, resp = self._mtls_send(
-            self.control_host, "PUT", path, body,
-            extra_headers=self._headers_with_jwt(),
-        )
-        j = json.loads(resp)
-        return _check_control_resp(j)
+        return _check_control_resp(
+            self._authed_apis_call("PUT", path, body))
 
     # ---- Compound rapid warm/cool (different endpoint) ----
 
@@ -1115,12 +1115,8 @@ class GeelyApi:
             body["ventilation"] = [{"level": "3", "pos": p} for p in vent_seats]
         body_bytes = json.dumps(body, separators=(",", ":")).encode()
         path = f"/charge-server/ecarx_charge_set/{self.vin}"
-        status, resp = self._mtls_send(
-            self.control_host, "POST", path, body_bytes,
-            extra_headers=self._headers_with_jwt(),
-        )
-        j = json.loads(resp)
-        return _check_control_resp(j)
+        return _check_control_resp(
+            self._authed_apis_call("POST", path, body_bytes))
 
     # ---- Capability discovery ----
 
@@ -1138,12 +1134,8 @@ class GeelyApi:
             f"/geelyTCAccess/tcservices/capability/{self.vin}"
             "?pageSize=2000&pageIndex=1&vehicleType=0&sortField=&direction="
         )
-        status, resp = self._mtls_send(
-            self.control_host, "GET", path, b"",
-            extra_headers=self._headers_with_jwt(),
-        )
         try:
-            j = json.loads(resp)
+            j = self._authed_apis_call("GET", path, b"")
             return (j.get("data") or {}).get("list", []) or []
         except Exception:
             return []
