@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Geely Connect",
-        "description": "Intégration communautaire non officielle - non affiliée à Geely. Saisissez l'email du compte Geely, choisissez le pays, l'unité de pression des pneus et la langue. Un code à 6 chiffres sera envoyé.",
+        "description": "Intégration communautaire non officielle - sans lien avec Geely. Saisissez l'e-mail de votre compte Geely et choisissez votre pays ; un code à 6 chiffres vous sera envoyé.\n\nLe mode d'interrogation détermine la fréquence de contact avec le véhicule. Geely n'autorise qu'une session par compte, donc chaque interrogation déconnecte brièvement l'application mobile - choisissez Manuel si cela vous gêne.",
         "data": {
           "email": "Email",
           "country_code": "Pays",
@@ -46,7 +46,7 @@
     "step": {
       "init": {
         "title": "Options",
-        "description": "Modifiez la fréquence d'interrogation du véhicule, l'unité de pression des pneus et la langue des entités. Une interrogation plus rapide déconnecte l'application mobile plus souvent.",
+        "description": "Modifiez la fréquence d'interrogation du véhicule, l'unité de pression des pneus et les entités exposées.\n\nEco, Normal et Live interrogent selon une minuterie, du moins au plus fréquent. Manuel n'interroge jamais de lui-même : les données ne sont actualisées que lorsque vous appuyez sur le bouton Actualiser, appelez homeassistant.update_entity ou envoyez une commande au véhicule. Entre-temps, aucun contact n'est établi, l'application mobile reste connectée - mais les valeurs datent de votre dernière synchronisation.",
         "data": {
           "poll_mode": "Mode d'interrogation",
           "pressure_unit": "Unité de pression des pneus",

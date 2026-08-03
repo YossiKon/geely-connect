@@ -26,7 +26,7 @@ polished setup on top.
   duplicates, nothing to switch on by hand.
 - 🧮 **Computed extras** - charge completion time, range at full charge and
   efficiency, none of which the car reports itself.
-- 🔋 **Efficient polling** with selectable modes (Eco / Normal / Live),
+- 🔋 **Efficient polling** with selectable modes (Eco / Normal / Live / Manual),
   changeable at any time.
 - 🌍 **EU and North-American** backends, detected from the vehicle.
 - 🗣️ **Translated setup** - the configuration dialogs are in English, Hebrew,
@@ -160,12 +160,58 @@ profile at setup:
 | 🔋 **Eco** - fewest interruptions | every 90 s | 300 s → 30 min | every 6th cycle | every 12th |
 | ⚖️ **Normal** - balanced | every 30 s | 90 s → 15 min | every 4th cycle | every 6th |
 | ⚡ **Live** - freshest | every 15 s | 45 s → 5 min | every 3rd cycle | every 3rd |
+| ✋ **Manual** - you sync | never | never | on every sync | on every sync |
 
 The mode is **not fixed at setup** - change it any time from **Configure** on
 the device page (see *Changing settings later* below).
 
 Everything is per-mode: the active-polling rate, the parked back-off, the cap,
 and how often secondary/GPS calls run.
+
+### ✋ Manual mode - sync only when you ask
+
+Manual runs **no timer at all**. Home Assistant never contacts the car on its
+own, so the phone app is never signed out by the integration. The trade is
+explicit: entity values stay exactly as old as your last sync, and there is no
+"is it plugged in yet?" without asking.
+
+A sync happens when - and only when - one of these occurs:
+
+- you press the **Refresh Data** button on the device page
+- something calls `homeassistant.update_entity` on any entity of the car
+  (a dashboard button, an automation, a schedule you define yourself)
+- **you send a command** - lock, climate, charging and the rest still poll
+  afterwards on their own, so the entity reflects what the car actually did
+
+Because syncs are rare in this mode, each one fetches **everything**: the full
+status, the secondary state and scheduled-charging data, and a fresh GPS
+position. The other modes ration those across cycles; Manual does not.
+
+Two things worth knowing before you pick it:
+
+- **Automations that read car state will act on stale data** unless they sync
+  first. Call `homeassistant.update_entity` at the start of the automation and
+  the data will be fresh for the conditions that follow.
+- **A failed sync is shown, not hidden.** The Refresh Data button reports the
+  error instead of silently leaving the old values on screen.
+
+Sync on your own schedule - this polls once an hour, and only during the day:
+
+```yaml
+automation:
+  - alias: Geely - hourly sync
+    triggers:
+      - trigger: time_pattern
+        hours: "/1"
+    conditions:
+      - condition: time
+        after: "07:00:00"
+        before: "23:00:00"
+    actions:
+      - action: homeassistant.update_entity
+        target:
+          entity_id: sensor.geely_ex5_4143_battery
+```
 
 Other smart behaviour: **long-term statistics** (battery, range, consumption,
 pressures feed HA statistics + the Energy dashboard) and **ready-made
@@ -518,9 +564,13 @@ project reports. Adding APAC or SA needs that area's app id and secret.
 ## 🎚️ Changing settings later
 
 Settings → Devices & Services → **Geely Connect** → **Configure** changes the
-**polling mode** and **tire-pressure unit** at any time - no reinstall, no
-restart. Changing the pressure unit also re-points the four
-existing tire sensors, so history is kept rather than restarting.
+**polling mode** (Eco / Normal / Live / Manual) and **tire-pressure unit** at
+any time - no reinstall, no restart. Changing the pressure unit also re-points
+the four existing tire sensors, so history is kept rather than restarting.
+
+Switching to **Manual** stops the timer immediately, and switching away from it
+starts polling again - no entity is created or removed either way, so history
+and automations are untouched.
 
 ### Which entities appear
 

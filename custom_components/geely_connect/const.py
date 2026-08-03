@@ -94,15 +94,23 @@ CONF_FULL_EXPOSURE = "full_exposure"
 #   cap             = max interval when parked and nothing changes (idle back-off)
 #   secondary_every = fetch state + scheduled-charging every Nth cycle
 #   position_every  = wake the car for fresh GPS every Nth cycle when parked
+#   manual          = no timer at all; data is fetched only when you ask
 POLL_PROFILES: dict[str, dict] = {
     "eco":    {"base": 300, "fast": 90, "cap": 1800, "secondary_every": 6, "position_every": 12},
     "normal": {"base": 90,  "fast": 30, "cap": 900,  "secondary_every": 4, "position_every": 6},
     "live":   {"base": 45,  "fast": 15, "cap": 300,  "secondary_every": 3, "position_every": 3},
+    # Manual sync: the coordinator gets no update_interval, so nothing is
+    # fetched on a timer. Every refresh is one the user (or an automation)
+    # asked for, and because those are rare there is no reason to ration the
+    # secondary endpoints - every sync fetches everything, position included.
+    "manual": {"base": 0, "fast": 0, "cap": 0, "secondary_every": 1,
+               "position_every": 1, "manual": True},
 }
 POLL_MODES: dict[str, str] = {
     "eco":    "🔋 Eco (fewest interruptions)",
     "normal": "⚖️ Normal (balanced)",
     "live":   "⚡ Live (freshest, polls most)",
+    "manual": "✋ Manual (no automatic polling - you sync)",
 }
 DEFAULT_POLL_MODE = "normal"
 

@@ -86,8 +86,20 @@ class GeelyRefreshButton(ButtonEntity):
         )
 
     async def async_press(self) -> None:
-        # Immediate refresh; raises to the UI if the poll fails.
-        await self._coordinator.async_request_refresh()
+        """Fetch now and tell the user if it failed.
+
+        async_request_refresh() is debounced and returns without waiting, which
+        is right for the automatic post-command polls but wrong here: in Manual
+        polling mode this button is the only thing that fetches data, so a
+        press has to actually run the poll and surface a failure instead of
+        silently leaving stale values on screen.
+        """
+        await self._coordinator.async_refresh()
+        if not self._coordinator.last_update_success:
+            err = self._coordinator.last_exception
+            raise HomeAssistantError(
+                f"Geely sync failed: {err}" if err else "Geely sync failed"
+            )
 
 
 class GeelyTelematicsButton(ButtonEntity):

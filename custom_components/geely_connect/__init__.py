@@ -348,6 +348,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     _SECONDARY_EVERY = profile["secondary_every"]
     _POSITION_EVERY = profile["position_every"]
+    # Manual mode: no timer. The coordinator still refreshes on demand - the
+    # Refresh Data button, homeassistant.update_entity, and the automatic
+    # post-command polls - it just never starts one by itself.
+    _MANUAL = bool(profile.get("manual"))
 
     async def _async_update():
         poll_state["cycle"] += 1
@@ -442,18 +446,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             poll_state["idle"] = 0
         poll_state["sig"] = sig
 
-        try:
-            coordinator.update_interval = _adaptive_interval(data, poll_state["idle"], profile)
-        except Exception:  # noqa: BLE001
-            pass
+        if not _MANUAL:
+            try:
+                coordinator.update_interval = _adaptive_interval(data, poll_state["idle"], profile)
+            except Exception:  # noqa: BLE001
+                pass
         return data
 
     coordinator = DataUpdateCoordinator(
         hass,
         _LOGGER,
         name=DOMAIN,
+        config_entry=entry,
         update_method=_async_update,
-        update_interval=timedelta(seconds=profile["base"]),
+        # None means "never schedule an update yourself" - manual mode.
+        update_interval=None if _MANUAL else timedelta(seconds=profile["base"]),
     )
     await coordinator.async_config_entry_first_refresh()
 

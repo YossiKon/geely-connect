@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Geely Connect",
-        "description": "Unofficial community integration - not affiliated with Geely. Enter your Geely account email and pick your country, and we'll send a 6-digit code to your inbox.",
+        "description": "Unofficial community integration - not affiliated with Geely. Enter your Geely account email and pick your country, and we'll send a 6-digit code to your inbox.\n\nPolling mode decides how often the car is contacted. Geely allows one session per account, so every poll briefly signs the phone app out - pick Manual if that bothers you.",
         "data": {
           "email": "Email",
           "country_code": "Country",
@@ -46,7 +46,7 @@
     "step": {
       "init": {
         "title": "Options",
-        "description": "Change how often Home Assistant polls the car, the tire-pressure unit and the entity language. Faster polling logs the phone app out more often.",
+        "description": "Change how often Home Assistant polls the car, the tire-pressure unit and which entities are exposed.\n\nEco, Normal and Live poll on a timer, from least to most often. Manual never polls on its own: data refreshes only when you press the Refresh Data button, call homeassistant.update_entity, or send a command to the car. Nothing is contacted in between, so the phone app stays signed in - but values stay as old as your last sync.",
         "data": {
           "poll_mode": "Polling mode",
           "pressure_unit": "Tire pressure unit",
