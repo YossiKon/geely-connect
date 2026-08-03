@@ -18,6 +18,12 @@ import traceback
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+# When this file runs as __main__ AND a test module does `from run import skip`,
+# Python would build a second module object, so run._Skip and __main__._Skip
+# would be different classes and skips would surface as failures. Registering
+# ourselves under the name tests import makes both resolve to this module.
+sys.modules.setdefault("run", sys.modules[__name__])
+
 
 def _load(path: str):
     name = os.path.splitext(os.path.basename(path))[0]
