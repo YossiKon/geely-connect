@@ -19,6 +19,14 @@ Target temp: NOT readable from any server endpoint. The Geely cloud's
 capability catalog explicitly lists `temperature_2` (which is the only
 remote_status temp query) as returning `temperature_in_car` only.
 We track the user-set value locally and surface it as `target_temperature`.
+
+Scope: this entity controls REMOTE pre-conditioning only. The Geely
+cloud does not report manual in-cabin HVAC operation - preClimateActive
+flips true only while a remote pre-climate cycle is running, and ends
+when the car starts (verified on EX5, 2026-08). A car driven with the
+cabin heater on still reports OFF here, exactly like the phone app,
+whose AC indicator is the same field. The entity name reflects that
+scope.
 """
 # -----------------------------------------------------------------------------
 # Portions of this file - the reverse-engineered Geely protocol / field mappings
@@ -152,7 +160,7 @@ class GeelyClimate(CoordinatorEntity, ClimateEntity, RestoreEntity):
         self._attr_supported_features = features
 
         self._attr_unique_id = f"geely_{self._vin}_climate"
-        self._attr_name = "Climate"
+        self._attr_name = "Remote Pre-Conditioning"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self._vin)},
             manufacturer="Geely",
