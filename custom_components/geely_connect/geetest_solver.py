@@ -328,10 +328,25 @@ def fetch_load(s: requests.Session, captcha_id: str, *, client_type: str = "web"
     r = s.get(f"{GEELY_HOST}/load", params=params, timeout=15)
     r.raise_for_status()
     text = r.text
-    inner = text.split(f"{callback}(", 1)[1].rsplit(")", 1)[0]
+    # The reply is JSONP: callback({...}). A 200 that is not JSONP - a captive
+    # portal, a WAF block page - would make a bare split raise IndexError, which
+    # says nothing about what went wrong five frames up the config flow.
+    marker = f"{callback}("
+    if marker not in text:
+        raise RuntimeError(
+            f"/load did not return the expected JSONP envelope "
+            f"(got {len(text)} bytes starting {text[:40]!r})"
+        )
+    inner = text.split(marker, 1)[1].rsplit(")", 1)[0]
     j = json.loads(inner)
     if not j.get("status") == "success":
-        raise RuntimeError(f"/load failed: {j}")
+        # Only the diagnostic fields. The full envelope carries the captcha
+        # session material (payload, process_token), and this message reaches
+        # the Home Assistant log.
+        raise RuntimeError(
+            "/load failed: status={!r} error={!r} msg={!r}".format(
+                j.get("status"), j.get("error"), j.get("msg") or j.get("message"))
+        )
     d = j["data"]
     return LoadResponse(
         lot_number=d["lot_number"],
