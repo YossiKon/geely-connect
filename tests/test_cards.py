@@ -142,8 +142,7 @@ def test_the_shipped_card_defines_both_elements_and_the_picker_entries():
     dashboard using the documented type names."""
     if not have_homeassistant():
         skip("homeassistant not installed")
-    src = open(os.path.join(PKG, "frontend", "geely-card.js"),
-               encoding="utf-8").read()
+    src = open(os.path.join(PKG, "geely-card.js"), encoding="utf-8").read()
     for needle in ('customElements.define("geely-card-compact"',
                    'customElements.define("geely-card"',
                    'type: "geely-card"', "window.customCards",
@@ -377,3 +376,12 @@ def test_a_missing_card_file_is_an_error_not_a_silent_absence():
     assert urls == [], "nothing may be advertised that cannot be served"
     assert hass.http.paths == [], "no route for a file that is not there"
     assert not hass.data.get("geely_connect_cards_registered"),         "a re-download plus reload must be able to retry"
+
+
+def test_the_card_file_sits_beside_the_python_not_in_a_subdirectory():
+    """A subdirectory is one more thing an install path can miss, and when it
+    does the only symptom is "Custom element not found" in a browser."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    assert os.path.isfile(os.path.join(PKG, "geely-card.js"))
+    assert not os.path.isdir(os.path.join(PKG, "frontend")),         "the card moved to the package root - drop the empty subdirectory"

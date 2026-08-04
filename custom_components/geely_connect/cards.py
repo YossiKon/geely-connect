@@ -1,6 +1,6 @@
 """Serve and auto-register the dashboard cards that ship with the integration.
 
-The cards live in frontend/geely-card.js and appear in the Lovelace card
+The cards live in geely-card.js, beside this file, and appear in the Lovelace card
 picker as `custom:geely-card` and `custom:geely-card-compact` the moment the
 integration is set up - no HACS frontend package, no manual resource entry.
 
@@ -42,7 +42,11 @@ async def async_register_cards(hass: HomeAssistant) -> None:
     # not both try to register the same static path.
     hass.data[_REGISTERED] = True
     try:
-        path = os.path.join(os.path.dirname(__file__), "frontend", "geely-card.js")
+        # Deliberately beside this module rather than in a subdirectory:
+        # every install path that delivers the .py files delivers a sibling
+        # file too, and a card that never arrives is invisible until someone
+        # reads a browser console.
+        path = os.path.join(os.path.dirname(__file__), "geely-card.js")
         if not await hass.async_add_executor_job(os.path.isfile, path):
             # A partial download (HACS interrupted, a manual copy that missed
             # the subdirectory) leaves the integration working and the cards
@@ -54,7 +58,7 @@ async def async_register_cards(hass: HomeAssistant) -> None:
                 "(%s). The vehicle works, but the Geely cards cannot load. "
                 "Re-download the integration in HACS (or copy the whole "
                 "custom_components/geely_connect folder if you installed by "
-                "hand) and restart.", path,
+                "hand) and restart Home Assistant.", path,
             )
             return
         await hass.http.async_register_static_paths(
