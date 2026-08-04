@@ -37,6 +37,7 @@ _ICONS: dict[str, str] = {
     "trunk_open":       "mdi:car-back",
     "driver_seatbelt":  "mdi:seatbelt",
     "charger_plugged_in": "mdi:ev-plug-type2",
+    "tank_flap":        "mdi:gas-station",
 }
 
 
@@ -58,6 +59,7 @@ SPECS: tuple[tuple[str, str, tuple[str, ...], BinarySensorDeviceClass | None, tu
     # surfaced by switch.charging.
     ("charger_plugged_in",   "Charger Plug",      (*_EV,   "statusOfChargerConnection"),    BinarySensorDeviceClass.PLUG,    ("1", 1, "2", 2, "3", 3)),
 )
+
 # Removed (redundant with proper entities):
 #   - doors_unlocked   → lock.<vin>_doors
 #   - defrost_active   → switch.<vin>_defrost
@@ -67,6 +69,14 @@ SPECS: tuple[tuple[str, str, tuple[str, ...], BinarySensorDeviceClass | None, tu
 # HA purges them on next reload.
 
 
+# Only for a car with a tank - see propulsion.py. `tankFlapStatus` reads 2 when
+# the flap is shut, matching the window/charge-lid convention elsewhere in this
+# payload, so 1 is open.
+HYBRID_SPECS: tuple[tuple[str, str, tuple[str, ...], BinarySensorDeviceClass | None, tuple[Any, ...]], ...] = (
+    ("tank_flap",            "Fuel Flap",         (*_SAFE, "tankFlapStatus"),               BinarySensorDeviceClass.OPENING, ("1", 1)),
+)
+
+
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entities: AddEntitiesCallback) -> None:
@@ -74,8 +84,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
     coordinator = bundle["coordinator"]
     vin = bundle["vin"]
     device_name = bundle.get("device_name") or f"Geely ({vin})"
+    verdict = bundle.get("propulsion")
+    specs = SPECS + (HYBRID_SPECS if verdict and verdict.has_tank else ())
     entities: list[BinarySensorEntity] = [
-        GeelyBinarySensor(coordinator, vin, device_name, *s) for s in SPECS
+        GeelyBinarySensor(coordinator, vin, device_name, *s) for s in specs
     ]
     # Connectivity: is the integration currently reaching the car's cloud?
     entities.append(GeelyConnectivity(coordinator, vin, device_name))

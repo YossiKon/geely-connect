@@ -64,13 +64,16 @@ class _Hass:
         return None
 
 
-def _build_all():
-    """Set up every platform and return {platform: [entities]}."""
-    import importlib
+def _build_all(**bundle_extra):
+    """Set up every platform and return {platform: [entities]}.
+
+    `bundle_extra` overrides entries in the hass.data bundle - that is how the
+    propulsion verdict reaches the platforms, so it is how the gating is tested.
+    """
     hass, entry = _Hass(), _Entry()
     hass.data["geely_connect"] = {"e1": {
         "api": object(), "coordinator": _Coord(), "vin": FAKE_VIN,
-        "device_name": "Geely EX5 (0000)", "capabilities": {}}}
+        "device_name": "Geely EX5 (0000)", "capabilities": {}, **bundle_extra}}
     out = {}
     for name in ("sensor", "binary_sensor", "switch", "select", "cover",
                  "button", "lock", "climate", "device_tracker", "time"):
@@ -79,6 +82,21 @@ def _build_all():
         asyncio.run(mod.async_setup_entry(hass, entry, lambda e, *a, **k: got.extend(list(e))))
         out[name] = got
     return out
+
+
+def _keys(built):
+    """Every unique_id suffix built, across all platforms."""
+    return {getattr(e, "_attr_unique_id", "").rsplit(f"{FAKE_VIN}_", 1)[-1]
+            for entities in built.values() for e in entities}
+
+
+_FUEL_ONLY_KEYS = frozenset({
+    "fuel_level", "fuel_level_pct", "fuel_consumption", "fuel_consumption_trip",
+    "mileage_on_fuel", "mileage_on_battery", "engine_coolant_temp",
+    "engine_speed", "engine_oil_health", "engine_hours_to_service",
+    "fuel_range", "combined_range",
+    "bs_tank_flap",   # binary_sensor unique_ids carry a bs_ prefix
+})
 
 
 def test_all_platforms_build_without_error():
@@ -109,6 +127,61 @@ def test_every_unique_id_is_namespaced_by_vin():
         for e in entities:
             uid = getattr(e, "_attr_unique_id", "")
             assert FAKE_VIN in uid, f"{uid} is not vehicle-specific"
+
+
+# ------------------------------------------------- propulsion gating ---
+# STATUS above is a BEV payload: no fuelStatus, no engine fields. What a BEV
+# owner must never see is a row of fuel tiles that can only read `unavailable`.
+
+def test_a_bev_gets_no_fuel_or_engine_entities():
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    p = load("propulsion")
+    verdict = p.classify("\u7eaf\u7535\u52a8", _Coord.data)
+    assert verdict.has_tank is False, "fixture is not a BEV any more"
+    leaked = _keys(_build_all(propulsion=verdict)) & _FUEL_ONLY_KEYS
+    assert leaked == set(), leaked
+
+
+def test_an_entry_with_no_verdict_at_all_behaves_like_a_bev():
+    """Belt and braces: if the verdict is ever missing from the bundle, the
+    platforms must fall back to the entity set every install had before."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    leaked = _keys(_build_all()) & _FUEL_ONLY_KEYS
+    assert leaked == set(), leaked
+
+
+def test_a_hybrid_gets_the_whole_fuel_set_and_keeps_the_electric_one():
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    p = load("propulsion")
+    verdict = p.Verdict(kind=p.Propulsion.HYBRID, has_tank=True, has_plug=True,
+                        source="declared", declared_raw="\u6df7\u52a8",
+                        propulsion_type="3", fuel_type="2")
+    built = _build_all(propulsion=verdict)
+    got = _keys(built)
+    assert _FUEL_ONLY_KEYS <= got, _FUEL_ONLY_KEYS - got
+    # The electric half does not go away on a PHEV.
+    assert {"battery", "range", "sw_charging"} <= got, sorted(got)
+
+
+def test_the_hybrid_entities_carry_unique_namespaced_ids_too():
+    """The uniqueness and VIN checks above only cover the BEV set."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    p = load("propulsion")
+    verdict = p.Verdict(kind=p.Propulsion.HYBRID, has_tank=True, has_plug=True,
+                        source="declared", declared_raw="", propulsion_type="",
+                        fuel_type="")
+    seen = {}
+    for platform, entities in _build_all(propulsion=verdict).items():
+        for e in entities:
+            uid = getattr(e, "_attr_unique_id", None)
+            assert uid, f"{platform}/{type(e).__name__} has no unique_id"
+            assert FAKE_VIN in uid, f"{uid} is not vehicle-specific"
+            assert uid not in seen, f"{uid} used by both {seen[uid]} and {platform}"
+            seen[uid] = platform
 
 
 def test_no_property_raises_on_a_sparse_payload():

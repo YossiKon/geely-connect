@@ -9,9 +9,10 @@
 
 A **security-hardened** [Home Assistant](https://www.home-assistant.io/)
 integration for Geely vehicles that use the **Geely Global / International**
-mobile app. Tested on the **Geely EX5**; it is capability-driven, so other Geely
-models on the same EU/International cloud should work too (only the entities your
-specific car reports are created).
+mobile app. Tested on the **Geely EX5** (EU, battery-only) and the **Geely
+Starray PHEV** (APAC, petrol + plug-in); it is capability-driven, so other
+Geely models should work too - only the entities your specific car reports are
+created, and a car with a tank gets the fuel and engine ones on top.
 
 It talks directly to Geely's own cloud - the same servers the official app uses
 - and adds a hardened transport, full data exposure, efficient polling and a
@@ -22,13 +23,16 @@ polished setup on top.
 ## ✨ Highlights
 
 - 🔒 **Security-first** - verified TLS plus public-key pinning.
-- 📊 **Everything enabled** - all 61 entities are on from the start, no
-  duplicates, nothing to switch on by hand.
+- 📊 **Everything enabled** - all 62 entities are on from the start (75 on a
+  hybrid), no duplicates, nothing to switch on by hand.
 - 🧮 **Computed extras** - charge completion time, range at full charge and
   efficiency, none of which the car reports itself.
+- ⛽ **Hybrids and PHEVs** - fuel level and range, engine state, oil and coolant,
+  the tank flap, and the lifetime split between petrol and battery kilometres,
+  all added automatically when the car has a tank.
 - 🔋 **Efficient polling** with selectable modes (Eco / Normal / Live / Manual),
   changeable at any time.
-- 🌍 **EU and North-American** backends, detected from the vehicle.
+- 🌍 **EU, North-American and APAC** backends, detected from the vehicle.
 - 🗣️ **Translated setup** - the configuration dialogs are in English, Hebrew,
   Arabic, Russian and French. Entity names follow Home Assistant's own
   language.
@@ -118,6 +122,30 @@ Location (device tracker) - GPS position on the map, with altitude.
 | **Trip In Progress** | How far the current journey has gone; 0 when parked |
 | **Connected** | Is the integration reaching the car right now |
 | **Last Updated** | Timestamp of the last successful poll |
+
+### ⛽ Hybrid & PHEV only
+These appear **only on a car that has a fuel tank**, so a battery-electric EX5
+shows none of them. Which set you get is decided by the `powerType` your account
+reports (`混动`, `PHEV`, `纯电动`, `BEV`, …); if that value is missing or is a
+wording this integration hasn't seen yet, the car's own telemetry decides
+instead, and the raw string is written to the log so it can be added.
+
+| Entity | Description |
+|---|---|
+| Fuel Level / Fuel Level Percent | Litres in the tank, and the same as a percentage |
+| Fuel Consumption / Trip Fuel Consumption | L/100 km, lifetime average and current trip |
+| Trip Consumption | kWh/100 km for the current trip, next to the lifetime figure that was already exposed |
+| Mileage On Fuel / Mileage On Battery | Lifetime split of the odometer: how far the car has *ever* run on petrol vs on the battery. The two add up to the odometer, so they answer "what fraction of my driving is actually electric". Not a trip figure - for that, reset a trip meter |
+| Engine Coolant Temperature | °C |
+| Engine Speed | rpm - 0 whenever the engine is off, which on a PHEV is most of the time |
+| Engine Oil Health / Engine Hours To Service | Oil condition %, and engine hours until the next service |
+| Fuel Flap | Open / closed |
+| **Fuel Range** | Computed. The server sends no fuel-range field at all, so this is tank litres ÷ average consumption. Blank until the car has reported a consumption figure |
+| **Combined Range** | Computed. Electric range + fuel range. Deliberately blank unless *both* halves are known - a "combined" range showing only the electric half would read far too low to a driver with a full tank |
+
+> Two of the odometers (`odometerOnFuelOnly`, `odometerOnBatteryOnly`) arrive
+> from the server in units of 0.1 km and are scaled here. If you compare against
+> the raw diagnostics download, expect a factor of ten.
 
 ### 🔍 Full exposure (optional)
 Every other field the server returns can be exposed as an auto-generated
@@ -586,8 +614,13 @@ and automations are untouched.
 
 ### Which entities appear
 
-**All 61 are on from the start** - nothing is hidden and nothing needs enabling.
-Everything the car reports, plus the computed extras above.
+**Everything is on from the start** - nothing is hidden and nothing needs
+enabling. Everything the car reports, plus the computed extras above.
+
+The one thing that varies by car is propulsion: the thirteen fuel and engine
+entities are created only for a car with a tank, so a battery-electric EX5 gets
+62 entities and a PHEV gets 75. That's a decision made once at startup from your
+account's `powerType` plus the car's own telemetry - there is no option to set.
 
 The only thing not created is the raw full-exposure pass (see below), because
 those are duplicates of the curated entities by definition. Two aggregates that
