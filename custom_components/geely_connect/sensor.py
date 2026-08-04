@@ -45,6 +45,7 @@ from .const import (
     DEFAULT_PRESSURE_UNIT,
     DOMAIN,
 )
+from .helpers import minutes_or_none as _minutes_or_none
 from .helpers import walk as _walk
 
 # Keys that represent a tire pressure (raw value is kPa; converted per user unit).
@@ -157,7 +158,7 @@ SENSOR_SPECS: tuple[tuple, ...] = (
     ("engine_state",        "Engine State",         (*_BASIC, "engineStatus"),                         None,                             None,                          "map",   _ENGINE_STATE_MAP),
     ("park_brake",          "Park Brake",           (*_SAFE,  "electricParkBrakeStatus"),              None,                             None,                          "map",   _PARK_BRAKE_MAP),
     ("charger_connected",   "Charger Connection",   (*_EV,    "statusOfChargerConnection"),            None,                             None,                          "map",   _CHARGER_CONNECTION_MAP),
-    ("time_to_full_min",    "Time To Full Charge",  (*_EV,    "timeToFullyCharged"),                   "min",                            None,                          "int",   None),
+    ("time_to_full_min",    "Time To Full Charge",  (*_EV,    "timeToFullyCharged"),                   "min",                            None,                          "minutes", None),
     ("12v_battery",         "12V Battery",          (*_MAINT, "mainBatteryStatus", "chargeLevel"),     PERCENTAGE,                       None,                          "float", None),
     ("12v_voltage",         "12V Voltage",          (*_MAINT, "mainBatteryStatus", "voltage"),         UnitOfElectricPotential.VOLT,     SensorDeviceClass.VOLTAGE,     "float", None),
     ("avg_consumption",     "Average Consumption",  (*_EV,    "averPowerConsumption"),                 "kWh/100km",                      None,                          "float", None),
@@ -199,6 +200,8 @@ def _coerce(v: Any, kind: str, value_map: dict | None = None) -> Any:
             return float(v)
         if kind == "map" and value_map is not None:
             return value_map.get(v, value_map.get(str(v), v))
+        if kind == "minutes":
+            return _minutes_or_none(v)
     except (TypeError, ValueError):
         return None
     return v
@@ -503,11 +506,8 @@ class GeelyChargeCompleteSensor(CoordinatorEntity, SensorEntity):
         status = _walk(self.coordinator.data or {}, (*_EV, "statusOfChargerConnection"))
         if str(status) != "3":          # 3 = actively drawing current
             return None
-        try:
-            minutes = float(_walk(self.coordinator.data or {}, (*_EV, "timeToFullyCharged")))
-        except (TypeError, ValueError):
-            return None
-        if minutes <= 0:
+        minutes = _minutes_or_none(_walk(self.coordinator.data or {}, (*_EV, "timeToFullyCharged")))
+        if minutes is None:
             return None
         # Rounded to the minute so a stable estimate does not rewrite itself
         # every poll with a few seconds of drift.

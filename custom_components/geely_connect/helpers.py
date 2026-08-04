@@ -56,6 +56,29 @@ def truthy(v: Any) -> bool:
     return str(v).lower() in ("1", "true", "yes")
 
 
+# The car reports "no estimate available" for its minute countdowns as 2047,
+# which is 0x7FF - every bit of an 11-bit field set. Published verbatim it reads
+# as a real 34-hour estimate, so it has to be filtered where it enters.
+SIGNAL_UNAVAILABLE_MINUTES = 2047
+
+
+def minutes_or_none(v: Any) -> float | None:
+    """A minute countdown from the car, or None when it has no estimate.
+
+    Covers `timeToFullyCharged` and `timeToTargetDisCharged`. Anything
+    non-numeric, non-positive, or equal to the not-available sentinel is
+    absent rather than zero - a charger that is not running has no ETA, and
+    zero would render as "now".
+    """
+    try:
+        m = float(v)
+    except (TypeError, ValueError):
+        return None
+    if m <= 0 or m >= SIGNAL_UNAVAILABLE_MINUTES:
+        return None
+    return m
+
+
 def device_info(vin: str, device_name: str | None = None) -> DeviceInfo:
     """The one device every entity of a vehicle belongs to."""
     return DeviceInfo(
