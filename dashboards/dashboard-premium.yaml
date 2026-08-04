@@ -349,6 +349,28 @@ views:
             name: Time to full
             icon: mdi:timer-sand
             grid_options: {columns: 6}
+          # How fast, when it will finish, and - when the answer to "how fast"
+          # disappoints - the volts and amps that explain it. The car sends the
+          # two legs but never their product, so this is the only place the
+          # charge rate exists.
+          - type: tile
+            entity: sensor.my_geely_ex5_charging_power
+            name: Charging now
+            icon: mdi:lightning-bolt
+            grid_options: {columns: 6}
+          - type: tile
+            entity: sensor.my_geely_ex5_charge_complete
+            name: Full at
+            icon: mdi:calendar-clock
+            grid_options: {columns: 6}
+          - type: tile
+            entity: sensor.my_geely_ex5_charge_voltage
+            name: Voltage
+            grid_options: {columns: 6}
+          - type: tile
+            entity: sensor.my_geely_ex5_charge_current
+            name: Current
+            grid_options: {columns: 6}
 
       # ---------------- Charge control ----------------
       - type: grid
@@ -443,6 +465,12 @@ views:
               - min
               - max
             grid_options: {columns: 12, rows: 6}
+          # One card, deliberately tall. A history-graph stacks the state
+          # ribbons above a line chart for the numeric entity, so the charger
+          # state, the charging switch and the kW all share one x-axis - which
+          # is how you read a session: plug-in, ramp, taper, stop. It only
+          # needs the height to do it. At rows: 4 the ribbons collapsed to
+          # slivers and the kW axis labels overlapped each other.
           - type: history-graph
             title: Charging activity, last 48 h
             hours_to_show: 48
@@ -451,7 +479,9 @@ views:
                 name: Charger
               - entity: switch.my_geely_ex5_charging
                 name: Charging
-            grid_options: {columns: 12, rows: 4}
+              - entity: sensor.my_geely_ex5_charging_power
+                name: Power
+            grid_options: {columns: 12, rows: 8}
 
   # ===================================================================
   #  VIEW 3 - CLIMATE

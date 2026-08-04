@@ -5,8 +5,8 @@
 #  WHAT THIS IS
 #    One dashboard view built around charging: battery gauge, range now
 #    and range at a full charge, the charging and scheduled-charging
-#    controls, plug and connection status, consumption / efficiency,
-#    and a week of battery history.
+#    controls, plug and connection status, the live charge rate,
+#    consumption / efficiency, and a week of battery history.
 #
 #  WHERE TO PASTE IT
 #    Settings -> Dashboards -> open your dashboard -> pencil (Edit) ->
@@ -85,6 +85,16 @@
           name: Charging
           icon: mdi:ev-station
           grid_options: {columns: 12}
+        # The rate itself. The car sends volts and amps but never their
+        # product, so this is the only place the charge rate exists.
+        # Unconditional, unlike the tiles below: 0 kW on an idle car is a
+        # true reading, not a stale one.
+        - type: tile
+          entity: sensor.my_geely_ex5_charging_power
+          name: Charging now
+          icon: mdi:lightning-bolt
+          color: yellow
+          grid_options: {columns: 12}
         - type: tile
           entity: sensor.my_geely_ex5_charger_connection
           name: Connection
@@ -110,6 +120,31 @@
             icon: mdi:battery-clock
             color: green
           grid_options: {columns: 12}
+
+        # Same gate: while parked, the AC leg reports a small sense
+        # current at 0 V, which is real but says nothing about a charge.
+        - type: conditional
+          conditions:
+            - condition: state
+              entity: sensor.my_geely_ex5_charger_connection
+              state: Charging
+          card:
+            type: tile
+            entity: sensor.my_geely_ex5_charge_voltage
+            name: Voltage
+            icon: mdi:sine-wave
+          grid_options: {columns: 6}
+        - type: conditional
+          conditions:
+            - condition: state
+              entity: sensor.my_geely_ex5_charger_connection
+              state: Charging
+          card:
+            type: tile
+            entity: sensor.my_geely_ex5_charge_current
+            name: Current
+            icon: mdi:current-ac
+          grid_options: {columns: 6}
 
     # ============ Scheduled charging ============
     - type: grid
