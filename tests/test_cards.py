@@ -20,13 +20,13 @@ def _cards():
 
 class _Http:
     def __init__(self, fail=False):
-        self.paths = []
+        self.views = []
         self.fail = fail
 
-    async def async_register_static_paths(self, configs):
+    def register_view(self, view):
         if self.fail:
-            raise OSError("static path route taken")
-        self.paths.extend(configs)
+            raise OSError("no http server")
+        self.views.append(view)
 
 
 class _Resources:
@@ -124,9 +124,10 @@ def test_the_cards_register_once_with_a_version_busted_url():
     assert len(urls) == 1, "a second entry must not re-register"
     assert urls[0] == f"{c.CARD_URL}?v=9.9.9", \
         "without the version query the old card survives every upgrade"
-    (cfg,) = hass.http.paths
-    assert cfg.url_path == c.CARD_URL
-    assert os.path.isfile(cfg.path), "the served file must actually exist"
+    (view,) = hass.http.views
+    assert view.url == c.CARD_URL
+    assert view.requires_auth is False,         "script tags carry no auth token - the view must be public"
+    assert os.path.isfile(c._card_path()), "the served file must actually exist"
 
 
 def test_a_broken_frontend_never_blocks_the_vehicle_setup():
@@ -380,7 +381,7 @@ def test_a_missing_card_file_is_an_error_not_a_silent_absence():
         logger.handlers = [h for h in logger.handlers if not isinstance(h, _Grab)]
     assert seen and "missing" in seen[0].lower()
     assert urls == [], "nothing may be advertised that cannot be served"
-    assert hass.http.paths == [], "no route for a file that is not there"
+    assert hass.http.views == [], "no route for a file that is not there"
     assert not hass.data.get("geely_connect_cards_registered"),         "a re-download plus reload must be able to retry"
 
 
@@ -505,3 +506,37 @@ def test_a_self_check_that_cannot_run_stays_silent():
     hass.config = types.SimpleNamespace(internal_url="http://ha.local:8123")
     seen = _selfcheck(c, hass, _Session(boom=OSError("no route")))
     assert not [m for lvl, m in seen if lvl >= logging.WARNING]
+
+
+# --------------------------------------------------------------- the view ---
+# A static path pins the file location at registration time; a HACS update
+# that moves files plus an entry reload left the route serving a deleted path
+# while diagnostics truthfully said the (new) file exists. The view resolves
+# per request, so these pin its behavior.
+
+class _Req:
+    def __init__(self, hass):
+        self.app = {"hass": hass}
+
+
+def test_the_view_serves_the_current_file_with_no_cache():
+    c = _cards()
+    hass = _Hass()
+    resp = asyncio.run(c.GeelyCardView().get(_Req(hass)))
+    assert resp.status == 200
+    assert resp.content_type == "text/javascript"
+    assert resp.headers["Cache-Control"] == "no-cache",         "a cached card survives every upgrade until a hard refresh"
+    assert b"geely-card" in resp.body
+
+
+def test_the_view_reports_a_vanished_file_as_404_not_a_crash():
+    """The exact field failure: files replaced underneath a live route."""
+    c = _cards()
+    hass = _Hass()
+    orig = c._card_path
+    c._card_path = lambda: orig() + ".definitely-not-there"
+    try:
+        resp = asyncio.run(c.GeelyCardView().get(_Req(hass)))
+    finally:
+        c._card_path = orig
+    assert resp.status == 404

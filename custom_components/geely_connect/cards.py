@@ -19,10 +19,10 @@ from __future__ import annotations
 import logging
 import os
 
-from aiohttp import ClientTimeout
+from aiohttp import ClientTimeout, web
 
 from homeassistant.components.frontend import add_extra_js_url
-from homeassistant.components.http import StaticPathConfig
+from homeassistant.components.http import HomeAssistantView
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import CoreState, HomeAssistant
 from homeassistant.loader import async_get_integration
@@ -48,7 +48,7 @@ async def async_register_cards(hass: HomeAssistant) -> None:
         # every install path that delivers the .py files delivers a sibling
         # file too, and a card that never arrives is invisible until someone
         # reads a browser console.
-        path = os.path.join(os.path.dirname(__file__), "geely-card.js")
+        path = _card_path()
         if not await hass.async_add_executor_job(os.path.isfile, path):
             # A partial download (HACS interrupted, a manual copy that missed
             # the subdirectory) leaves the integration working and the cards
@@ -63,9 +63,15 @@ async def async_register_cards(hass: HomeAssistant) -> None:
                 "hand) and restart Home Assistant.", path,
             )
             return
-        await hass.http.async_register_static_paths(
-            [StaticPathConfig(CARD_URL, path, cache_headers=True)]
-        )
+        # A view, not a static path, and the difference is not cosmetic: a
+        # static path pins the file location as it was at registration time.
+        # A HACS update that moves or replaces files, followed by an entry
+        # reload rather than a full restart, left the old route serving a
+        # deleted path - HTTP 404, "Custom element not found: geely-card" in
+        # the browser, while diagnostics truthfully reported the new file
+        # present. The view resolves the file on every request, and no-cache
+        # means an updated card reaches browsers without any cache dance.
+        hass.http.register_view(GeelyCardView())
         integration = await async_get_integration(hass, DOMAIN)
         # The version query busts browser caches on upgrade; without it the
         # previous release's card survives every restart until a hard refresh.
@@ -187,3 +193,38 @@ async def _async_verify_served(hass: HomeAssistant, url: str) -> None:
             )
     except Exception as e:  # noqa: BLE001 - a diagnostic must never break setup
         _LOGGER.debug("Card self-check could not run (%s)", e)
+
+
+def _card_path() -> str:
+    return os.path.join(os.path.dirname(__file__), "geely-card.js")
+
+
+class GeelyCardView(HomeAssistantView):
+    """Serve geely-card.js, resolved fresh on every request.
+
+    No auth: the frontend fetches Lovelace resources as plain script tags,
+    which carry no token. The file is public UI code.
+    """
+
+    url = CARD_URL
+    name = f"{DOMAIN}:card"
+    requires_auth = False
+
+    async def get(self, request: web.Request) -> web.Response:
+        def _read() -> bytes | None:
+            try:
+                with open(_card_path(), "rb") as fh:
+                    return fh.read()
+            except OSError:
+                return None
+
+        body = await request.app["hass"].async_add_executor_job(_read)
+        if body is None:
+            return web.Response(status=404, text="geely-card.js is missing "
+                                "from the integration directory")
+        return web.Response(
+            body=body,
+            content_type="text/javascript",
+            charset="utf-8",
+            headers={"Cache-Control": "no-cache"},
+        )
