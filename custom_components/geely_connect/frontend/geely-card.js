@@ -281,6 +281,12 @@
       this._sig = "";
     }
 
+    disconnectedCallback() {
+      // A pending arm-timeout must not fire a render on a removed card.
+      clearTimeout(this._armedTimer);
+      this._armed = null;
+    }
+
     setConfig(config) {
       this._config = config || {};
       this._prefix = this._config.prefix || null;
