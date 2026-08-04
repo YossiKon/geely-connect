@@ -184,8 +184,10 @@ def test_an_unreachable_captcha_host_fails_fast_not_five_times():
     user saw a generic "try again in a minute". Network-level failure is not
     solver inaccuracy - one attempt, then a distinct exception naming the
     host so there is something to act on."""
-    if importlib.util.find_spec("requests") is None:
-        skip("requests not installed")
+    # geetest_solver imports numpy/PIL/scipy at module level, so this needs
+    # the full solver deps even though solve() itself is stubbed out.
+    if not _deps() or importlib.util.find_spec("requests") is None:
+        skip("solver deps or requests not installed")
     import requests
     api = load("api")
     gs = load("geetest_solver")

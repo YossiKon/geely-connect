@@ -116,7 +116,8 @@ def test_derived_sensors_inherit_the_rule_rather_than_restating_it():
                  "GeelyChargeCurrentSensor", "GeelyChargeVoltageSensor",
                  "GeelyFuelRangeSensor", "GeelyCombinedRangeSensor",
                  "GeelyFullRangeSensor", "GeelyTireSensor",
-                 "GeelyLastTripSensor", "GeelyTripInProgressSensor"):
+                 "GeelyLastTripSensor", "GeelyTripInProgressSensor",
+                 "GeelyPackPowerSensor"):
         assert issubclass(getattr(s, name), s._AutoPrecision), name
 
 
