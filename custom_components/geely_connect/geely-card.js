@@ -818,24 +818,56 @@
   // Watch for the swap for a while and re-register through whichever
   // registry is current; the polyfill scopes its native names, so the old
   // definition does not block the new one.
+  /* Reproduced against the real polyfill: after it loads,
+   * customElements.get("geely-card") returns undefined even though the
+   * definition succeeded moments earlier - it does not carry earlier
+   * registrations across. Redefining the same name afterwards is allowed and
+   * restores it, so the whole fix is noticing the moment it happens.
+   *
+   * The card picker gives a custom element two seconds and never retries: a
+   * rejected lookup leaves its preview tile spinning until the dialog is
+   * reopened. So the check is cheap (one map lookup) and runs often enough
+   * that the gap cannot outlast that window. */
   let knownRegistry = window.customElements;
   let knownDefine = window.customElements.define;
-  let watchLeft = 120;                      // 120 x 500 ms = one minute
-  const watchdog = setInterval(() => {
+
+  const ensureRegistered = () => {
     const swapped = window.customElements !== knownRegistry ||
       window.customElements.define !== knownDefine;
-    if (swapped || !window.customElements.get("geely-card")) {
+    const lost = !window.customElements.get("geely-card") ||
+      !window.customElements.get("geely-card-compact");
+    if (swapped || lost) {
       if (swapped) {
         STATUS.swaps += 1;
-        console.info("geely-card: custom element registry was replaced - re-registering");
+        console.info(
+          "geely-card: the custom element registry was replaced (a scoped-registry " +
+          "polyfill, shipped by some cards) - re-registering");
       }
       knownRegistry = window.customElements;
       knownDefine = window.customElements.define;
       registerElements();
     }
     if (statusEntry) statusEntry.description = STATUS.line();
-    if (--watchLeft <= 0) clearInterval(watchdog);
-  }, 500);
+  };
+
+  // Fast while the page is still pulling in resources - that is when the
+  // polyfill lands - then slow, and stop after a minute.
+  let fastLeft = 100;                       // 100 x 50 ms = five seconds
+  const fast = setInterval(() => {
+    ensureRegistered();
+    if (--fastLeft <= 0) {
+      clearInterval(fast);
+      let slowLeft = 110;                   // + 110 x 500 ms = one minute
+      const slow = setInterval(() => {
+        ensureRegistered();
+        if (--slowLeft <= 0) clearInterval(slow);
+      }, 500);
+    }
+  }, 50);
+  // Late-loading resources can still land after that: re-check whenever the
+  // page finishes loading and whenever the tab comes back to the foreground.
+  window.addEventListener("load", ensureRegistered);
+  document.addEventListener("visibilitychange", ensureRegistered);
 
   // A breadcrumb for support: when a dashboard says "Custom element not
   // found: geely-card", this line's presence (or absence) in the browser
