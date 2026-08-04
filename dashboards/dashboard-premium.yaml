@@ -38,6 +38,14 @@ views:
       - type: entity
         entity: sensor.my_geely_ex5_electric_range
         color: blue
+      # Hybrid only - a badge whose visibility entity does not exist stays hidden.
+      - type: entity
+        entity: sensor.my_geely_ex5_combined_range
+        color: purple
+        visibility:
+          - condition: numeric_state
+            entity: sensor.my_geely_ex5_fuel_level
+            above: -1
       - type: entity
         entity: binary_sensor.my_geely_ex5_connected
       - type: entity
@@ -59,8 +67,13 @@ views:
               {%- set r = states('sensor.my_geely_ex5_electric_range') %}
               {%- set plug = states('sensor.my_geely_ex5_charger_connection') %}
               {%- set lu = states('sensor.my_geely_ex5_last_updated') %}
-              ## {{ b if b not in ['unknown', 'unavailable'] else '--' }} % - {{ r if r not in ['unknown', 'unavailable'] else '--' }} km
-              {% if plug == 'Charging' %}Charging now{% elif plug == 'Plugged in' %}Plugged in, not charging{% else %}Running on battery{% endif %} -
+              {#- Hybrids only. has_value() rules out unknown/unavailable AND a
+                  missing entity, so on a battery-electric car every fuel branch
+                  below simply does not render and the headline is unchanged. -#}
+              {%- set fr = states('sensor.my_geely_ex5_fuel_range') if has_value('sensor.my_geely_ex5_fuel_range') else none %}
+              {%- set engine = states('sensor.my_geely_ex5_engine_speed') | float(0) > 0 %}
+              ## {{ b if b not in ['unknown', 'unavailable'] else '--' }} % - {{ r if r not in ['unknown', 'unavailable'] else '--' }} km{% if fr %} + {{ fr }} km fuel{% endif %}
+              {% if plug == 'Charging' %}Charging now{% elif plug == 'Plugged in' %}Plugged in, not charging{% elif engine %}Engine running{% else %}Running on battery{% endif %} -
               {%- if is_state('lock.my_geely_ex5_doors', 'locked') %} doors locked{% else %} **doors unlocked**{% endif %} -
               {#- as_datetime needs the none default: without it any state that is
                   not a timestamp RAISES and the whole card renders as an error box.
@@ -98,6 +111,53 @@ views:
           - type: tile
             entity: sensor.my_geely_ex5_exterior_temperature
             name: Exterior
+            grid_options: {columns: 6}
+
+      # ---------------- Fuel (hybrid / PHEV only) ----------------
+      #  This whole section hides itself on a battery-electric car: the
+      #  visibility condition tests an entity that only exists when the car
+      #  has a tank, and a condition on a missing entity is false. So there is
+      #  nothing to delete by hand on an EX5 - leave it in place.
+      - type: grid
+        visibility:
+          - condition: numeric_state
+            entity: sensor.my_geely_ex5_fuel_level
+            above: -1
+        cards:
+          - type: heading
+            heading: Fuel
+            heading_style: title
+            icon: mdi:gas-station
+          - type: gauge
+            entity: sensor.my_geely_ex5_fuel_level_percent
+            name: Tank
+            min: 0
+            max: 100
+            needle: true
+            severity:
+              green: 40
+              yellow: 15
+              red: 0
+            grid_options: {columns: 6, rows: 3}
+          - type: tile
+            entity: sensor.my_geely_ex5_fuel_level
+            name: In tank
+            icon: mdi:fuel
+            grid_options: {columns: 6}
+          - type: tile
+            entity: sensor.my_geely_ex5_fuel_range
+            name: Fuel range
+            icon: mdi:map-marker-distance
+            grid_options: {columns: 6}
+          - type: tile
+            entity: sensor.my_geely_ex5_combined_range
+            name: Combined range
+            color: purple
+            icon: mdi:road-variant
+            grid_options: {columns: 6}
+          - type: tile
+            entity: binary_sensor.my_geely_ex5_fuel_flap
+            name: Fuel flap
             grid_options: {columns: 6}
 
       # ---------------- Controls ----------------
@@ -630,6 +690,97 @@ views:
             name: Driver seatbelt
             icon: mdi:seatbelt
             grid_options: {columns: 12}
+
+      # ---------------- Electric vs petrol (hybrid / PHEV only) ----------------
+      #  Hides itself on a battery-electric car - see the note in Overview.
+      - type: grid
+        visibility:
+          - condition: numeric_state
+            entity: sensor.my_geely_ex5_fuel_level
+            above: -1
+        cards:
+          - type: heading
+            heading: Electric vs petrol
+            heading_style: title
+            icon: mdi:call-split
+          - type: markdown
+            text_only: true
+            content: |-
+              {#- The two lifetime odometers add up to the total odometer, so
+                  their ratio is the share of driving actually done on battery.
+                  Guarded against the both-zero case on a delivery-fresh car,
+                  where the ratio is undefined rather than 0 %. -#}
+              {%- set e = states('sensor.my_geely_ex5_mileage_on_battery') | float(0) %}
+              {%- set f = states('sensor.my_geely_ex5_mileage_on_fuel') | float(0) %}
+              {%- set total = e + f %}
+              {%- if total > 0 %}
+              ## {{ (100 * e / total) | round(0) }} % electric
+              {{ e | round(1) }} km on battery, {{ f | round(1) }} km on petrol, over {{ total | round(1) }} km total.
+              {%- else %}
+              ## -- % electric
+              No distance recorded yet.
+              {%- endif %}
+            grid_options: {columns: 12}
+          - type: tile
+            entity: sensor.my_geely_ex5_mileage_on_battery
+            name: On battery
+            color: green
+            grid_options: {columns: 6}
+          - type: tile
+            entity: sensor.my_geely_ex5_mileage_on_fuel
+            name: On petrol
+            grid_options: {columns: 6}
+          - type: tile
+            entity: sensor.my_geely_ex5_fuel_consumption
+            name: Fuel use, lifetime
+            grid_options: {columns: 6}
+          - type: tile
+            entity: sensor.my_geely_ex5_trip_fuel_consumption
+            name: Fuel use, trip
+            grid_options: {columns: 6}
+          - type: tile
+            entity: sensor.my_geely_ex5_trip_consumption
+            name: Power use, trip
+            color: blue
+            grid_options: {columns: 12}
+
+      # ---------------- Engine (hybrid / PHEV only) ----------------
+      #  Hides itself on a battery-electric car - see the note in Overview.
+      - type: grid
+        visibility:
+          - condition: numeric_state
+            entity: sensor.my_geely_ex5_fuel_level
+            above: -1
+        cards:
+          - type: heading
+            heading: Engine
+            heading_style: title
+            icon: mdi:engine
+          - type: tile
+            entity: sensor.my_geely_ex5_engine_speed
+            name: Engine speed
+            icon: mdi:speedometer
+            grid_options: {columns: 6}
+          - type: tile
+            entity: sensor.my_geely_ex5_engine_coolant_temperature
+            name: Coolant
+            grid_options: {columns: 6}
+          - type: gauge
+            entity: sensor.my_geely_ex5_engine_oil_health
+            name: Oil health
+            min: 0
+            max: 100
+            needle: true
+            severity:
+              green: 40
+              yellow: 20
+              red: 0
+            grid_options: {columns: 6, rows: 3}
+          - type: tile
+            entity: sensor.my_geely_ex5_engine_hours_to_service
+            name: Hours to service
+            icon: mdi:wrench-clock
+            grid_options: {columns: 6}
 
       # ---------------- 12 V system ----------------
       - type: grid

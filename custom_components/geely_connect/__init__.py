@@ -24,6 +24,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from . import api as geely_api
+from . import propulsion
 from .api import GeelyApi, GeelyAuthError, GeelyControlError, GeelyTLSPinError, redact
 from .const import (
     CLIENT_ID,
@@ -42,6 +43,7 @@ from .const import (
     CONF_USER_ID,
     CONF_VEHICLE_MODEL_CODE,
     CONF_VEHICLE_NICKNAME,
+    CONF_VEHICLE_POWER_TYPE,
     CONF_VEHICLE_SERIES,
     CONF_VIN,
     DEFAULT_COUNTRY_CODE,
@@ -489,12 +491,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except Exception as e:  # noqa: BLE001
         _LOGGER.warning("Capability fetch failed (non-fatal): %s", e)
 
+    # What the car is powered by, decided once from the first refresh. Platforms
+    # read this rather than each deciding for itself, so a PHEV cannot end up
+    # with fuel sensors but no fuel binary sensor.
+    verdict = propulsion.classify(d.get(CONF_VEHICLE_POWER_TYPE), coordinator.data)
+    _LOGGER.info("Propulsion: %s (%s, tank=%s plug=%s, powerType=%r)",
+                 verdict.kind, verdict.source, verdict.has_tank,
+                 verdict.has_plug, verdict.declared_raw)
+
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "api":           api,
         "coordinator":   coordinator,
         "vin":           d[CONF_VIN],
         "device_name":   _resolve_device_name(d),
         "capabilities":  capabilities,
+        "propulsion":    verdict,
     }
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     # Reload when the options flow changes the polling mode / pressure unit /

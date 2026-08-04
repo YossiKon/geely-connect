@@ -26,11 +26,14 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     PERCENTAGE,
+    REVOLUTIONS_PER_MINUTE,
     UnitOfElectricPotential,
     UnitOfLength,
     UnitOfPressure,
     UnitOfSpeed,
     UnitOfTemperature,
+    UnitOfTime,
+    UnitOfVolume,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
@@ -92,8 +95,15 @@ _MEASUREMENT_KEYS = {
     # last_reset HA would fold the reset into the sum as a negative delta, and
     # total_mileage below already provides the cumulative distance statistic.
     "trip_meter",
+    # Hybrid-only. Fuel level and both consumption averages are instantaneous
+    # readings; the engine ones are state, not counters.
+    "fuel_level", "fuel_level_pct", "fuel_consumption", "fuel_consumption_trip",
+    "power_consumption_trip", "engine_coolant_temp", "engine_speed",
+    "engine_oil_health",
+    # Counts DOWN to the next service, like days_to_service above.
+    "engine_hours_to_service",
 }
-_TOTAL_INCREASING_KEYS = {"total_mileage"}
+_TOTAL_INCREASING_KEYS = {"total_mileage", "mileage_on_fuel", "mileage_on_battery"}
 
 # Shorthand for nested status branches
 _BASIC  = ("vehicleStatus", "basicVehicleStatus")
@@ -103,6 +113,8 @@ _EV     = (*_ADD, "electricVehicleStatus")
 _CLIM   = (*_ADD, "climateStatus")
 _SAFE   = (*_ADD, "drivingSafetyStatus")
 _RUN    = (*_ADD, "runningStatus")
+_FUELS  = (*_ADD, "fuelStatus")
+_DRIVE  = (*_ADD, "drivingBehaviourStatus")
 
 # Value mappers for sensors that should display a readable label instead
 # of the raw numeric/string code from the API.
@@ -145,6 +157,19 @@ _SENSOR_ICONS: dict[str, str] = {
     "tire_pressure_rr":  "mdi:car-tire-alert",
     "days_to_service":     "mdi:calendar-clock",
     "distance_to_service": "mdi:road-variant",
+    "fuel_level":        "mdi:gas-station",
+    "fuel_level_pct":    "mdi:gas-station-outline",
+    "fuel_consumption":  "mdi:fuel",
+    "fuel_consumption_trip": "mdi:fuel",
+    "fuel_range":        "mdi:map-marker-distance",
+    "combined_range":    "mdi:map-marker-path",
+    "mileage_on_fuel":  "mdi:road-variant",
+    "mileage_on_battery": "mdi:road-variant",
+    "engine_coolant_temp": "mdi:coolant-temperature",
+    "engine_speed":      "mdi:engine-outline",
+    "engine_oil_health": "mdi:oil",
+    "engine_hours_to_service": "mdi:engine-outline",
+    "power_consumption_trip": "mdi:lightning-bolt-outline",
 }
 
 # (key, friendly_name, dotted-path, unit, device_class, value_type, value_map?)
@@ -170,6 +195,30 @@ SENSOR_SPECS: tuple[tuple, ...] = (
     ("tire_pressure_rr",    "Tire Pressure RR",     (*_MAINT, "tyreStatusPassengerRear"),              "kPa",                            SensorDeviceClass.PRESSURE,    "float", None),
     ("days_to_service",     "Days To Service",      (*_MAINT, "daysToService"),                        "d",                              None,                          "int",   None),
     ("distance_to_service", "Distance To Service",  (*_MAINT, "distanceToService"),                    UnitOfLength.KILOMETERS,          SensorDeviceClass.DISTANCE,    "int",   None),
+    # The trip twin of avg_consumption. The server has always sent both; only
+    # the lifetime one was read, which made the pair look like one reading.
+    ("power_consumption_trip", "Trip Consumption",   (*_EV,    "averTraPowerConsumption"),              "kWh/100km",                      None,                          "float", None),
+)
+
+# Only created for a car that burns fuel - see propulsion.py. A BEV reports none
+# of these, and entities for them would sit `unavailable` forever.
+#
+# Mind the scale: this payload mixes three of them. `mileage_on_fuel` and
+# `mileage_on_battery` arrive in units of 0.1 km, while `odometer` and
+# `distanceToService` in the same response are plain km. Proof from a real
+# vehicle: 630 + 332 = 962 -> 96.2 km, exactly what tripMeter1 and odometer
+# report. Hence the "deci" coercion rather than "float".
+HYBRID_SPECS: tuple[tuple, ...] = (
+    ("fuel_level",           "Fuel Level",            (*_RUN,   "fuelLevel"),                  UnitOfVolume.LITERS,        SensorDeviceClass.VOLUME_STORAGE, "float", None),
+    ("fuel_level_pct",       "Fuel Level Percent",    (*_RUN,   "fuelLevelPct"),               PERCENTAGE,                 None,                             "float", None),
+    ("fuel_consumption",     "Fuel Consumption",      (*_RUN,   "aveFuelConsumption"),         "L/100km",                  None,                             "float", None),
+    ("fuel_consumption_trip", "Trip Fuel Consumption", (*_RUN,  "aveTraFuelConsumption"),      "L/100km",                  None,                             "float", None),
+    ("mileage_on_fuel",     "Mileage On Fuel",      (*_FUELS, "odometerOnFuelOnly"),         UnitOfLength.KILOMETERS,    SensorDeviceClass.DISTANCE,       "deci",  None),
+    ("mileage_on_battery",  "Mileage On Battery",   (*_EV,    "odometerOnBatteryOnly"),      UnitOfLength.KILOMETERS,    SensorDeviceClass.DISTANCE,       "deci",  None),
+    ("engine_coolant_temp",  "Engine Coolant Temperature", (*_RUN, "engineCoolantTemperature"), UnitOfTemperature.CELSIUS, SensorDeviceClass.TEMPERATURE,    "float", None),
+    ("engine_speed",         "Engine Speed",          (*_DRIVE, "engineSpeed"),                REVOLUTIONS_PER_MINUTE,     None,                             "float", None),
+    ("engine_oil_health",    "Engine Oil Health",     (*_MAINT, "engineOilHealthLevel"),       PERCENTAGE,                 None,                             "float", None),
+    ("engine_hours_to_service", "Engine Hours To Service", (*_MAINT, "engineHrsToService"),    UnitOfTime.HOURS,           None,                             "int",   None),
 )
 
 # Sensors marked diagnostic appear in HA's collapsed "Diagnostic" section
@@ -184,7 +233,12 @@ _DIAGNOSTIC_KEYS: set[str] = {
     # Rarely interesting on their own: engine state duplicates what the climate
     # and charging entities already show, and time-to-full is only meaningful
     # while charging.
-    "engine_state", "time_to_full_min",
+    "engine_state", "time_to_full_min", "power_consumption_trip",
+    # Hybrid: the engine internals are for troubleshooting, not the dashboard.
+    # Fuel level, both fuel consumptions and the two mode odometers stay on the
+    # main list - they are the half of the car that was previously invisible.
+    "engine_coolant_temp", "engine_speed", "engine_oil_health",
+    "engine_hours_to_service", "fuel_consumption_trip",
 }
 
 
@@ -198,6 +252,9 @@ def _coerce(v: Any, kind: str, value_map: dict | None = None) -> Any:
             return int(float(v))
         if kind == "float":
             return float(v)
+        if kind == "deci":
+            # Tenths of a kilometre -> kilometres.
+            return round(float(v) / 10.0, 1)
         if kind == "map" and value_map is not None:
             return value_map.get(v, value_map.get(str(v), v))
         if kind == "minutes":
@@ -209,7 +266,7 @@ def _coerce(v: Any, kind: str, value_map: dict | None = None) -> Any:
 
 # Paths already covered by a curated sensor above - skip them in the dynamic
 # full-exposure pass so we don't create duplicates.
-_CURATED_PATHS: set[str] = {".".join(spec[2]) for spec in SENSOR_SPECS}
+_CURATED_PATHS: set[str] = {".".join(spec[2]) for spec in (*SENSOR_SPECS, *HYBRID_SPECS)}
 
 
 _MAX_FLATTEN_DEPTH = 12   # deeper than any real status payload nests
@@ -263,6 +320,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
     add_entities(GeelySensor(coordinator, vin, device_name, *spec,
                              pressure_unit=pressure_unit) for spec in SENSOR_SPECS)
 
+    # A car that burns fuel gets the other half of itself. The verdict is
+    # decided once in __init__ so every platform agrees; a BEV skips this block
+    # and is exactly as it was before hybrids were supported.
+    verdict = bundle.get("propulsion")
+    has_tank = bool(verdict and verdict.has_tank)
+    if has_tank:
+        add_entities(GeelySensor(coordinator, vin, device_name, *spec,
+                                 pressure_unit=pressure_unit) for spec in HYBRID_SPECS)
+
     # Computed / meta sensors (our own additions).
     add_entities([
         GeelyEfficiencySensor(coordinator, vin, device_name),
@@ -274,6 +340,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
         *(GeelyTireSensor(coordinator, vin, device_name, key, name, path,
                           pressure_unit)
           for key, name, path in _TIRE_CORNERS),
+        # Derived, and only meaningful with a tank: the car reports no fuel
+        # range of its own, and a combined range needs both halves.
+        *((GeelyFuelRangeSensor(coordinator, vin, device_name),
+           GeelyCombinedRangeSensor(coordinator, vin, device_name))
+          if has_tank else ()),
     ])
 
     # 2) Full exposure: one diagnostic sensor for EVERY field the server
@@ -546,6 +617,82 @@ class GeelyFullRangeSensor(CoordinatorEntity, SensorEntity):
         if charge < 10 or rng <= 0:
             return None
         return round(rng * 100.0 / charge)
+
+
+def _fuel_range_km(data: dict) -> float | None:
+    """Kilometres left on the fuel in the tank, at the lifetime average.
+
+    The car reports no fuel range of its own - there is no
+    `distanceToEmptyOnFuel` anywhere in the payload - so it has to come from
+    litres and L/100km. None when either is missing or non-positive, which is
+    also the state of a car that has never burned any fuel.
+    """
+    try:
+        litres = float(_walk(data, (*_RUN, "fuelLevel")))
+        per_100 = float(_walk(data, (*_RUN, "aveFuelConsumption")))
+    except (TypeError, ValueError):
+        return None
+    if litres <= 0 or per_100 <= 0:
+        return None
+    return litres / per_100 * 100.0
+
+
+class GeelyFuelRangeSensor(CoordinatorEntity, SensorEntity):
+    """How far the fuel in the tank goes, since the car will not say."""
+
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.DISTANCE
+    _attr_native_unit_of_measurement = UnitOfLength.KILOMETERS
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:map-marker-distance"
+
+    def __init__(self, coordinator, vin: str, device_name: str) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"geely_{vin}_fuel_range"
+        self._attr_name = "Fuel Range"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, vin)}, manufacturer="Geely", name=device_name)
+
+    @property
+    def native_value(self):
+        km = _fuel_range_km(self.coordinator.data or {})
+        return None if km is None else round(km)
+
+
+class GeelyCombinedRangeSensor(CoordinatorEntity, SensorEntity):
+    """Total distance available on both energy sources.
+
+    Not a restatement of the electric and fuel ranges sitting beside it: it is
+    the number that answers "can I get there", and on a hybrid neither half
+    answers that alone. Unknown unless both halves are known, because a total
+    that silently omits one is worse than no total."""
+
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.DISTANCE
+    _attr_native_unit_of_measurement = UnitOfLength.KILOMETERS
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:map-marker-path"
+
+    def __init__(self, coordinator, vin: str, device_name: str) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"geely_{vin}_combined_range"
+        self._attr_name = "Combined Range"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, vin)}, manufacturer="Geely", name=device_name)
+
+    @property
+    def native_value(self):
+        data = self.coordinator.data or {}
+        fuel = _fuel_range_km(data)
+        if fuel is None:
+            return None
+        try:
+            electric = float(_walk(data, (*_EV, "distanceToEmptyOnBatteryOnly")))
+        except (TypeError, ValueError):
+            return None
+        if electric < 0:
+            return None
+        return round(fuel + electric)
 
 
 class GeelyTireSensor(CoordinatorEntity, SensorEntity):

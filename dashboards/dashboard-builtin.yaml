@@ -241,6 +241,53 @@ views:
             icon: mdi:tire
             grid_options: {columns: 6}
 
+      # ============ Fuel & engine (hybrid / PHEV only) ============
+      #  Hides itself on a battery-electric car: the visibility condition tests
+      #  an entity that only exists when the car has a tank, and a condition on
+      #  a missing entity is false. Nothing to delete by hand on an EX5.
+      - type: grid
+        visibility:
+          - condition: numeric_state
+            entity: sensor.my_geely_ex5_fuel_level
+            above: -1
+        cards:
+          - type: heading
+            heading: Fuel & engine
+            heading_style: title
+            icon: mdi:gas-station
+          - type: tile
+            entity: sensor.my_geely_ex5_fuel_level
+            name: In tank
+            grid_options: {columns: 6}
+          - type: tile
+            entity: sensor.my_geely_ex5_fuel_range
+            name: Fuel range
+            grid_options: {columns: 6}
+          - type: tile
+            entity: sensor.my_geely_ex5_combined_range
+            name: Combined range
+            grid_options: {columns: 6}
+          - type: tile
+            entity: sensor.my_geely_ex5_fuel_consumption
+            name: Fuel use
+            grid_options: {columns: 6}
+          - type: tile
+            entity: sensor.my_geely_ex5_mileage_on_battery
+            name: On battery
+            grid_options: {columns: 6}
+          - type: tile
+            entity: sensor.my_geely_ex5_mileage_on_fuel
+            name: On petrol
+            grid_options: {columns: 6}
+          - type: tile
+            entity: sensor.my_geely_ex5_engine_speed
+            name: Engine speed
+            grid_options: {columns: 6}
+          - type: tile
+            entity: sensor.my_geely_ex5_engine_oil_health
+            name: Oil health
+            grid_options: {columns: 6}
+
       # ============ Vehicle info ============
       - type: grid
         cards:
