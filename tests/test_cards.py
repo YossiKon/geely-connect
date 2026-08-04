@@ -149,8 +149,8 @@ def test_the_shipped_card_defines_both_elements_and_the_picker_entries():
     if not have_homeassistant():
         skip("homeassistant not installed")
     src = open(os.path.join(PKG, "geely-card.js"), encoding="utf-8").read()
-    for needle in ('customElements.define("geely-card-compact"',
-                   'customElements.define("geely-card"',
+    for needle in ('defineOnce("geely-card-compact"',
+                   'defineOnce("geely-card"',
                    'type: "geely-card"', "window.customCards",
                    "_battery"):
         assert needle in src, needle
