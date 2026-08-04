@@ -271,6 +271,11 @@
     constructor() {
       super();
       this.attachShadow({ mode: "open" });
+      // The picker (and some dashboards) set `hass` before `setConfig` -
+      // every field the render path touches must already exist.
+      this._config = {};
+      this._prefix = null;
+      this._hass = null;
       this._armed = null;          // suffix of the armed destructive action
       this._armedTimer = null;
       this._sig = "";
@@ -280,7 +285,10 @@
       this._config = config || {};
       this._prefix = this._config.prefix || null;
       this._sig = "";
-      if (this._hass) this._render();
+      if (this._hass) {
+        this._prefix = this._prefix || this._detectPrefix(this._hass);
+        this._safeRender();
+      }
     }
 
     set hass(hass) {
@@ -289,7 +297,19 @@
       const sig = this._signature(hass);
       if (sig !== this._sig) {
         this._sig = sig;
+        this._safeRender();
+      }
+    }
+
+    /* A render that throws would leave the card picker's preview spinning
+     * forever - fail visibly instead. */
+    _safeRender() {
+      try {
         this._render();
+      } catch (err) {
+        this.shadowRoot.innerHTML = `<style>${BASE_CSS}</style>
+          <div class="shell"><p class="micro">Geely Card</p>
+          <p style="margin-top:8px;font-size:12px">Render failed: ${esc(err && err.message)}</p></div>`;
       }
     }
 
@@ -334,15 +354,15 @@
         clearTimeout(this._armedTimer);
         this._armed = null;
         fire();
-        this._sig = ""; this._render();
+        this._sig = ""; this._safeRender();
         return;
       }
       this._armed = key;
       clearTimeout(this._armedTimer);
       this._armedTimer = setTimeout(() => {
-        this._armed = null; this._sig = ""; this._render();
+        this._armed = null; this._sig = ""; this._safeRender();
       }, 3000);
-      this._sig = ""; this._render();
+      this._sig = ""; this._safeRender();
     }
 
     _onAction(key) {
