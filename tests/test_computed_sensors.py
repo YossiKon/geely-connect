@@ -107,6 +107,29 @@ def test_charge_complete_handles_a_garbled_minute_count():
         s.native_value           # must not raise
 
 
+def test_charge_complete_rejects_the_not_available_sentinel():
+    """2047 is 0x7FF - an 11-bit field with every bit set, which is how the car
+    says "no estimate". Published verbatim it reads as a 34-hour charge."""
+    s = _make("GeelyChargeCompleteSensor",
+              _status(ev={"statusOfChargerConnection": "3",
+                          "timeToFullyCharged": "2047"}))
+    assert s.native_value is None
+
+
+def test_time_to_full_spec_rejects_the_sentinel_too():
+    """The curated minute sensor reads the same field, so it must filter the
+    same value - otherwise the two disagree about the same quantity."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    sensor = load("sensor")
+    assert sensor._coerce("2047", "minutes") is None
+    assert sensor._coerce("95", "minutes") == 95.0
+    assert sensor._coerce("0", "minutes") is None
+    assert sensor._coerce("abc", "minutes") is None
+    spec = next(s for s in sensor.SENSOR_SPECS if s[0] == "time_to_full_min")
+    assert spec[5] == "minutes", "time_to_full_min must go through the filter"
+
+
 # ------------------------------------------------------------- tires ---
 
 def _tire(data, unit="psi"):
