@@ -35,8 +35,15 @@ def load(module: str):
         sys.modules["gc"] = pkg
     spec = importlib.util.spec_from_file_location(name, os.path.join(PKG, f"{module}.py"))
     mod = importlib.util.module_from_spec(spec)
+    # Register before exec (circular imports), but drop the entry if the
+    # import fails: a half-initialized module left in sys.modules makes every
+    # later test report a misleading AttributeError instead of the real error.
     sys.modules[name] = mod
-    spec.loader.exec_module(mod)
+    try:
+        spec.loader.exec_module(mod)
+    except BaseException:
+        sys.modules.pop(name, None)
+        raise
     return mod
 
 

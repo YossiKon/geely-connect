@@ -105,15 +105,45 @@ def test_charging_or_driving_uses_the_fast_interval():
             assert m._adaptive_interval(data, 0, p).total_seconds() == p["fast"], name
 
 
+def _at_hour(m, hour):
+    """Pin the module's clock: quiet hours are wall-clock, tests must not be."""
+    import contextlib
+    import datetime
+
+    @contextlib.contextmanager
+    def pinned():
+        real = m.dt_util
+        m.dt_util = types.SimpleNamespace(
+            now=lambda: datetime.datetime(2026, 1, 1, hour, 0, 0))
+        try:
+            yield
+        finally:
+            m.dt_util = real
+    return pinned()
+
+
 def test_a_parked_car_backs_off_towards_the_cap_but_never_past_it():
     m = _coordinator_module()
     const = load("const")
     p = const.POLL_PROFILES["normal"]
     parked = _status(speed="0", charger="0")
-    seen = [m._adaptive_interval(parked, i, p).total_seconds() for i in range(0, 10)]
+    with _at_hour(m, 12):
+        seen = [m._adaptive_interval(parked, i, p).total_seconds()
+                for i in range(0, 10)]
     assert seen[0] == p["base"], seen[0]
     assert seen == sorted(seen), f"back-off is not monotonic: {seen}"
     assert max(seen) <= p["cap"], f"exceeded the cap: {max(seen)}"
+
+
+def test_quiet_hours_park_the_interval_at_the_cap():
+    m = _coordinator_module()
+    const = load("const")
+    p = const.POLL_PROFILES["normal"]
+    parked = _status(speed="0", charger="0")
+    with _at_hour(m, 3):
+        assert m._adaptive_interval(parked, 0, p).total_seconds() == p["cap"]
+        # Charging or driving still wins over quiet hours.
+        assert m._adaptive_interval(_status(charger="3"), 0, p).total_seconds() == p["fast"]
 
 
 def test_back_off_stops_growing_so_the_interval_cannot_run_away():

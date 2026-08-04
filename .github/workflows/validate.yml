@@ -25,10 +25,16 @@ jobs:
         with:
           python-version: "3.13"
 
-      # The offline tests - redaction, transport invariants, request shapes,
-      # region resolution - need nothing but the standard library, so they run
-      # first and fail fast. The entity tests import Home Assistant and skip
-      # themselves without it.
+      # The captcha-solver tests need the manifest requirements (pycryptodome
+      # etc.), and the entity tests skip themselves unless Home Assistant is
+      # importable - so install both and run the whole suite, not just the
+      # stdlib-only subset.
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -c "import json; print('\n'.join(json.load(open('custom_components/geely_connect/manifest.json'))['requirements']))" > requirements-ci.txt
+          python -m pip install -r requirements-ci.txt homeassistant
+
       - name: Run tests
         run: python tests/run.py
 
