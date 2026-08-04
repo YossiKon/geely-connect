@@ -81,7 +81,14 @@ async def async_register_cards(hass: HomeAssistant) -> None:
         # They carry the same URL, so the browser's module map runs the file
         # exactly once either way.
         registered = await _async_register_resource(hass, url)
-        add_extra_js_url(hass, url)
+        if not registered:
+            # Only as a fallback. As an extra script this file runs before
+            # every Lovelace resource - including the scoped-registry
+            # polyfill that some popular cards ship, which replaces
+            # window.customElements and hides anything registered earlier.
+            # Loading as a resource puts us after that swap; the extra-module
+            # URL stays for installs whose resource list is read-only.
+            add_extra_js_url(hass, url)
         if not registered and hass.state is not CoreState.starting:
             # Nothing else will retry, so say plainly what is missing and how
             # to add it by hand. Without the resource the card can lose the

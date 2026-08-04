@@ -799,6 +799,7 @@
     try {
       if (!customElements.get(tag)) customElements.define(tag, cls);
     } catch (err) {
+      STATUS.defineError = String(err && err.message || err).slice(0, 80);
       console.warn(`geely-card: define(${tag}) skipped:`, err);
     }
   };
@@ -818,16 +819,21 @@
   // registry is current; the polyfill scopes its native names, so the old
   // definition does not block the new one.
   let knownRegistry = window.customElements;
+  let knownDefine = window.customElements.define;
   let watchLeft = 120;                      // 120 x 500 ms = one minute
   const watchdog = setInterval(() => {
-    if (window.customElements !== knownRegistry ||
-        !window.customElements.get("geely-card")) {
-      if (window.customElements !== knownRegistry) {
+    const swapped = window.customElements !== knownRegistry ||
+      window.customElements.define !== knownDefine;
+    if (swapped || !window.customElements.get("geely-card")) {
+      if (swapped) {
+        STATUS.swaps += 1;
         console.info("geely-card: custom element registry was replaced - re-registering");
       }
       knownRegistry = window.customElements;
+      knownDefine = window.customElements.define;
       registerElements();
     }
+    if (statusEntry) statusEntry.description = STATUS.line();
     if (--watchLeft <= 0) clearInterval(watchdog);
   }, 500);
 
@@ -835,14 +841,53 @@
   // found: geely-card", this line's presence (or absence) in the browser
   // console separates "the file never ran" from "it ran and something else
   // is wrong" - the two have opposite fixes.
-  const VERSION = document.currentScript && document.currentScript.src
-    ? (document.currentScript.src.split("?v=")[1] || "?") : "module";
+  // As a module there is no document.currentScript, and import.meta is a
+  // syntax error in the classic-script fallback - so find this file's own
+  // tag in the DOM. The version is what tells a screenshot which build ran.
+  const VERSION = (() => {
+    let src = (document.currentScript && document.currentScript.src) || "";
+    if (!src) {
+      const tag = [...document.querySelectorAll('script[src*="geely-card.js"]')].pop();
+      src = (tag && tag.src) || "";
+    }
+    const m = /[?&]v=([^&]+)/.exec(src);
+    return m ? decodeURIComponent(m[1]) : "?";
+  })();
   console.info(
     `%c GEELY-CARD %c ${VERSION} loaded - geely-card, geely-card-compact registered`,
     "background:#2fd6a4;color:#0b2b22;font-weight:600;border-radius:3px 0 0 3px",
     "background:#0b2b22;color:#2fd6a4;border-radius:0 3px 3px 0");
 
   window.customCards = window.customCards || [];
+  /* A status tile that renders as plain text in the picker (preview: false
+   * never creates an element, so it shows even when everything else is
+   * broken) - live diagnosis for phone-only users, no console needed. */
+  const STATUS = {
+    version: VERSION, swaps: 0, defineError: "",
+    line() {
+      const full = !!window.customElements.get("geely-card");
+      const compact = !!window.customElements.get("geely-card-compact");
+      return `v${this.version} · script ran · geely-card ${full ? "OK" : "MISSING"}` +
+        ` · compact ${compact ? "OK" : "MISSING"}` +
+        (this.swaps ? ` · registry swapped x${this.swaps}` : "") +
+        (this.defineError ? ` · define error: ${this.defineError}` : "");
+    },
+  };
+
+  class GeelyCardStatus extends HTMLElement {
+    setConfig() {}
+    set hass(_h) {
+      this.innerHTML = `<ha-card style="padding:12px;font-size:12px">
+        Geely card status: ${esc(STATUS.line())}</ha-card>`;
+    }
+    getCardSize() { return 1; }
+  }
+  try {
+    if (!customElements.get("geely-card-status")) {
+      customElements.define("geely-card-status", GeelyCardStatus);
+    }
+  } catch (err) { /* status must never break the file */ }
+
   if (!window.customCards.some((c) => c.type === "geely-card")) {
     window.customCards.push(
       {
@@ -857,6 +902,14 @@
         description: "Battery, range and the controls that matter - lock, climate, defrost, trunk.",
         preview: true,
       },
+      {
+        type: "geely-card-status",
+        name: "Geely Card (status)",
+        description: STATUS.line(),
+        preview: false,
+      },
     );
   }
+
+  const statusEntry = window.customCards.find((c) => c.type === "geely-card-status");
 })();

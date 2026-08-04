@@ -174,7 +174,11 @@ def test_the_card_is_registered_as_a_lovelace_resource():
     assert [i["url"] for i in res.items] == [f"{c.CARD_URL}?v=9.9.9"]
     assert res.items[0]["type"] == "module"
     assert res.loaded, "the collection must be loaded before it is read"
-    assert urls == [f"{c.CARD_URL}?v=9.9.9"],         "the extra-module URL stays as the belt to the resource's braces"
+    assert urls == [], (
+        "with the resource in place the extra-module URL must NOT be added: "
+        "as an extra script this file runs before every Lovelace resource, "
+        "including the scoped-registry polyfill that hides earlier "
+        "registrations")
 
 
 def test_an_upgrade_moves_the_existing_resource_to_the_new_version():
