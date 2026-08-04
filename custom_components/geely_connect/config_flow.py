@@ -53,14 +53,11 @@ from .const import (
     CONF_POLL_MODE,
     CONF_PRESSURE_UNIT,
     CONF_USER_ID,
-    CONF_VEHICLE_COLOR,
-    CONF_VEHICLE_MODEL_CODE,
     CONF_VEHICLE_NICKNAME,
-    CONF_VEHICLE_POWER_TYPE,
-    CONF_VEHICLE_SERIES,
     CONF_VIN,
     DOMAIN,
 )
+from .helpers import vehicle_metadata
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -375,8 +372,11 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             _LOGGER.exception("cert provisioning failed")
             return self.async_abort(reason="cert_failed")
 
-        nickname = vehicle.get("nickname") or vehicle.get("model") or "Geely"
-        title = f"{nickname} ({vin})"
+        metadata = vehicle_metadata(vehicle)
+        # The title needs something to show even for a car with neither a
+        # nickname nor a model; the stored field stays empty so the device name
+        # can fall through to the model code.
+        title = f"{metadata[CONF_VEHICLE_NICKNAME] or 'Geely'} ({vin})"
         return self.async_create_entry(
             title=title,
             data={
@@ -391,11 +391,7 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_KEY_PATH:           key_path,
                 CONF_DEVICE_IDFA:        self._idfa,
                 CONF_DEVICE_IDFV:        self._idfv,
-                CONF_VEHICLE_NICKNAME:   nickname,
-                CONF_VEHICLE_SERIES:     vehicle.get("series") or "",
-                CONF_VEHICLE_MODEL_CODE: vehicle.get("modelCode") or vehicle.get("seriesCode") or "",
-                CONF_VEHICLE_COLOR:      vehicle.get("color") or "",
-                CONF_VEHICLE_POWER_TYPE: vehicle.get("powerType") or "",
+                **metadata,
                 CONF_PRESSURE_UNIT:      self._pressure_unit,
                 CONF_POLL_MODE:          self._poll_mode,
             },
