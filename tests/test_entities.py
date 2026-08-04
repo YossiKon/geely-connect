@@ -129,6 +129,18 @@ def test_every_unique_id_is_namespaced_by_vin():
             assert FAKE_VIN in uid, f"{uid} is not vehicle-specific"
 
 
+def test_the_climate_object_id_stays_climate_despite_the_display_name():
+    """The display name is "Remote Pre-Conditioning", but every shipped
+    dashboard and the README adaptation procedure reference
+    climate.<device>_climate, and existing installs already have that id in
+    the registry. New installs must generate the same one."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    (entity,) = _build_all()["climate"]
+    assert entity.entity_id == "climate.geely_ex5_0000_climate", entity.entity_id
+    assert entity._attr_name == "Remote Pre-Conditioning"
+
+
 # ------------------------------------------------- propulsion gating ---
 # STATUS above is a BEV payload: no fuelStatus, no engine fields. What a BEV
 # owner must never see is a row of fuel tiles that can only read `unavailable`.

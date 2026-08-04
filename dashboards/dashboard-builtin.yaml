@@ -125,7 +125,7 @@ views:
             heading_style: title
           - type: thermostat
             entity: climate.my_geely_ex5_climate
-            name: Climate
+            name: Pre-Conditioning
             features:
               - type: climate-hvac-modes
                 hvac_modes: [heat_cool, "off"]

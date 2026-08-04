@@ -80,7 +80,7 @@ cards:
   # overwrites whatever target was set before it.
   - type: tile
     entity: climate.my_geely_ex5_climate
-    name: Climate
+    name: Pre-Conditioning
     icon: mdi:air-conditioner
     features:
       - type: climate-preset-modes

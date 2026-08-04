@@ -57,6 +57,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import ExtraStoredData, RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import slugify
 from homeassistant.util.unit_conversion import TemperatureConverter
 
 from .api import GeelyControlError, redact
@@ -161,10 +162,19 @@ class GeelyClimate(CoordinatorEntity, ClimateEntity, RestoreEntity):
 
         self._attr_unique_id = f"geely_{self._vin}_climate"
         self._attr_name = "Remote Pre-Conditioning"
+        device_name = bundle.get("device_name") or f"Geely ({self._vin})"
+        # The display name says "Remote Pre-Conditioning", but the object_id
+        # must stay `<device>_climate`: every shipped dashboard, card and
+        # automation references climate.<device>_climate, and existing
+        # installs already carry that id in the entity registry. Without this
+        # suggestion a *fresh* install would generate
+        # climate.<device>_remote_pre_conditioning and match none of them.
+        # HA only honours entity_id suggestions on first registration.
+        self.entity_id = f"climate.{slugify(f'{device_name} Climate')}"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self._vin)},
             manufacturer="Geely",
-            name=bundle.get("device_name") or f"Geely ({self._vin})",
+            name=device_name,
         )
 
         # Local cache: target temp is not server-readable, so we remember

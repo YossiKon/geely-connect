@@ -175,7 +175,7 @@ views:
             grid_options: {columns: 12}
           - type: tile
             entity: climate.my_geely_ex5_climate
-            name: Climate
+            name: Pre-Conditioning
             features:
               - type: climate-hvac-modes
                 hvac_modes: [heat_cool, "off"]
@@ -500,16 +500,16 @@ views:
         entity: climate.my_geely_ex5_climate
     sections:
 
-      # ---------------- Cabin climate ----------------
+      # ---------------- Pre-conditioning ----------------
       - type: grid
         cards:
           - type: heading
-            heading: Cabin climate
+            heading: Pre-conditioning
             heading_style: title
             icon: mdi:thermometer
           - type: thermostat
             entity: climate.my_geely_ex5_climate
-            name: Climate
+            name: Pre-Conditioning
             features:
               - type: climate-hvac-modes
                 hvac_modes: [heat_cool, "off"]

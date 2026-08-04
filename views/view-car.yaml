@@ -77,7 +77,7 @@
         # and the mode button would silently disappear.
         - type: tile
           entity: climate.my_geely_ex5_climate
-          name: Climate
+          name: Pre-Conditioning
           features:
             - type: climate-hvac-modes
               hvac_modes: [heat_cool, "off"]

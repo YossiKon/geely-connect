@@ -27,7 +27,7 @@ cards:
   # matter; rapid_warming is silently ignored.
   - type: thermostat
     entity: climate.my_geely_ex5_climate
-    name: Cabin
+    name: Pre-Conditioning
     features:
       - type: climate-hvac-modes
         hvac_modes:
