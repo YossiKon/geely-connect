@@ -202,3 +202,86 @@ def test_the_metadata_shape_reads_every_spelling_the_server_uses():
     assert fallbacks[const.CONF_VEHICLE_MODEL_CODE] == "FX11"
     # Absent everything is empty, never None - entry data is all strings.
     assert set(helpers.vehicle_metadata({}).values()) == {""}
+
+
+# ------------------------------------------------- the refetch itself ---
+# The tests above pin the *shape*; these pin the one function that applies it.
+# The original bug lived here: the refresh hand-built three of the five fields
+# and its own guard then locked the entry out of ever acquiring the other two.
+
+
+def _refetch(entry, vehicles):
+    """Run _maybe_refetch_vehicle_metadata against a canned vehicle list,
+    counting how many times the cloud would have been called."""
+    m = _mod()
+
+    class _ExecHass(_Hass):
+        async def async_add_executor_job(self, fn, *a):
+            return fn(*a)
+
+    hass = _ExecHass()
+    calls = []
+    orig = m.geely_api
+    m.geely_api = types.SimpleNamespace(
+        list_vehicles=lambda *a, **k: (calls.append(1), vehicles)[1])
+    try:
+        asyncio.run(m._maybe_refetch_vehicle_metadata(hass, entry))
+    finally:
+        m.geely_api = orig
+    return hass, len(calls)
+
+
+def _record(**over):
+    base = {"vin": FAKE_VIN, "nickname": "My EX5", "series": "FX11",
+            "modelCode": "FX11", "color": "Silver", "powerType": "混动"}
+    base.update(over)
+    return base
+
+
+def test_the_refetch_heals_an_entry_the_old_code_damaged():
+    """A half-healed entry - nickname and series present, powerType and
+    colour dropped by the old 3-of-5 refresh - must trigger the heal and come
+    out carrying every metadata key. Key presence decides, not truthiness."""
+    from conftest import load
+    const = load("const")
+    entry = _Entry(6, data={
+        "vin": FAKE_VIN, const.CONF_VEHICLE_NICKNAME: "My EX5",
+        const.CONF_VEHICLE_SERIES: "FX11", const.CONF_VEHICLE_MODEL_CODE: "FX11"})
+    hass, called = _refetch(entry, [_record()])
+    assert called == 1
+    assert hass.updated is not None, "the healed entry was never written back"
+    helpers = load("helpers")
+    missing = set(helpers.vehicle_metadata({})) - set(entry.data)
+    assert missing == set(), missing
+    assert entry.data[const.CONF_VEHICLE_POWER_TYPE] == "混动"
+    assert entry.data[const.CONF_VEHICLE_COLOR] == "Silver"
+
+
+def test_a_complete_entry_never_logs_in_again():
+    """Every key present - even as "" - means no cloud call on boot. The
+    backend allows one session per account, so a refetch loop logs the
+    owner's phone app out on every restart."""
+    _mod()
+    from conftest import load
+    helpers = load("helpers")
+    entry = _Entry(6, data={"vin": FAKE_VIN,
+                            **{k: "" for k in helpers.vehicle_metadata({})}})
+    _, called = _refetch(entry, [_record()])
+    assert called == 0
+
+
+def test_the_heal_never_downgrades_a_field_the_server_omits_today():
+    """A stored powerType must survive a heal run whose vehicle record lacks
+    it - powerType decides the entity set, and a transient omission would
+    silently flip the car to telemetry-observed classification."""
+    from conftest import load
+    const = load("const")
+    entry = _Entry(6, data={
+        "vin": FAKE_VIN, const.CONF_VEHICLE_NICKNAME: "My EX5",
+        const.CONF_VEHICLE_SERIES: "FX11", const.CONF_VEHICLE_MODEL_CODE: "FX11",
+        const.CONF_VEHICLE_POWER_TYPE: "混动"})
+    _, called = _refetch(entry, [_record(powerType=None, color="Red")])
+    assert called == 1
+    assert entry.data[const.CONF_VEHICLE_POWER_TYPE] == "混动", \
+        "the heal cleared a stored powerType"
+    assert entry.data[const.CONF_VEHICLE_COLOR] == "Red"

@@ -148,13 +148,19 @@ _OBSOLETE_UNIQUE_ID_PATTERNS: tuple[str, ...] = (
 
 
 async def _maybe_refetch_vehicle_metadata(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """If the entry was created before vehicle metadata was tracked (v1
-    entries), or the user renamed the vehicle on iOS, re-fetch from
-    /controlCars and update the entry. Best-effort - silently skips on
-    error so a hiccup never blocks setup."""
-    have = entry.data.get(CONF_VEHICLE_NICKNAME)
-    have_series = entry.data.get(CONF_VEHICLE_SERIES) or entry.data.get(CONF_VEHICLE_MODEL_CODE)
-    if have and have_series:
+    """If the entry predates any of the vehicle-metadata fields, re-fetch
+    from /controlCars once and fill them in. Best-effort - silently skips on
+    error so a hiccup never blocks setup.
+
+    Key *presence* decides, not truthiness. The old truthiness guard had two
+    failure modes: an entry the 3-of-5 refresh had already half-healed
+    (nickname and series written, powerType and colour dropped) satisfied it
+    and could never acquire the missing fields, while a car with neither
+    nickname nor model stored "" and re-triggered a fresh cloud login on
+    every boot - against a backend that allows one session per account. One
+    successful heal writes every key (possibly empty), which both completes
+    the damaged entries and terminates the loop."""
+    if all(k in entry.data for k in vehicle_metadata({})):
         return
     try:
         # The install fingerprint has to go with it. Without idfa/idfv,
@@ -179,7 +185,12 @@ async def _maybe_refetch_vehicle_metadata(hass: HomeAssistant, entry: ConfigEntr
     match = next((v for v in all_v if v.get("vin") == target_vin), None)
     if not match:
         return
-    new_data = {**entry.data, **vehicle_metadata(match)}
+    # Never downgrade: a field the server omits on the heal run must not
+    # clear a value the entry already holds - powerType decides the entity
+    # set, and one transient omission would flip it to telemetry-observed.
+    fetched = {k: v or entry.data.get(k, "")
+               for k, v in vehicle_metadata(match).items()}
+    new_data = {**entry.data, **fetched}
     hass.config_entries.async_update_entry(entry, data=new_data)
     # Last 4 VIN characters only, matching _resolve_device_name, so a shared
     # log or screenshot does not reveal the full VIN.
