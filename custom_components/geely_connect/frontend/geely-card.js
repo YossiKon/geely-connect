@@ -293,6 +293,8 @@
       this._config = {};
       this._prefix = null;
       this._hass = null;
+      this._map = {};
+      this._mapFor = null;
       this._armed = null;          // suffix of the armed destructive action
       this._armedTimer = null;
       this._sig = "";
@@ -316,12 +318,17 @@
 
     set hass(hass) {
       this._hass = hass;
-      if (!this._prefix) this._prefix = this._detectPrefix(hass);
-      const sig = this._signature(hass);
-      if (sig !== this._sig) {
+      // Nothing in this setter may throw: an exception here happens outside
+      // the render safety net and leaves the card picker's preview spinning.
+      try {
+        if (!this._prefix) this._prefix = this._detectPrefix(hass);
+        const sig = this._signature(hass);
+        if (sig === this._sig) return;
         this._sig = sig;
-        this._safeRender();
+      } catch (err) {
+        this._sig = "error";
       }
+      this._safeRender();
     }
 
     /* A render that throws would leave the card picker's preview spinning
