@@ -164,7 +164,10 @@ def _to_grayscale(png: bytes) -> np.ndarray:
         # this was ported from indexes a BGR array and must not be copied
         # verbatim, or the red and blue weights end up swapped.
         return (0.299 * arr[..., 0] + 0.587 * arr[..., 1] + 0.114 * arr[..., 2]).astype(np.float32)
-    return arr[..., 0].astype(np.float32)
+    # Defensive only: PIL decodes no mode that lands here (2/4 channels lose
+    # their alpha above; 1 and 3 return above), but a future PIL mode should
+    # degrade to channel 0 rather than crash the login.
+    return arr[..., 0].astype(np.float32)  # pragma: no cover
 
 
 def _canny_edges(im: np.ndarray, low: float = 50.0, high: float = 100.0) -> np.ndarray:

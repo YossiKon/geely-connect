@@ -33,10 +33,15 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -c "import json; print('\n'.join(json.load(open('custom_components/geely_connect/manifest.json'))['requirements']))" > requirements-ci.txt
-          python -m pip install -r requirements-ci.txt homeassistant
+          python -m pip install -r requirements-ci.txt homeassistant coverage
 
-      - name: Run tests
-        run: python tests/run.py
+      # The suite covers every line of the integration; keep it that way.
+      # A PR that adds uncovered code fails here - either test it or discuss
+      # lowering the bar in the PR.
+      - name: Run tests with coverage
+        run: |
+          python -m coverage run --source=custom_components/geely_connect tests/run.py
+          python -m coverage report --fail-under=100 --show-missing
 
   hassfest:
     name: Hassfest

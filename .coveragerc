@@ -1,0 +1,6 @@
+# Run:   python -m coverage run --source=custom_components/geely_connect tests/run.py
+# View:  python -m coverage report --show-missing
+[report]
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:
