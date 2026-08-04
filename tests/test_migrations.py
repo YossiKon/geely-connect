@@ -166,3 +166,39 @@ def test_the_flow_version_and_the_migration_target_agree():
     assert f"entry.version >= {flow_version}" in src, (
         f"the early-return does not match v{flow_version}"
     )
+
+
+def test_every_vehicle_field_goes_through_the_shared_metadata_shape():
+    """The refresh path rebuilt this list by hand and dropped two of five -
+    powerType (which decides whether the car gets fuel entities) and colour.
+
+    Asserting the constant set, not a hand-written five, so a sixth vehicle
+    field cannot be added to config flow and silently skipped by the refresh."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    from conftest import load
+    const = load("const")
+    helpers = load("helpers")
+    declared = {v for k, v in vars(const).items()
+                if k.startswith("CONF_VEHICLE_") and isinstance(v, str)}
+    produced = set(helpers.vehicle_metadata({}))
+    assert declared == produced, f"missing from vehicle_metadata: {declared - produced}"
+
+
+def test_the_metadata_shape_reads_every_spelling_the_server_uses():
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    from conftest import load
+    helpers = load("helpers")
+    const = load("const")
+    full = helpers.vehicle_metadata({
+        "nickname": "My P145-J1", "series": "P145-J1", "modelCode": "P145-J1",
+        "color": "Blue", "powerType": "\u6df7\u52a8"})
+    assert full[const.CONF_VEHICLE_POWER_TYPE] == "\u6df7\u52a8"
+    assert full[const.CONF_VEHICLE_COLOR] == "Blue"
+    # seriesCode is the older spelling of modelCode; model is the older nickname
+    fallbacks = helpers.vehicle_metadata({"model": "EX5", "seriesCode": "FX11"})
+    assert fallbacks[const.CONF_VEHICLE_NICKNAME] == "EX5"
+    assert fallbacks[const.CONF_VEHICLE_MODEL_CODE] == "FX11"
+    # Absent everything is empty, never None - entry data is all strings.
+    assert set(helpers.vehicle_metadata({}).values()) == {""}

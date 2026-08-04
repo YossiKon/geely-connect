@@ -1,4 +1,4 @@
-"""Small pieces shared by every entity platform.
+"""Small pieces shared across the integration.
 
 These were each copied into six to eight platform modules before this file
 existed - `_walk` alone had eight definitions - so a change to any of them
@@ -20,9 +20,39 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import DeviceInfo
 
 from .api import GeelyControlError
-from .const import DOMAIN
+from .const import (
+    CONF_VEHICLE_COLOR,
+    CONF_VEHICLE_MODEL_CODE,
+    CONF_VEHICLE_NICKNAME,
+    CONF_VEHICLE_POWER_TYPE,
+    CONF_VEHICLE_SERIES,
+    DOMAIN,
+)
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def vehicle_metadata(vehicle: dict) -> dict[str, str]:
+    """The entry-data fields we keep about the car, from one vehicle-list record.
+
+    Config flow writes these when the entry is created and
+    `_maybe_refetch_vehicle_metadata` refreshes them later. Both go through here
+    because the refresh used to rebuild the list by hand and dropped two of the
+    five - and one of the dropped fields, `powerType`, is what decides whether
+    the car gets fuel entities.
+
+    Nickname is empty rather than "Geely" when the car has neither a nickname
+    nor a model: the device name then falls through to the model code, which is
+    more use than the literal brand.
+    """
+    return {
+        CONF_VEHICLE_NICKNAME:   vehicle.get("nickname") or vehicle.get("model") or "",
+        CONF_VEHICLE_SERIES:     vehicle.get("series") or "",
+        CONF_VEHICLE_MODEL_CODE: vehicle.get("modelCode") or vehicle.get("seriesCode") or "",
+        CONF_VEHICLE_COLOR:      vehicle.get("color") or "",
+        CONF_VEHICLE_POWER_TYPE: vehicle.get("powerType") or "",
+    }
+
 
 # The four window corners, in the order the protocol names them.
 WINDOW_CORNERS: tuple[str, ...] = ("Driver", "Passenger", "DriverRear", "PassengerRear")

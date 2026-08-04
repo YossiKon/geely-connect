@@ -52,6 +52,7 @@ from .const import (
     SERIES_TO_FRIENDLY_NAME,
     region_config,
 )
+from .helpers import vehicle_metadata
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -176,10 +177,7 @@ async def _maybe_refetch_vehicle_metadata(hass: HomeAssistant, entry: ConfigEntr
     match = next((v for v in all_v if v.get("vin") == target_vin), None)
     if not match:
         return
-    new_data = dict(entry.data)
-    new_data[CONF_VEHICLE_NICKNAME] = match.get("nickname") or match.get("model") or ""
-    new_data[CONF_VEHICLE_SERIES] = match.get("series") or ""
-    new_data[CONF_VEHICLE_MODEL_CODE] = match.get("modelCode") or match.get("seriesCode") or ""
+    new_data = {**entry.data, **vehicle_metadata(match)}
     hass.config_entries.async_update_entry(entry, data=new_data)
     # Last 4 VIN characters only, matching _resolve_device_name, so a shared
     # log or screenshot does not reveal the full VIN.
