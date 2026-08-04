@@ -127,6 +127,13 @@ _CHARGER_CONNECTION_MAP = {
     "3": "Charging",     3: "Charging",
 }
 
+# Derived from the map above rather than restated: the codes that mean the car
+# is actually taking charge. _charge_leg gates on this, so a label change here
+# cannot leave the power sensor believing something different.
+_CHARGING_CODES = frozenset(
+    code for code, label in _CHARGER_CONNECTION_MAP.items() if label == "Charging"
+)
+
 _PARK_BRAKE_MAP = {
     "0": "Released", 0: "Released",
     "1": "Engaged",  1: "Engaged",
@@ -457,7 +464,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
         *((GeelyChargeCompleteSensor(coordinator, vin, device_name),
            GeelyChargePowerSensor(coordinator, vin, device_name),
            GeelyChargeCurrentSensor(coordinator, vin, device_name),
-           GeelyChargeVoltageSensor(coordinator, vin, device_name))
+           GeelyChargeVoltageSensor(coordinator, vin, device_name),
+           # The same DC pair, read for what it is rather than as a charge:
+           # the pack's own power flow, which is what the car's dashboard
+           # shows while driving. Signed, so one entity covers both
+           # directions. Behind the same gate because it reads the same
+           # fields - without them it could only ever be unknown.
+           GeelyPackPowerSensor(coordinator, vin, device_name))
           if charges else ()),
         *(GeelyTireSensor(coordinator, vin, device_name, key, name, path,
                           pressure_unit)
@@ -834,24 +847,35 @@ class GeelyCombinedRangeSensor(CoordinatorEntity, _AutoPrecision):
         return round(fuel + electric)
 
 
+def _is_charging(data: dict) -> bool:
+    """Whether the car says it is charging, per the field behind the label sensor."""
+    return _walk(data, (*_EV, "statusOfChargerConnection")) in _CHARGING_CODES
+
+
 def _charge_leg(data: dict) -> tuple[float, float] | None:
     """The volts and amps of whichever charge leg is actually delivering power.
 
     The car reports two independent pairs - AC (`chargeUAct` / `chargeIAct`) and
     DC (`dcChargeUAct` / `dcChargeIAct`) - and never says which one is in use.
-    Neither half of a pair can decide it alone:
+    Worse, the DC pair is the pack, so it reads whether or not a charger is
+    attached, and no rule over the electrical readings alone survives contact
+    with real data:
 
-    * Voltage cannot: `dcChargeUAct` reports the pack voltage - 349 V on the
-      test car - while parked and unplugged, so the DC leg would always win.
+    * Voltage cannot decide: `dcChargeUAct` reports the pack voltage - 349 V on
+      the test car - while parked and unplugged, so the DC leg would always win.
     * Current cannot either. Measured on a plugged-in, not-charging car, the AC
-      leg reads 0.2 A at 0.0 V: a sense current with no voltage behind it. A
-      "first leg with current" rule picks that, so a DC fast charge alongside
-      the same 0.2 A of AC noise would have reported 0 kW.
+      leg reads 0.2 A at 0.0 V: a sense current with no voltage behind it.
+    * Nor can the larger product. Measured while *driving*, the DC pair reports
+      pack voltage against traction current with a positive sign - 338.2 V at
+      52.4 A - so the product rule published 17.7 kW of "charging" on a car
+      running on a 233 V 8 A lead, and put that in long-term statistics.
 
-    So pick the leg with the larger product, which neither a phantom voltage nor
-    a phantom current can win. Ties at zero fall back to the AC pair, so a
-    parked car reads 0 kW rather than unknown - a gap in a power graph is
-    indistinguishable from a failed poll. None only when the fields are absent.
+    Only the car can say whether it is charging, and it already does, in the
+    field behind the Charger Connection label. So gate on that first: not
+    charging reads 0 kW, because a gap in a power graph is indistinguishable
+    from a failed poll. Then, and only then, pick between the legs by product -
+    still needed, because an AC sense current and a live DC fast charge can be
+    present at the same moment. None only when the fields are absent.
 
     One resolver for all three charge sensors: split across them, power could
     report the DC leg while current reported the AC one.
@@ -865,6 +889,10 @@ def _charge_leg(data: dict) -> tuple[float, float] | None:
 
     ac = pair("chargeUAct", "chargeIAct")
     dc = pair("dcChargeUAct", "dcChargeIAct")
+    if ac is None and dc is None:
+        return None
+    if not _is_charging(data):
+        return (0.0, 0.0)
     live = [leg for leg in (ac, dc) if leg is not None and leg[0] > 0 and leg[1] > 0]
     if live:
         return max(live, key=lambda leg: leg[0] * leg[1])
@@ -947,6 +975,49 @@ class GeelyChargeVoltageSensor(CoordinatorEntity, _AutoPrecision):
     def native_value(self):
         leg = _charge_leg(self.coordinator.data or {})
         return None if leg is None else round(leg[0], 1)
+
+
+class GeelyPackPowerSensor(CoordinatorEntity, _AutoPrecision):
+    """The pack's own power flow in kW, signed: positive out, negative in.
+
+    The DC pair (`dcChargeUAct` / `dcChargeIAct`) is not a charge leg at all -
+    it is the pack, and it reads whether or not a charger is attached. Measured
+    on the test car: 338.2 V at +52.4 A while driving (17.7 kW leaving the pack)
+    and 346.7 V at -4.4 A while charging from a 233 V lead (1.5 kW entering it,
+    the 1.8 kW at the wall less the onboard charger's losses and the 12 V
+    auxiliaries).
+
+    That is the power flow the car's own dashboard shows, so it is worth an
+    entity - but not the Charging Power one, which is about the wall. Keeping
+    the car's sign convention rather than inverting it means there is one
+    answer to "which way is positive", and it is the car's.
+
+    Ungated: the flow is real whether or not a charger is connected, which is
+    the whole point of separating it from the charge sensors.
+    """
+
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_native_unit_of_measurement = UnitOfPower.KILO_WATT
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:current-dc"
+
+    def __init__(self, coordinator, vin: str, device_name: str) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"geely_{vin}_pack_power"
+        self._attr_name = "Pack Power"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, vin)}, manufacturer="Geely", name=device_name)
+
+    @property
+    def native_value(self):
+        data = self.coordinator.data or {}
+        try:
+            volts = float(_walk(data, (*_EV, "dcChargeUAct")))
+            amps = float(_walk(data, (*_EV, "dcChargeIAct")))
+        except (TypeError, ValueError):
+            return None
+        return round(volts * amps / 1000.0, 2)
 
 
 class GeelyTireSensor(CoordinatorEntity, _AutoPrecision):

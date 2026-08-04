@@ -23,7 +23,7 @@ polished setup on top.
 ## ✨ Highlights
 
 - 🔒 **Security-first** - verified TLS plus public-key pinning.
-- 📊 **Everything enabled** - all 65 entities are on from the start (78 on a
+- 📊 **Everything enabled** - all 66 entities are on from the start (79 on a
   hybrid), no duplicates, nothing to switch on by hand.
 - 🧮 **Computed extras** - charging power, charge completion time, range at full
   charge and efficiency, none of which the car reports itself.
@@ -118,8 +118,9 @@ Location (device tracker) - GPS position on the map, with altitude.
 |---|---|
 | **Efficiency** | km per kWh, derived from average consumption |
 | **Charge Complete** | When charging finishes, as a time rather than a minute count - so a notification can fire on it |
-| **Charging Power** | How fast the car is charging, in kW. The car reports volts and amps but never their product, so this is the only place the charge rate exists. A real `power` entity, so it records long-term statistics and can be graphed alongside your house load |
-| **Charge Voltage** / **Charge Current** | The two halves behind that number (diagnostic). Worth a look when a charge is slower than expected - a derated circuit shows up as low current, not low voltage. The car sends an AC and a DC pair and never says which is live; whichever is carrying current wins, because the DC pair reports pack voltage even while parked |
+| **Charging Power** | How fast the car is charging, in kW. The car reports volts and amps but never their product, so this is the only place the charge rate exists. A real `power` entity, so it records long-term statistics and can be graphed alongside your house load. Reads 0 kW unless the car says it is charging - the DC pair is the pack, so it carries traction current while you drive, and a rule based on the readings alone reports that as a 17 kW charge |
+| **Charge Voltage** / **Charge Current** | The two halves behind that number (diagnostic). Worth a look when a charge is slower than expected - a derated circuit shows up as low current, not low voltage. The car sends an AC and a DC pair and never says which is live, so among the live legs the larger volts × amps wins: that is what separates a DC fast charge from the small sense current the AC leg shows while plugged in and idle |
+| **Pack Power** | The battery's own power flow in kW, signed the way the car signs it: positive leaving the pack, negative going in. This is the figure the car's dashboard shows while driving - about 17 kW up a hill, and around −1.5 kW on a 1.8 kW wall charge, the difference being the onboard charger's losses and the 12 V systems |
 | **Range At Full Charge** | Remaining range extrapolated to 100% at the current efficiency, so it's comparable week to week. Blank below 10% charge, where the estimate is mostly noise |
 | **Last Trip** | How far the last completed journey went, worked out from the odometer between engine-on and engine-off |
 | **Trip In Progress** | How far the current journey has gone; 0 when parked |
@@ -652,7 +653,7 @@ enabling. Everything the car reports, plus the computed extras above.
 
 The one thing that varies by car is propulsion: the thirteen fuel and engine
 entities are created only for a car with a tank, so a battery-electric EX5 gets
-65 entities and a PHEV gets 78. That's a decision made once at startup from your
+66 entities and a PHEV gets 79. That's a decision made once at startup from your
 account's `powerType` plus the car's own telemetry - there is no option to set.
 
 The only thing not created is the raw full-exposure pass (see below), because

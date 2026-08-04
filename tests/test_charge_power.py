@@ -1,9 +1,14 @@
 """Charging power, and the leg-selection trap behind it.
 
-The car sends two independent volt/amp pairs and never says which is live. The
-DC pair reports pack voltage (349 V) even while parked and unplugged, so any
-rule that looks at voltage first reports a phantom charge forever. These tests
-pin the rule to current.
+The car sends two independent volt/amp pairs and never says which is live, and
+the DC pair is the pack rather than a charge leg: it reads 349 V parked, and
+338.2 V at +52.4 A while driving. No rule over the readings alone can tell a
+charge from a drive, so the car's own charging state gates them and the pack
+flow gets its own signed entity.
+
+`_status` is therefore disconnected by default and `_charging` is the
+plugged-in-and-charging payload; a fixture that sets volts and amps without a
+charging status describes something the car never sends.
 """
 from conftest import FAKE_VIN, have_homeassistant, load
 from run import skip
@@ -18,6 +23,12 @@ def _status(**ev):
         "electricVehicleStatus": base, "maintenanceStatus": {},
         "runningStatus": {}, "climateStatus": {}, "drivingSafetyStatus": {}}},
         "_state": {}, "_scheduled_charging": {}}
+
+
+def _charging(**ev):
+    """The same payload with the car reporting that it is charging (code 3)."""
+    ev.setdefault("statusOfChargerConnection", "3")
+    return _status(**ev)
 
 
 class _Coord:
@@ -50,18 +61,18 @@ def test_a_parked_car_reads_zero_not_the_pack_voltage_times_nothing():
 
 def test_ac_charging_uses_the_ac_pair():
     """240 V at 30 A -> 7.2 kW, and the idle 349 V DC leg must not win."""
-    assert _power(_status(chargeUAct="240.0", chargeIAct="30.0")) == 7.2
+    assert _power(_charging(chargeUAct="240.0", chargeIAct="30.0")) == 7.2
 
 
 def test_dc_charging_uses_the_dc_pair():
     """400 V at 125 A -> 50 kW on a fast charger, with the AC pair at zero."""
-    assert _power(_status(dcChargeUAct="400.0", dcChargeIAct="125.0")) == 50.0
+    assert _power(_charging(dcChargeUAct="400.0", dcChargeIAct="125.0")) == 50.0
 
 
 def test_a_payload_with_no_ac_pair_still_reports_the_fast_charge():
     """A trim that omits the AC keys entirely must not read unknown while DC
     fast charging - one absent pair falls through to the other."""
-    data = _status(dcChargeUAct="400.0", dcChargeIAct="125.0")
+    data = _charging(dcChargeUAct="400.0", dcChargeIAct="125.0")
     ev = data["vehicleStatus"]["additionalVehicleStatus"]["electricVehicleStatus"]
     del ev["chargeUAct"], ev["chargeIAct"]
     assert _power(data) == 50.0
@@ -70,8 +81,8 @@ def test_a_payload_with_no_ac_pair_still_reports_the_fast_charge():
 def test_the_live_leg_is_chosen_by_current_never_by_voltage():
     """The trap: DC volts are always the larger number. If the rule compared
     voltages, an AC charge would be reported at the DC pack voltage."""
-    v = _power(_status(chargeUAct="240.0", chargeIAct="32.0",
-                       dcChargeUAct="349.0", dcChargeIAct="0.0"))
+    v = _power(_charging(chargeUAct="240.0", chargeIAct="32.0",
+                        dcChargeUAct="349.0", dcChargeIAct="0.0"))
     assert abs(v - 7.68) < 0.01, v
 
 
@@ -79,8 +90,8 @@ def test_a_sense_current_with_no_voltage_does_not_win_the_leg():
     """Measured on the real car, plugged in and not charging: the AC leg reads
     0.2 A at 0.0 V. A "first leg with current" rule picks that leg, so a DC
     fast charge happening alongside this noise reported 0 kW."""
-    v = _power(_status(chargeUAct="0.0", chargeIAct="0.2",
-                       dcChargeUAct="400.0", dcChargeIAct="125.0"))
+    v = _power(_charging(chargeUAct="0.0", chargeIAct="0.2",
+                        dcChargeUAct="400.0", dcChargeIAct="125.0"))
     assert v == 50.0, v
 
 
@@ -91,9 +102,76 @@ def test_that_same_noise_alone_still_reads_zero():
 
 def test_the_larger_product_wins_when_both_legs_look_live():
     """Neither a phantom voltage nor a phantom current can beat real power."""
-    v = _power(_status(chargeUAct="240.0", chargeIAct="0.1",
-                       dcChargeUAct="349.0", dcChargeIAct="100.0"))
+    v = _power(_charging(chargeUAct="240.0", chargeIAct="0.1",
+                        dcChargeUAct="349.0", dcChargeIAct="100.0"))
     assert v == 34.9, v
+
+
+# ------------------------------------------------ measured on the real car ---
+
+def test_driving_is_not_charging_however_large_the_dc_product():
+    """The defect this gate exists for, with the numbers it was found on.
+
+    Driving home unplugged, the DC pair read 338.2 V at +52.4 A. Both halves
+    are positive, so a product rule called it a 17.7 kW charge and wrote that
+    into the long-term statistics of a car whose supply tops out near 1.8 kW.
+    """
+    assert _power(_status(dcChargeUAct="338.2", dcChargeIAct="52.4")) == 0.0
+
+
+def test_the_real_charging_payload_reads_the_wall_leg():
+    """Charging at 8 A from a 233 V lead, the pack draws -4.4 A at 346.7 V.
+
+    The negative sign is what makes the DC leg lose here, but it only appears
+    once a charge is under way - which is why the sign cannot be the gate."""
+    v = _power(_charging(chargeUAct="233.0", chargeIAct="7.800",
+                         dcChargeUAct="346.7", dcChargeIAct="-4.4"))
+    assert abs(v - 1.82) < 0.01, v
+
+
+def test_plugged_in_but_idle_reads_zero_not_the_sense_current():
+    """Code 1/2 is "Plugged in", not charging: the 0.2 A sense current on the
+    AC leg is real and means nothing, so the rate is 0 kW."""
+    for code in ("1", "2"):
+        v = _power(_status(statusOfChargerConnection=code,
+                           chargeUAct="0.0", chargeIAct="0.2"))
+        assert v == 0.0, (code, v)
+
+
+# ---------------------------------------------------------- pack power ---
+
+def _pack(data):
+    return _make("GeelyPackPowerSensor", data).native_value
+
+
+def test_pack_power_is_positive_while_driving():
+    """The 17.7 kW the charge sensor must not claim is real, and belongs here."""
+    v = _pack(_status(dcChargeUAct="338.2", dcChargeIAct="52.4"))
+    assert abs(v - 17.72) < 0.01, v
+
+
+def test_pack_power_is_negative_while_charging():
+    """Into the pack is negative, keeping the car's own sign convention."""
+    v = _pack(_charging(dcChargeUAct="346.7", dcChargeIAct="-4.4"))
+    assert abs(v + 1.53) < 0.01, v
+
+
+def test_pack_power_is_not_gated_on_the_charger():
+    """Unlike the charge sensors: the flow is real with nothing plugged in,
+    which is the reason it is a separate entity rather than a mode of one."""
+    assert _pack(_status(dcChargeUAct="349.0", dcChargeIAct="0.0")) == 0.0
+    assert _pack(_status(dcChargeUAct="340.0", dcChargeIAct="13.2")) != 0.0
+
+
+def test_pack_power_records_statistics_and_reports_none_when_absent():
+    s = _make("GeelyPackPowerSensor", _status())
+    assert s.device_class == "power"
+    assert s.state_class == "measurement"
+    assert s.native_unit_of_measurement == "kW"
+    bare = {"vehicleStatus": {"basicVehicleStatus": {},
+                              "additionalVehicleStatus": {"electricVehicleStatus": {}}},
+            "_state": {}, "_scheduled_charging": {}}
+    assert _pack(bare) is None
 
 
 # --------------------------------------------------------------- absence ---
@@ -114,14 +192,14 @@ def test_junk_readings_do_not_raise():
 
 def test_a_negative_current_is_not_negative_power():
     """Discharge on the same pins (V2L) must not read as negative charging."""
-    assert _power(_status(chargeUAct="240.0", chargeIAct="-10.0")) == 0.0
+    assert _power(_charging(chargeUAct="240.0", chargeIAct="-10.0")) == 0.0
 
 
 # ----------------------------------------------- current and voltage pair ---
 
 def test_current_and_voltage_report_the_same_leg_as_power():
     """Split resolvers would let power say DC while current says AC."""
-    data = _status(chargeUAct="240.0", chargeIAct="32.0")
+    data = _charging(chargeUAct="240.0", chargeIAct="32.0")
     amps = _make("GeelyChargeCurrentSensor", data).native_value
     volts = _make("GeelyChargeVoltageSensor", data).native_value
     assert (volts, amps) == (240.0, 32.0)
@@ -129,7 +207,7 @@ def test_current_and_voltage_report_the_same_leg_as_power():
 
 
 def test_the_dc_leg_is_reported_whole_when_it_is_the_live_one():
-    data = _status(dcChargeUAct="400.0", dcChargeIAct="125.0")
+    data = _charging(dcChargeUAct="400.0", dcChargeIAct="125.0")
     assert _make("GeelyChargeVoltageSensor", data).native_value == 400.0
     assert _make("GeelyChargeCurrentSensor", data).native_value == 125.0
 
