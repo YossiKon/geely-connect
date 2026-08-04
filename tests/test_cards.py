@@ -90,6 +90,12 @@ class _Hass:
     async def async_add_executor_job(self, fn, *args):
         return fn(*args)
 
+    def async_create_task(self, coro, *a, **k):
+        # The card self-check is a fire-and-forget diagnostic; the tests do
+        # not exercise the network, so close the coroutine cleanly.
+        coro.close()
+        return None
+
 
 def _patched(c, version="9.9.9"):
     urls = []
@@ -385,3 +391,117 @@ def test_the_card_file_sits_beside_the_python_not_in_a_subdirectory():
         skip("homeassistant not installed")
     assert os.path.isfile(os.path.join(PKG, "geely-card.js"))
     assert not os.path.isdir(os.path.join(PKG, "frontend")),         "the card moved to the package root - drop the empty subdirectory"
+
+
+# ------------------------------------------------------ the served-URL check ---
+# "Custom element not found: geely-card" while the file is on disk and the
+# resource is registered leaves only one question - does Home Assistant
+# actually hand the file over when asked. These pin the answer to a log line.
+
+class _Reply:
+    def __init__(self, status=200, ctype="text/javascript", body=b"/* card */"):
+        self.status = status
+        self.headers = {"Content-Type": ctype}
+        self._body = body
+
+    @property
+    def content(self):
+        parent = self
+
+        class _C:
+            async def read(self, n):
+                return parent._body[:n]
+        return _C()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+class _Session:
+    def __init__(self, reply=None, boom=None):
+        self.reply = reply or _Reply()
+        self.boom = boom
+        self.urls = []
+
+    def get(self, url, timeout=None):
+        self.urls.append(url)
+        if self.boom:
+            raise self.boom
+        return self.reply
+
+
+def _selfcheck(c, hass, session, url="/geely_connect/geely-card.js?v=1"):
+    import homeassistant.helpers.aiohttp_client as ac
+    orig = ac.async_get_clientsession
+    ac.async_get_clientsession = lambda h, verify_ssl=True: session
+    seen = []
+    import logging
+
+    class _Grab(logging.Handler):
+        def emit(self, record):
+            seen.append((record.levelno, record.getMessage()))
+
+    logger = logging.getLogger("gc.cards")
+    handler = _Grab()
+    logger.addHandler(handler)
+    try:
+        asyncio.run(c._async_verify_served(hass, url))
+    finally:
+        ac.async_get_clientsession = orig
+        logger.removeHandler(handler)
+    return seen
+
+
+def test_a_served_card_passes_the_self_check_quietly():
+    import types
+    c = _cards()
+    hass = _Hass()
+    hass.config = types.SimpleNamespace(internal_url="http://ha.local:8123")
+    session = _Session()
+    seen = _selfcheck(c, hass, session)
+    assert session.urls == ["http://ha.local:8123/geely_connect/geely-card.js?v=1"]
+    import logging
+    assert not [m for lvl, m in seen if lvl >= logging.ERROR]
+
+
+def test_the_home_assistant_ui_coming_back_instead_of_the_card_is_an_error():
+    """The failure that produces "Custom element not found" in a browser: the
+    URL answers with something that is not JavaScript."""
+    import logging
+    import types
+    c = _cards()
+    hass = _Hass()
+    hass.config = types.SimpleNamespace(internal_url=None)
+    hass.http.ssl_certificate = None
+    hass.http.server_port = 8123
+    session = _Session(_Reply(status=404, ctype="text/html", body=b"<!DOCTYPE html>"))
+    seen = _selfcheck(c, hass, session)
+    assert session.urls[0].startswith("http://127.0.0.1:8123/")
+    errors = [m for lvl, m in seen if lvl >= logging.ERROR]
+    assert errors and "Custom element not found" in errors[0]
+
+
+def test_an_https_only_instance_is_probed_over_https():
+    import types
+    c = _cards()
+    hass = _Hass()
+    hass.config = types.SimpleNamespace(internal_url="")
+    hass.http.ssl_certificate = "/etc/cert.pem"
+    hass.http.server_port = 8123
+    session = _Session()
+    _selfcheck(c, hass, session)
+    assert session.urls[0].startswith("https://127.0.0.1:8123/")
+
+
+def test_a_self_check_that_cannot_run_stays_silent():
+    """It is a diagnostic; a network hiccup must not add noise or raise."""
+    import logging
+    import types
+    c = _cards()
+    hass = _Hass()
+    hass.config = types.SimpleNamespace(internal_url="http://ha.local:8123")
+    seen = _selfcheck(c, hass, _Session(boom=OSError("no route")))
+    assert not [m for lvl, m in seen if lvl >= logging.WARNING]

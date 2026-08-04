@@ -19,6 +19,8 @@ from __future__ import annotations
 import logging
 import os
 
+from aiohttp import ClientTimeout
+
 from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
@@ -106,6 +108,7 @@ async def async_register_cards(hass: HomeAssistant) -> None:
         # "is it even being served, and from where" without a log-level dance.
         _LOGGER.info("Geely dashboard cards served at %s (Lovelace resource: %s)",
                      url, registered)
+        hass.async_create_task(_async_verify_served(hass, url))
     except Exception as e:  # noqa: BLE001
         # Release the claim so a later reload can retry.
         hass.data[_REGISTERED] = False
@@ -152,3 +155,35 @@ async def _async_register_resource(hass: HomeAssistant, url: str) -> bool:
         _LOGGER.debug("Lovelace resource registration unavailable (%s); "
                       "falling back to an extra module URL", e)
         return False
+
+
+async def _async_verify_served(hass: HomeAssistant, url: str) -> None:
+    """Fetch our own card URL and say what came back.
+
+    "Custom element not found: geely-card" in a browser has several possible
+    causes and the user cannot see any of them. This turns the important half
+    into one log line: either Home Assistant serves the file to itself, or it
+    does not and the reason is right there.
+    """
+    from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+    try:
+        base = (hass.config.internal_url or "").rstrip("/")
+        if not base:
+            scheme = "https" if getattr(hass.http, "ssl_certificate", None) else "http"
+            base = f"{scheme}://127.0.0.1:{hass.http.server_port}"
+        session = async_get_clientsession(hass, verify_ssl=False)
+        async with session.get(f"{base}{url}", timeout=ClientTimeout(total=10)) as resp:
+            body = await resp.content.read(64)
+            ctype = resp.headers.get("Content-Type", "?")
+            if resp.status == 200 and "javascript" in ctype:
+                _LOGGER.debug("Card self-check OK (%s, %s)", resp.status, ctype)
+                return
+            _LOGGER.error(
+                "The Geely card is registered but Home Assistant serves %s "
+                "as HTTP %s (%s) instead of JavaScript, so the browser cannot "
+                "load it and dashboards will say \"Custom element not found: "
+                "geely-card\". First bytes: %r", url, resp.status, ctype, body,
+            )
+    except Exception as e:  # noqa: BLE001 - a diagnostic must never break setup
+        _LOGGER.debug("Card self-check could not run (%s)", e)

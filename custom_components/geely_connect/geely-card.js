@@ -798,6 +798,17 @@
     customElements.define("geely-card", GeelyCard);
   }
 
+  // A breadcrumb for support: when a dashboard says "Custom element not
+  // found: geely-card", this line's presence (or absence) in the browser
+  // console separates "the file never ran" from "it ran and something else
+  // is wrong" - the two have opposite fixes.
+  const VERSION = document.currentScript && document.currentScript.src
+    ? (document.currentScript.src.split("?v=")[1] || "?") : "module";
+  console.info(
+    `%c GEELY-CARD %c ${VERSION} loaded - geely-card, geely-card-compact registered`,
+    "background:#2fd6a4;color:#0b2b22;font-weight:600;border-radius:3px 0 0 3px",
+    "background:#0b2b22;color:#2fd6a4;border-radius:0 3px 3px 0");
+
   window.customCards = window.customCards || [];
   if (!window.customCards.some((c) => c.type === "geely-card")) {
     window.customCards.push(
