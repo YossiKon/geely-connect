@@ -101,10 +101,12 @@ def test_charge_complete_is_blank_when_not_charging():
 
 
 def test_charge_complete_handles_a_garbled_minute_count():
-    for junk in ("", None, "abc", "-5"):
+    # "nan" earns its place: it passes float() and every ordinary comparison
+    # (all False), and timedelta(minutes=nan) raises inside the state write.
+    for junk in ("", None, "abc", "-5", "nan", "NaN", "inf"):
         s = _make("GeelyChargeCompleteSensor",
                   _status(ev={"statusOfChargerConnection": "3", "timeToFullyCharged": junk}))
-        s.native_value           # must not raise
+        assert s.native_value is None, junk
 
 
 def test_charge_complete_rejects_the_not_available_sentinel():

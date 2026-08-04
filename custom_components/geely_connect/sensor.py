@@ -346,8 +346,14 @@ class _AutoPrecision(SensorEntity):
 
     @property
     def suggested_display_precision(self) -> int | None:
-        return _display_precision(
-            self.native_unit_of_measurement, self._value_kind)
+        # Home Assistant applies a suggested precision to the *display* unit:
+        # the suggested unit when one is set, else the native unit. The
+        # curated tire sensors report native kPa but display the setup choice,
+        # so keying off the native unit would hand a psi or bar reading kPa's
+        # zero decimals - "2 bar" cannot tell a flat tire from a full one.
+        unit = (self.suggested_unit_of_measurement
+                or self.native_unit_of_measurement)
+        return _display_precision(unit, self._value_kind)
 
 
 # Paths already covered by a curated sensor above - skip them in the dynamic
@@ -723,15 +729,18 @@ def _fuel_range_km(data: dict) -> float | None:
 
     The car reports no fuel range of its own - there is no
     `distanceToEmptyOnFuel` anywhere in the payload - so it has to come from
-    litres and L/100km. None when either is missing or non-positive, which is
-    also the state of a car that has never burned any fuel.
+    litres and L/100km. None when either is missing, or when the car has
+    never burned fuel and so has no consumption average to project with. A
+    *reported* empty tank is different: zero litres at a known consumption is
+    a true 0 km, and hiding it would blank Combined Range exactly when the
+    driver is running on the last of both.
     """
     try:
         litres = float(_walk(data, (*_RUN, "fuelLevel")))
         per_100 = float(_walk(data, (*_RUN, "aveFuelConsumption")))
     except (TypeError, ValueError):
         return None
-    if litres <= 0 or per_100 <= 0:
+    if litres < 0 or per_100 <= 0:
         return None
     return litres / per_100 * 100.0
 

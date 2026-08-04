@@ -132,6 +132,19 @@ def test_fuel_range_is_absent_without_a_level():
     assert s.native_value is None
 
 
+def test_an_empty_tank_is_zero_kilometres_not_unknown():
+    """fuelLevel 0 with a known consumption is a *reading*: the driver ran the
+    tank down. Hiding it would blank Combined Range exactly when someone is
+    running on the last of both - and a combined_range < X automation would
+    never fire. Distinct from the never-fueled car, which has no consumption
+    average and stays absent."""
+    s = _derived("GeelyFuelRangeSensor", _status(running={"fuelLevel": "0"}))
+    assert s.native_value == 0.0
+    combined = _derived("GeelyCombinedRangeSensor",
+                        _status(running={"fuelLevel": "0"}))
+    assert abs(combined.native_value - 136.0) < 0.1, combined.native_value
+
+
 # ------------------------------------------------------ combined range ---
 
 def test_combined_range_adds_both_halves():

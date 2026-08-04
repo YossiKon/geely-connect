@@ -74,6 +74,20 @@ def test_the_tire_corner_sensors_honour_the_chosen_unit():
         assert e.suggested_display_precision == expected, unit
 
 
+def test_the_curated_tire_sensors_honour_the_chosen_unit_too():
+    """The corner sensors carry the chosen unit natively, but the curated four
+    report native kPa and *display* the setup choice via the suggested unit.
+    Home Assistant applies a suggested precision to the display unit, so
+    deriving it from the native unit handed a bar install kPa's zero decimals
+    - and "2 bar" cannot tell a flat tire from a full one."""
+    s = _sensor()
+    row = next(r for r in s.SENSOR_SPECS if r[0] == "tire_pressure_fl")
+    for unit, expected in (("psi", 1), ("bar", 2), ("kPa", 0)):
+        e = s.GeelySensor(_Coord(), FAKE_VIN, "Geely (0000)", *row,
+                          pressure_unit=unit)
+        assert e.suggested_display_precision == expected, unit
+
+
 # ------------------------------------------------- reaches every consumer ---
 
 def test_every_numeric_curated_sensor_declares_a_precision():

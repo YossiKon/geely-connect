@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from collections.abc import Callable
 from contextlib import contextmanager
 from typing import Any
@@ -104,7 +105,9 @@ def minutes_or_none(v: Any) -> float | None:
         m = float(v)
     except (TypeError, ValueError):
         return None
-    if m <= 0 or m >= SIGNAL_UNAVAILABLE_MINUTES:
+    # NaN slips through ordinary comparisons (every one is False), and a NaN
+    # minute count would blow up in timedelta() inside a state write.
+    if not math.isfinite(m) or m <= 0 or m >= SIGNAL_UNAVAILABLE_MINUTES:
         return None
     return m
 

@@ -55,7 +55,8 @@ All of these are created **enabled** - nothing to switch on by hand.
 | Charger Connection | Disconnected / Plugged in / Charging |
 | Charger Plug | Binary - cable connected |
 | Time To Full Charge | Minutes remaining while charging |
-| Average Consumption | Energy use (kWh / 100 km) |
+| Average Consumption | Energy use (kWh / 100 km), lifetime |
+| Trip Consumption | kWh/100 km for the current trip, next to the lifetime figure |
 
 ### Driving & trip
 | Entity | Description |
@@ -136,7 +137,6 @@ instead, and the raw string is written to the log so it can be added.
 |---|---|
 | Fuel Level / Fuel Level Percent | Litres in the tank, and the same as a percentage |
 | Fuel Consumption / Trip Fuel Consumption | L/100 km, lifetime average and current trip |
-| Trip Consumption | kWh/100 km for the current trip, next to the lifetime figure that was already exposed |
 | Mileage On Fuel / Mileage On Battery | Lifetime split of the odometer: how far the car has *ever* run on petrol vs on the battery. The two add up to the odometer, so they answer "what fraction of my driving is actually electric". Not a trip figure - for that, reset a trip meter |
 | Engine Coolant Temperature | °C |
 | Engine Speed | rpm - 0 whenever the engine is off, which on a PHEV is most of the time |
