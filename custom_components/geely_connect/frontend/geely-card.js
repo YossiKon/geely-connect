@@ -68,58 +68,64 @@
           <feGaussianBlur stdDeviation="7"/>
         </filter>
         <clipPath id="gc">
-          <path d="M162 130 C190 102 246 90 310 88 C392 85 470 96 530 116
-            C556 125 578 134 594 142 L574 146 C430 156 250 154 200 148
-            C184 146 170 138 162 130 Z"/>
+          <path d="M148 110 C168 90 228 81 320 80 C392 79 448 86 492 98
+            C508 104 520 111 528 117 L512 125 C420 133 250 135 186 131
+            C166 128 154 121 148 110 Z"/>
         </clipPath>
         <mask id="arches">
           <rect x="0" y="0" width="760" height="300" fill="#fff"/>
-          <circle cx="212" cy="222" r="54" fill="#000"/>
-          <circle cx="566" cy="222" r="54" fill="#000"/>
+          <circle cx="208" cy="222" r="55" fill="#000"/>
+          <circle cx="560" cy="222" r="55" fill="#000"/>
         </mask>
       </defs>
 
-      <ellipse class="shadow" cx="388" cy="270" rx="288" ry="12" filter="url(#soft)"/>
-      <ellipse class="glow" cx="388" cy="265" rx="268" ry="10" filter="url(#soft)"/>
+      <ellipse class="shadow" cx="384" cy="270" rx="288" ry="12" filter="url(#soft)"/>
+      <ellipse class="glow" cx="384" cy="265" rx="268" ry="10" filter="url(#soft)"/>
+
+      <path class="rail" d="M152 70 C 250 62 350 62 434 72"/>
+      <path class="spoilerlip" d="M92 98 L 118 88 L 121 95 L 96 106 Z"/>
 
       <g mask="url(#arches)">
         <path class="paint" d="
-          M112 230
-          C98 227 90 218 90 204
-          C90 180 102 148 128 118
-          C180 96 250 84 330 84
-          C430 84 500 102 560 126
-          C588 136 614 139 636 141
-          C662 144 676 158 678 176
-          C680 200 672 220 656 226
-          C640 232 616 234 590 234
+          M104 230
+          C92 227 86 218 86 206
+          C87 186 90 170 94 160
+          C97 134 103 108 112 92
+          C160 80 220 76 290 75
+          C360 74 430 76 472 84
+          C504 93 526 105 542 116
+          C552 122 560 125 568 126
+          C594 128 618 129 638 131
+          C666 135 680 148 682 168
+          C682 194 676 216 660 224
+          C644 232 618 234 592 234
           L240 234
-          C180 234 142 233 112 230 Z"/>
-        <path class="rocker" d="M272 228 L508 228 L508 234 L272 234 Z"/>
+          C176 234 136 233 104 230 Z"/>
+        <path class="rocker" d="M264 227 L510 227 L510 234 L264 234 Z"/>
       </g>
 
-      <path class="crease" d="M144 176 C 320 165 500 160 638 170"/>
+      <path class="crease" d="M138 168 C 320 158 500 154 640 164"/>
 
-      <path class="glass" d="M162 130 C190 102 246 90 310 88 C392 85 470 96 530 116
-        C556 125 578 134 594 142 L574 146 C430 156 250 154 200 148
-        C184 146 170 138 162 130 Z"/>
-      <path class="streak" clip-path="url(#gc)" d="M300 74 L 236 160 M 356 70 L 286 164"/>
+      <path class="glass" d="M148 110 C168 90 228 81 320 80 C392 79 448 86 492 98
+        C508 104 520 111 528 117 L512 125 C420 133 250 135 186 131
+        C166 128 154 121 148 110 Z"/>
+      <path class="streak" clip-path="url(#gc)" d="M280 70 L 224 146 M 332 66 L 270 150"/>
 
-      <rect class="handle" x="300" y="160" width="28" height="5" rx="2.5"/>
-      <rect class="handle" x="450" y="156" width="28" height="5" rx="2.5"/>
+      <rect class="handle" x="296" y="146" width="28" height="5" rx="2.5"/>
+      <rect class="handle" x="446" y="144" width="28" height="5" rx="2.5"/>
 
-      <path class="headlight" d="M630 141 q26 4 38 13 l-5 9 q-17-8-35-11 z"/>
-      <path class="taillight" d="M92 150 q16-3 32-3 l1 8 q-16 0-31 3 z"/>
-      <rect class="port" x="126" y="164" width="15" height="13" rx="4"/>
-      <circle class="portdot" cx="133.5" cy="170.5" r="3.2"/>
+      <path class="headlight" d="M640 137 q26 4 38 12 l-5 9 q-17-8-35-11 z"/>
+      <path class="taillight" d="M89 140 l32 2 -1 9 -32-2 z"/>
+      <rect class="port" x="122" y="156" width="15" height="13" rx="4"/>
+      <circle class="portdot" cx="129.5" cy="162.5" r="3.2"/>
 
-      <g class="wheel-g" transform="translate(212 222)">${_WHEEL}</g>
-      <g class="wheel-g" transform="translate(566 222)">${_WHEEL}</g>
+      <g class="wheel-g" transform="translate(208 222)">${_WHEEL}</g>
+      <g class="wheel-g" transform="translate(560 222)">${_WHEEL}</g>
 
-      <circle class="ind ${open.trunk ? "on" : ""}" cx="122" cy="118" r="7"/>
-      <circle class="ind ${open.rear ? "on" : ""}" cx="296" cy="146" r="7"/>
-      <circle class="ind ${open.front ? "on" : ""}" cx="448" cy="140" r="7"/>
-      <circle class="ind ${open.hood ? "on" : ""}" cx="606" cy="136" r="7"/>
+      <circle class="ind ${open.trunk ? "on" : ""}" cx="116" cy="112" r="7"/>
+      <circle class="ind ${open.rear ? "on" : ""}" cx="294" cy="140" r="7"/>
+      <circle class="ind ${open.front ? "on" : ""}" cx="446" cy="136" r="7"/>
+      <circle class="ind ${open.hood ? "on" : ""}" cx="602" cy="128" r="7"/>
     </svg>`;
 
   const _WHEEL = `
@@ -197,7 +203,8 @@
     .car .crease { stroke: rgba(255,255,255,.4); stroke-width: 1.6; fill: none; }
     .car .glass { fill: url(#gg); }
     .car .streak { stroke: rgba(255,255,255,.14); stroke-width: 7; stroke-linecap: round; }
-    .car .spoiler { stroke: rgba(0,0,0,.35); stroke-width: 3.5; stroke-linecap: round; }
+    .car .rail { stroke: rgba(0,0,0,.45); stroke-width: 5; stroke-linecap: round; fill: none; opacity: .55; }
+    .car .spoilerlip { fill: rgba(0,0,0,.5); }
     .car .pillar { stroke: rgba(0,0,0,.4); stroke-width: 4; }
     .car .mirror { fill: #6d7681; stroke: rgba(0,0,0,.2); }
     .car .handle { fill: rgba(0,0,0,.25); }
