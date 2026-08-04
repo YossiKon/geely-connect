@@ -421,10 +421,8 @@ frontend package, no resource to add, nothing to copy. Open any dashboard,
 > ℹ️ **Known issue:** on some installations the cards don't yet appear in the
 > card picker - this is [being actively worked on](https://github.com/YossiKon/geely-connect/issues/8),
 > and updates land quickly. Everything else about the integration is
-> unaffected, and the cards themselves work when added manually:
-> **Add card → Manual** → `type: custom:geely-card`. Thank you for the
-> patience - and if you'd like to help, a note on the issue with what you see
-> is always welcome.
+> unaffected. Thank you for the patience - and if you'd like to help, a note
+> on the issue with what you see is always welcome.
 
 With one Geely on the account the cards find their entities on their own.
 With several, point each card at a car:
