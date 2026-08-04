@@ -48,6 +48,24 @@ views:
             name: Time to full
             grid_options: {columns: 6}
           - type: tile
+            entity: sensor.my_geely_ex5_charging_power
+            name: Charging now
+            color: yellow
+            grid_options: {columns: 6}
+          - type: tile
+            entity: sensor.my_geely_ex5_charge_complete
+            name: Full at
+            grid_options: {columns: 6}
+          # The two legs behind the rate - what a slow charge is made of.
+          - type: tile
+            entity: sensor.my_geely_ex5_charge_voltage
+            name: Voltage
+            grid_options: {columns: 6}
+          - type: tile
+            entity: sensor.my_geely_ex5_charge_current
+            name: Current
+            grid_options: {columns: 6}
+          - type: tile
             entity: switch.my_geely_ex5_charging
             name: Charging
             grid_options: {columns: 6}

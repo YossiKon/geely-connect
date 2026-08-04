@@ -27,8 +27,10 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     PERCENTAGE,
     REVOLUTIONS_PER_MINUTE,
+    UnitOfElectricCurrent,
     UnitOfElectricPotential,
     UnitOfLength,
+    UnitOfPower,
     UnitOfPressure,
     UnitOfSpeed,
     UnitOfTemperature,
@@ -264,9 +266,98 @@ def _coerce(v: Any, kind: str, value_map: dict | None = None) -> Any:
     return v
 
 
+# How many decimals a reading is worth showing, keyed by what it measures.
+#
+# Not cosmetic. Without it, a constant 15.38 km/kWh graphs as a spike between
+# 15.379999999999999 and 15.380000000000003: the value itself is rounded, but
+# Home Assistant's 5-minute statistics take a float mean, and summing N copies
+# of 15.38 lands a few ulps off. The chart then auto-scales to that 1-ulp range
+# and prints the full repr on the axis. Rounding harder in native_value cannot
+# fix it - the noise is introduced downstream of us - but a display precision
+# is applied to statistics too, so it is the only lever that works.
+#
+# Keyed by unit rather than per class, because precision is a property of the
+# quantity, not of the entity that happens to report it - and because every
+# sensor here already declares a unit, so there is nothing new to keep in sync.
+_PRECISION_BY_UNIT: dict[str, int] = {
+    PERCENTAGE: 0,                            # 71 % fuel, not 71.0 %
+    UnitOfLength.KILOMETERS: 1,               # odometers read x.x; ranges are ints (see below)
+    UnitOfTemperature.CELSIUS: 1,
+    UnitOfSpeed.KILOMETERS_PER_HOUR: 0,
+    UnitOfElectricPotential.VOLT: 1,          # 12 V battery health lives in the first decimal
+    UnitOfElectricCurrent.AMPERE: 1,
+    UnitOfPower.KILO_WATT: 2,                 # 7.68 kW - the second decimal is ~10 W, still real
+    UnitOfVolume.LITERS: 1,
+    REVOLUTIONS_PER_MINUTE: 0,
+    UnitOfTime.HOURS: 0,
+    "kWh/100km": 1,
+    "L/100km": 1,
+    "km/kWh": 2,
+    "min": 0,
+    "d": 0,
+}
+
+# Pressures are not listed above on purpose: _PRESSURE_FROM_KPA already declares
+# how many decimals each pressure unit deserves, right next to its conversion
+# factor. Restating them here would be a second answer to one question, and the
+# copy would only cover kPa - which is exactly how the psi and bar installs
+# ended up with no precision at all.
+_PRECISION_BY_UNIT.update({
+    _PRESSURE_UNIT_TO_HA[name]: digits
+    for name, (_factor, digits) in _PRESSURE_FROM_KPA.items()
+})
+
+
+def _display_precision(unit: str | None, kind: str) -> int | None:
+    """Decimals to display for a reading in `unit` produced by coercion `kind`.
+
+    `kind` refines the unit because one unit can carry two precisions: an
+    odometer and a remaining range are both km, but the first arrives as 96.0
+    and the second as a whole number. An int coercion cannot produce a decimal,
+    so showing one would invent precision the car never sent.
+
+    Returns None for a unitless reading - the mapped string states. Giving one a
+    precision would make Home Assistant demand a numeric state and raise on
+    "Disconnected".
+    """
+    if unit is None:
+        return None
+    if kind == "int":
+        return 0
+    return _PRECISION_BY_UNIT.get(unit)
+
+
+class _AutoPrecision(SensorEntity):
+    """Derives display precision from the unit the entity already declares.
+
+    Mixed into every numeric sensor here so the rule lives once. The
+    alternative - `_attr_suggested_display_precision` on each class - is the
+    same decision restated a dozen times, and the copies drift: the one class
+    somebody forgets is the one whose graph shows float noise.
+
+    Home Assistant looks this up through a property, so computing it costs
+    nothing at construction and needs no ordering against unit assignment.
+    """
+
+    #: The same coercion kind `_coerce` takes - the spec-driven sensor sets it
+    #: from its spec row, and a derived sensor declares it. "int" on a whole
+    #: number keeps a km reading from being shown as "136.0 km".
+    _value_kind: str = "float"
+
+    @property
+    def suggested_display_precision(self) -> int | None:
+        return _display_precision(
+            self.native_unit_of_measurement, self._value_kind)
+
+
 # Paths already covered by a curated sensor above - skip them in the dynamic
 # full-exposure pass so we don't create duplicates.
 _CURATED_PATHS: set[str] = {".".join(spec[2]) for spec in (*SENSOR_SPECS, *HYBRID_SPECS)}
+# Paths no spec row names, because a computed sensor above owns them. Without
+# this, turning on full exposure hands back a raw twin of each - the duplication
+# that pass exists to avoid.
+_CURATED_PATHS |= {".".join((*_EV, k)) for k in
+                   ("chargeUAct", "chargeIAct", "dcChargeUAct", "dcChargeIAct")}
 
 
 _MAX_FLATTEN_DEPTH = 12   # deeper than any real status payload nests
@@ -337,6 +428,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
         GeelyFullRangeSensor(coordinator, vin, device_name),
         GeelyLastTripSensor(coordinator, vin, device_name),
         GeelyTripInProgressSensor(coordinator, vin, device_name),
+        # Charging: the car sends volts and amps but never their product, so
+        # "how fast is it charging" has no entity without these. Not gated on
+        # propulsion - every plug-in Geely charges, and a car with no charge
+        # telemetry reports unknown rather than a wrong zero.
+        GeelyChargePowerSensor(coordinator, vin, device_name),
+        GeelyChargeCurrentSensor(coordinator, vin, device_name),
+        GeelyChargeVoltageSensor(coordinator, vin, device_name),
         *(GeelyTireSensor(coordinator, vin, device_name, key, name, path,
                           pressure_unit)
           for key, name, path in _TIRE_CORNERS),
@@ -374,7 +472,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
     entry.async_on_unload(coordinator.async_add_listener(_discover_and_add))
 
 
-class GeelySensor(CoordinatorEntity, SensorEntity):
+class GeelySensor(CoordinatorEntity, _AutoPrecision):
     _attr_has_entity_name = True
 
     def __init__(self, coordinator, vin: str, device_name: str,
@@ -385,7 +483,7 @@ class GeelySensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._key = key
         self._path = path
-        self._kind = kind
+        self._value_kind = kind
         self._value_map = value_map
         self._pressure_unit = pressure_unit
         self._attr_unique_id = f"geely_{vin}_{key}"
@@ -423,7 +521,7 @@ class GeelySensor(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self) -> Any:
         v = _walk(self.coordinator.data or {}, self._path)
-        val = _coerce(v, self._kind, self._value_map)
+        val = _coerce(v, self._value_kind, self._value_map)
         # Tire pressure stays in its native kPa here; Home Assistant converts
         # it to the unit chosen at setup. Converting it ourselves as well
         # would apply the factor twice.
@@ -493,7 +591,7 @@ class GeelyRawSensor(CoordinatorEntity, SensorEntity):
 # ---------------------------------------------------------------------------
 
 
-class GeelyEfficiencySensor(CoordinatorEntity, SensorEntity):
+class GeelyEfficiencySensor(CoordinatorEntity, _AutoPrecision):
     """Driving efficiency in km per kWh, derived from average consumption
     (server reports kWh/100km)."""
 
@@ -586,13 +684,14 @@ class GeelyChargeCompleteSensor(CoordinatorEntity, SensorEntity):
         return done.replace(second=0, microsecond=0)
 
 
-class GeelyFullRangeSensor(CoordinatorEntity, SensorEntity):
+class GeelyFullRangeSensor(CoordinatorEntity, _AutoPrecision):
     """Range the car would show on a full battery, at the current efficiency.
 
     Remaining range on its own says nothing about whether the pack is ageing or
     the weather is costing you; extrapolated to 100% it is comparable week to
     week. Unknown below 10% charge, where the estimate is mostly noise."""
 
+    _value_kind = "int"
     _attr_has_entity_name = True
     _attr_device_class = SensorDeviceClass.DISTANCE
     _attr_native_unit_of_measurement = UnitOfLength.KILOMETERS
@@ -637,9 +736,10 @@ def _fuel_range_km(data: dict) -> float | None:
     return litres / per_100 * 100.0
 
 
-class GeelyFuelRangeSensor(CoordinatorEntity, SensorEntity):
+class GeelyFuelRangeSensor(CoordinatorEntity, _AutoPrecision):
     """How far the fuel in the tank goes, since the car will not say."""
 
+    _value_kind = "int"
     _attr_has_entity_name = True
     _attr_device_class = SensorDeviceClass.DISTANCE
     _attr_native_unit_of_measurement = UnitOfLength.KILOMETERS
@@ -659,7 +759,7 @@ class GeelyFuelRangeSensor(CoordinatorEntity, SensorEntity):
         return None if km is None else round(km)
 
 
-class GeelyCombinedRangeSensor(CoordinatorEntity, SensorEntity):
+class GeelyCombinedRangeSensor(CoordinatorEntity, _AutoPrecision):
     """Total distance available on both energy sources.
 
     Not a restatement of the electric and fuel ranges sitting beside it: it is
@@ -667,6 +767,7 @@ class GeelyCombinedRangeSensor(CoordinatorEntity, SensorEntity):
     answers that alone. Unknown unless both halves are known, because a total
     that silently omits one is worse than no total."""
 
+    _value_kind = "int"
     _attr_has_entity_name = True
     _attr_device_class = SensorDeviceClass.DISTANCE
     _attr_native_unit_of_measurement = UnitOfLength.KILOMETERS
@@ -695,7 +796,122 @@ class GeelyCombinedRangeSensor(CoordinatorEntity, SensorEntity):
         return round(fuel + electric)
 
 
-class GeelyTireSensor(CoordinatorEntity, SensorEntity):
+def _charge_leg(data: dict) -> tuple[float, float] | None:
+    """The volts and amps of whichever charge leg is actually delivering power.
+
+    The car reports two independent pairs - AC (`chargeUAct` / `chargeIAct`) and
+    DC (`dcChargeUAct` / `dcChargeIAct`) - and never says which one is in use.
+    Neither half of a pair can decide it alone:
+
+    * Voltage cannot: `dcChargeUAct` reports the pack voltage - 349 V on the
+      test car - while parked and unplugged, so the DC leg would always win.
+    * Current cannot either. Measured on a plugged-in, not-charging car, the AC
+      leg reads 0.2 A at 0.0 V: a sense current with no voltage behind it. A
+      "first leg with current" rule picks that, so a DC fast charge alongside
+      the same 0.2 A of AC noise would have reported 0 kW.
+
+    So pick the leg with the larger product, which neither a phantom voltage nor
+    a phantom current can win. Ties at zero fall back to the AC pair, so a
+    parked car reads 0 kW rather than unknown - a gap in a power graph is
+    indistinguishable from a failed poll. None only when the fields are absent.
+
+    One resolver for all three charge sensors: split across them, power could
+    report the DC leg while current reported the AC one.
+    """
+    def pair(u_key: str, i_key: str) -> tuple[float, float] | None:
+        try:
+            return (float(_walk(data, (*_EV, u_key))),
+                    float(_walk(data, (*_EV, i_key))))
+        except (TypeError, ValueError):
+            return None
+
+    ac = pair("chargeUAct", "chargeIAct")
+    dc = pair("dcChargeUAct", "dcChargeIAct")
+    live = [leg for leg in (ac, dc) if leg is not None and leg[0] > 0 and leg[1] > 0]
+    if live:
+        return max(live, key=lambda leg: leg[0] * leg[1])
+    return ac if ac is not None else dc
+
+
+class GeelyChargePowerSensor(CoordinatorEntity, _AutoPrecision):
+    """How fast the car is actually charging, in kW.
+
+    Not reported by the car: it sends volts and amps and leaves the product to
+    the client. Worth having as a real power entity rather than a template,
+    because it is what tells you a charge is crawling at 2 kW on a shared
+    circuit instead of the 7 kW you expected, and with device_class power it
+    feeds the energy dashboard and long-term statistics.
+    """
+
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_native_unit_of_measurement = UnitOfPower.KILO_WATT
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:lightning-bolt"
+
+    def __init__(self, coordinator, vin: str, device_name: str) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"geely_{vin}_charge_power"
+        self._attr_name = "Charging Power"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, vin)}, manufacturer="Geely", name=device_name)
+
+    @property
+    def native_value(self):
+        leg = _charge_leg(self.coordinator.data or {})
+        if leg is None:
+            return None
+        volts, amps = leg
+        if volts <= 0 or amps <= 0:
+            return 0.0
+        return round(volts * amps / 1000.0, 2)
+
+
+class GeelyChargeCurrentSensor(CoordinatorEntity, _AutoPrecision):
+    """Amps into the car - diagnostic, and the half that explains a slow charge."""
+
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.CURRENT
+    _attr_native_unit_of_measurement = UnitOfElectricCurrent.AMPERE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator, vin: str, device_name: str) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"geely_{vin}_charge_current"
+        self._attr_name = "Charge Current"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, vin)}, manufacturer="Geely", name=device_name)
+
+    @property
+    def native_value(self):
+        leg = _charge_leg(self.coordinator.data or {})
+        return None if leg is None else round(leg[1], 1)
+
+
+class GeelyChargeVoltageSensor(CoordinatorEntity, _AutoPrecision):
+    """Volts at the charge port - diagnostic, the other half of the power."""
+
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.VOLTAGE
+    _attr_native_unit_of_measurement = UnitOfElectricPotential.VOLT
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator, vin: str, device_name: str) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"geely_{vin}_charge_voltage"
+        self._attr_name = "Charge Voltage"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, vin)}, manufacturer="Geely", name=device_name)
+
+    @property
+    def native_value(self):
+        leg = _charge_leg(self.coordinator.data or {})
+        return None if leg is None else round(leg[0], 1)
+
+
+class GeelyTireSensor(CoordinatorEntity, _AutoPrecision):
     """A tire pressure already converted to the unit picked at setup.
 
     The four "Tire Pressure FL/FR/RL/RR" sensors carry
@@ -780,7 +996,7 @@ def _odometer(data: dict) -> float | None:
     return km if km > 0 else None
 
 
-class _GeelyTripBase(CoordinatorEntity, RestoreSensor):
+class _GeelyTripBase(CoordinatorEntity, _AutoPrecision, RestoreSensor):
     """Shared bookkeeping for the two trip sensors.
 
     The car's own tripMeter1 is the trip meter A on the dash - the driver

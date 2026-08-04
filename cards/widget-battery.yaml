@@ -3,7 +3,8 @@
 #
 #  What it is : a narrow, one-column widget - battery gauge with colour
 #               bands, electric range, the charging switch, and the
-#               time-to-full tile that appears only while charging.
+#               time-to-full and charge-rate tiles that appear only
+#               while charging.
 #               Sized for a sidebar / phone column.
 #
 #  Where to paste : open your dashboard -> Edit dashboard ->
@@ -73,3 +74,17 @@ cards:
       name: Time to full
       icon: mdi:battery-clock
       color: green
+
+  # How fast, next to how long. The car never sends the product of volts
+  # and amps, so this sensor is the only place the rate exists.
+  - type: conditional
+    conditions:
+      - condition: state
+        entity: sensor.my_geely_ex5_charger_connection
+        state: Charging
+    card:
+      type: tile
+      entity: sensor.my_geely_ex5_charging_power
+      name: Charging now
+      icon: mdi:lightning-bolt
+      color: yellow

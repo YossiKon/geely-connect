@@ -23,10 +23,10 @@ polished setup on top.
 ## ✨ Highlights
 
 - 🔒 **Security-first** - verified TLS plus public-key pinning.
-- 📊 **Everything enabled** - all 62 entities are on from the start (75 on a
+- 📊 **Everything enabled** - all 65 entities are on from the start (78 on a
   hybrid), no duplicates, nothing to switch on by hand.
-- 🧮 **Computed extras** - charge completion time, range at full charge and
-  efficiency, none of which the car reports itself.
+- 🧮 **Computed extras** - charging power, charge completion time, range at full
+  charge and efficiency, none of which the car reports itself.
 - ⛽ **Hybrids and PHEVs** - fuel level and range, engine state, oil and coolant,
   the tank flap, and the lifetime split between petrol and battery kilometres,
   all added automatically when the car has a tank.
@@ -117,6 +117,8 @@ Location (device tracker) - GPS position on the map, with altitude.
 |---|---|
 | **Efficiency** | km per kWh, derived from average consumption |
 | **Charge Complete** | When charging finishes, as a time rather than a minute count - so a notification can fire on it |
+| **Charging Power** | How fast the car is charging, in kW. The car reports volts and amps but never their product, so this is the only place the charge rate exists. A real `power` entity, so it records long-term statistics and can be graphed alongside your house load |
+| **Charge Voltage** / **Charge Current** | The two halves behind that number (diagnostic). Worth a look when a charge is slower than expected - a derated circuit shows up as low current, not low voltage. The car sends an AC and a DC pair and never says which is live; whichever is carrying current wins, because the DC pair reports pack voltage even while parked |
 | **Range At Full Charge** | Remaining range extrapolated to 100% at the current efficiency, so it's comparable week to week. Blank below 10% charge, where the estimate is mostly noise |
 | **Last Trip** | How far the last completed journey went, worked out from the odometer between engine-on and engine-off |
 | **Trip In Progress** | How far the current journey has gone; 0 when parked |
@@ -388,7 +390,7 @@ A **card** starts with `type:` and is added via
 built-in only:
 
 - **`cards/widget-battery.yaml`** - battery gauge with colour bands, range,
-  charging switch, time-to-full while charging.
+  charging switch, time-to-full and charge rate while charging.
 - **`cards/widget-climate.yaml`** - thermostat, temperatures, defrost, G-Clean
   and the seat heat/vent selects.
 - **`cards/widget-security.yaml`** - lock, every door/trunk/hood at a glance, and
@@ -427,8 +429,9 @@ views already there.
 
 - **`views/view-car.yaml`** - the car at a glance: key numbers, lock and climate
   controls, every opening, quick actions, and a map.
-- **`views/view-charging.yaml`** - battery gauge, charge complete, range at full
-  charge, scheduled charging, and a week of battery history.
+- **`views/view-charging.yaml`** - battery gauge, the live charge rate with its
+  volts and amps, charge complete, range at full charge, scheduled charging,
+  and a week of battery history.
 - **`views/view-mobile.yaml`** - single column with big touch targets, for a
   phone.
 
@@ -461,7 +464,8 @@ A **dashboard** starts with `title:` / `views:` and is pasted via
   using only built-in cards. No HACS needed.
 
 > Any entity your car doesn't report shows as "unavailable" - just delete that
-> tile.
+> tile. The fuel, engine and electric-vs-petrol sections are the exception:
+> they hide themselves on a battery-only car, so leave them alone either way.
 
 ---
 
@@ -619,7 +623,7 @@ enabling. Everything the car reports, plus the computed extras above.
 
 The one thing that varies by car is propulsion: the thirteen fuel and engine
 entities are created only for a car with a tank, so a battery-electric EX5 gets
-62 entities and a PHEV gets 75. That's a decision made once at startup from your
+65 entities and a PHEV gets 78. That's a decision made once at startup from your
 account's `powerType` plus the car's own telemetry - there is no option to set.
 
 The only thing not created is the raw full-exposure pass (see below), because
