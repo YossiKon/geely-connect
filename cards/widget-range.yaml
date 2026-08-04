@@ -32,7 +32,7 @@ cards:
   # Heading badges need Home Assistant 2024.11 or newer - on older
   # versions delete the "badges:" block, the rest still works.
   - type: heading
-    heading: Range &amp; health
+    heading: Range & health
     heading_style: title
     icon: mdi:map-marker-distance
     badges:
