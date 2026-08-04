@@ -13,11 +13,13 @@
  *   type: custom:geely-card
  *   prefix: my_geely_ex5     # the entity slug, e.g. sensor.<prefix>_battery
  *
- * Design language: automotive instrument cluster. Ultra-light oversized
+ * Design language: automotive instrument cluster. A painted generic-EV
+ * illustration (drawn inline - no external assets), ultra-light oversized
  * numerals, letter-spaced micro-labels, hairline dividers, one electric
  * accent that follows the car's state (teal while charging, amber on
- * warnings). Destructive actions (unlock, trunk) arm on first tap and fire
- * on the second, so a stray touch on a wall tablet cannot open the car.
+ * warnings). Open doors light amber markers on the car itself. Destructive
+ * actions (unlock, trunk) arm on first tap and fire on the second, so a
+ * stray touch on a wall tablet cannot open the car.
  */
 "use strict";
 
@@ -39,32 +41,133 @@
       "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
     }[c]));
 
-  /* A clean generic EV side profile - drawn here, no external assets. */
-  const CAR_SVG = (cls) => `
-    <svg class="car ${cls}" viewBox="0 0 720 240" fill="none" aria-hidden="true">
-      <path class="body" d="M78 178c-20-2-34-10-36-26-2-14 4-24 18-30 10-40 34-64 92-72 64-9 148-10 216 2 40 7 74 24 100 48 56 6 96 16 118 30 12 8 16 18 12 30-3 10-12 16-26 18l-36 2"/>
-      <path class="glass" d="M170 62c50-14 150-16 224-4 26 4 52 16 74 34l-118 4c-40 1-98 0-132-4-22-3-40-12-48-30z"/>
-      <line class="hair" x1="288" y1="64" x2="286" y2="100"/>
-      <circle class="wheel" cx="182" cy="182" r="40"/>
-      <circle class="wheel" cx="548" cy="182" r="40"/>
-      <circle class="hub" cx="182" cy="182" r="14"/>
-      <circle class="hub" cx="548" cy="182" r="14"/>
-      <path class="ground" d="M96 226h530"/>
+  /* --------------------------------------------------------- the car ----- */
+  /* A generic electric crossover, side profile, drawn here - painted body,
+   * glass band with a reflection streak, aero wheels, LED lamps, a charge
+   * port that lights while charging, and amber indicator dots over the
+   * hood / doors / trunk that appear when something is open.
+   * Gradient ids are safe: each card lives in its own shadow root. */
+  const CAR_SVG = (cls, open = {}) => `
+    <svg class="car ${cls}" viewBox="0 0 760 300" fill="none" aria-hidden="true">
+      <defs>
+        <linearGradient id="gp" x1="0" y1="90" x2="0" y2="250" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stop-color="#d7dce2"/>
+          <stop offset=".45" stop-color="#aab2bc"/>
+          <stop offset=".8" stop-color="#848d98"/>
+          <stop offset="1" stop-color="#6d7681"/>
+        </linearGradient>
+        <linearGradient id="gg" x1="0" y1="100" x2="0" y2="150" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stop-color="#3d4653"/>
+          <stop offset="1" stop-color="#1c222b"/>
+        </linearGradient>
+        <linearGradient id="gr" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stop-color="#e7ebef"/>
+          <stop offset="1" stop-color="#b9c0c8"/>
+        </linearGradient>
+        <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
+          <feGaussianBlur stdDeviation="7"/>
+        </filter>
+        <clipPath id="gc">
+          <path d="M180 140 C190 114 214 102 250 96 C310 88 380 88 428 96
+            C460 102 486 112 502 124 L486 130 C400 140 260 142 214 142
+            C200 142 188 141 180 140 Z"/>
+        </clipPath>
+        <mask id="arches">
+          <rect x="0" y="0" width="760" height="300" fill="#fff"/>
+          <circle cx="218" cy="224" r="53" fill="#000"/>
+          <circle cx="556" cy="224" r="53" fill="#000"/>
+        </mask>
+      </defs>
+
+      <ellipse class="shadow" cx="388" cy="270" rx="280" ry="12" filter="url(#soft)"/>
+      <ellipse class="glow" cx="388" cy="265" rx="262" ry="10" filter="url(#soft)"/>
+
+      <g mask="url(#arches)">
+        <path class="paint" d="
+          M96 208
+          C94 186 100 164 116 150
+          C122 118 140 104 172 96
+          C240 78 330 76 396 82
+          C446 86 484 98 512 116
+          C542 130 570 138 600 146
+          C636 152 658 162 664 182
+          C668 198 664 214 650 220
+          C600 230 560 232 520 232
+          L240 232
+          C180 232 130 228 112 222
+          C100 218 97 214 96 208 Z"/>
+        <path class="rocker" d="M276 226 L500 226 L500 232 L276 232 Z"/>
+      </g>
+
+      <path class="crease" d="M150 182 C 320 172 500 168 636 176"/>
+
+      <path class="glass" d="M180 140 C190 114 214 102 250 96 C310 88 380 88 428 96
+        C460 102 486 112 502 124 L486 130 C400 140 260 142 214 142
+        C200 142 188 141 180 140 Z"/>
+      <path class="streak" clip-path="url(#gc)" d="M262 76 L 204 156 M 312 72 L 248 160"/>
+      <line class="pillar" x1="352" y1="90" x2="348" y2="138"/>
+
+      <path class="hoodline" d="M508 128 C560 138 612 146 650 160"/>
+      <path class="mirror" d="M496 122 l16-4 4 8 -12 6 z"/>
+      <rect class="handle" x="308" y="158" width="28" height="5" rx="2.5"/>
+      <rect class="handle" x="452" y="154" width="28" height="5" rx="2.5"/>
+
+      <path class="headlight" d="M600 150 q30 5 44 16 l-5 9 q-20-9-41-13 z"/>
+      <path class="taillight" d="M102 158 q-4 9-3 18 l11 2 q-1-11 2-20 z"/>
+      <rect class="port" x="142" y="164" width="15" height="13" rx="4"/>
+      <circle class="portdot" cx="149.5" cy="170.5" r="3.2"/>
+
+      <g class="wheel-g" transform="translate(218 224)">${_WHEEL}</g>
+      <g class="wheel-g" transform="translate(556 224)">${_WHEEL}</g>
+
+      <circle class="ind ${open.trunk ? "on" : ""}" cx="130" cy="120" r="7"/>
+      <circle class="ind ${open.rear ? "on" : ""}" cx="296" cy="146" r="7"/>
+      <circle class="ind ${open.front ? "on" : ""}" cx="444" cy="140" r="7"/>
+      <circle class="ind ${open.hood ? "on" : ""}" cx="592" cy="132" r="7"/>
     </svg>`;
 
+  const _WHEEL = `
+      <circle class="tire" r="46"/>
+      <circle class="rim" r="28" fill="url(#gr)"/>
+      <circle class="disc" r="18"/>
+      <circle class="hubcap" r="5.5"/>`;
+
+  /* ----------------------------------------------------------- icons ----- */
+  /* One cohesive hand-drawn stroke set - 24px grid, 1.8 stroke, round caps. */
+
   const ICONS = {
-    lock: "M12 17a2 2 0 0 0 2-2 2 2 0 0 0-2-2 2 2 0 0 0-2 2 2 2 0 0 0 2 2m6-9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2h1V6a5 5 0 0 1 5-5 5 5 0 0 1 5 5v2h1m-6-5a3 3 0 0 0-3 3v2h6V6a3 3 0 0 0-3-3z",
-    unlock: "M12 17a2 2 0 0 0 2-2 2 2 0 0 0-2-2 2 2 0 0 0-2 2 2 2 0 0 0 2 2m6-9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2h9V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3H7a5 5 0 0 1 5-5 5 5 0 0 1 5 5v2h1z",
-    climate: "M6.59 0.66c2.34-1.81 4.88.4 5.45 3.84.43 2.54-.42 4.72-2.04 5.5 1.63.78 2.47 2.96 2.04 5.5-.57 3.44-3.11 5.65-5.45 3.84C4.25 17.53 4 14.16 4 10S4.25 2.47 6.59.66M12 10c0-1.47.5-4.13 1.63-6.1a7.98 7.98 0 0 1 6.32 6.19c-2.02.35-4.5.35-5.95-.09zm7.95 2.08a7.98 7.98 0 0 1-6.32 6.19C12.5 16.3 12 13.5 12 12l2-.17c1.45.44 3.93.6 5.95.25z",
-    defrost: "M7 20a1 1 0 0 1-1 1 1 1 0 0 1-1-1c0-1.5 1.5-2.5 1.5-4S5 13.5 5 12s1.5-2.5 1.5-4S5 5.5 5 4a1 1 0 0 1 1-1 1 1 0 0 1 1 1c0 1.5-1.5 2.5-1.5 4S7 10.5 7 12s-1.5 2.5-1.5 4S7 18.5 7 20m6 0a1 1 0 0 1-1 1 1 1 0 0 1-1-1c0-1.5 1.5-2.5 1.5-4s-1.5-2.5-1.5-4 1.5-2.5 1.5-4S11 5.5 11 4a1 1 0 0 1 1-1 1 1 0 0 1 1 1c0 1.5-1.5 2.5-1.5 4s1.5 2.5 1.5 4-1.5 2.5-1.5 4 1.5 2.5 1.5 4m6 0a1 1 0 0 1-1 1 1 1 0 0 1-1-1c0-1.5 1.5-2.5 1.5-4s-1.5-2.5-1.5-4 1.5-2.5 1.5-4S17 5.5 17 4a1 1 0 0 1 1-1 1 1 0 0 1 1 1c0 1.5-1.5 2.5-1.5 4s1.5 2.5 1.5 4-1.5 2.5-1.5 4 1.5 2.5 1.5 4",
-    trunk: "M3 13v7h2v-2h14v2h2v-7L19 5H5l-2 8m4.5-6H12v4H6l1.5-4M14 7h3.5l1.5 4h-5V7z",
-    vent: "M4 5h16v2H4V5m0 4h16v2H4V9m8 4 4 4h-3v4h-2v-4H8l4-4z",
-    find: "M12 4a8 8 0 0 1 8 8c0 3.5-2.3 6.5-5.5 7.6L12 22l-2.5-2.4A8.01 8.01 0 0 1 4 12a8 8 0 0 1 8-8m0 3a5 5 0 0 0-5 5 5 5 0 0 0 5 5 5 5 0 0 0 5-5 5 5 0 0 0-5-5m0 2a3 3 0 0 1 3 3 3 3 0 0 1-3 3 3 3 0 0 1-3-3 3 3 0 0 1 3-3z",
-    refresh: "M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 0 0-8 8 8 8 0 0 0 8 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18a6 6 0 0 1-6-6 6 6 0 0 1 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z",
-    bolt: "M11 15H6l7-14v8h5l-7 14v-8z",
+    lock: `<rect x="5" y="10.5" width="14" height="9.5" rx="2.5"/>
+           <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/><circle cx="12" cy="15.2" r="1.4"/>`,
+    unlock: `<rect x="5" y="10.5" width="14" height="9.5" rx="2.5"/>
+             <path d="M16 10.5V7.5a4 4 0 0 0-7.6-1.7"/><circle cx="12" cy="15.2" r="1.4"/>`,
+    climate: `<circle cx="12" cy="12" r="1.9"/>
+              <path d="M12 9.7C12 6.6 10.9 4.6 8.9 4.8 7.2 5 6.9 7 8.3 8.3c.9.9 2.2 1.3 3.7 1.4z"/>
+              <path d="M12 9.7C12 6.6 10.9 4.6 8.9 4.8 7.2 5 6.9 7 8.3 8.3c.9.9 2.2 1.3 3.7 1.4z" transform="rotate(120 12 12)"/>
+              <path d="M12 9.7C12 6.6 10.9 4.6 8.9 4.8 7.2 5 6.9 7 8.3 8.3c.9.9 2.2 1.3 3.7 1.4z" transform="rotate(240 12 12)"/>`,
+    defrost: `<path d="M4.5 12.5c0-4.5 3.4-7.5 7.5-7.5s7.5 3 7.5 7.5"/>
+              <path d="M8.3 12c-1 2-1 3.5 0 5.5M12 12c-1 2-1 3.5 0 5.5M15.7 12c-1 2-1 3.5 0 5.5"/>`,
+    vent: `<rect x="4.5" y="5" width="15" height="12" rx="2"/>
+           <path d="M4.5 9.5h15M12 21v-6.2M9.6 17.2 12 14.8l2.4 2.4"/>`,
+    trunk: `<path d="M4.5 19v-6l3-2h9l3 3v5"/><path d="M4.5 16h15"/>
+            <path d="M7.5 11 12 4.8l7 3.2"/><circle cx="16.5" cy="18" r="0"/>`,
+    find: `<path d="M12 20.5s-6-5.1-6-9.5a6 6 0 0 1 12 0c0 4.4-6 9.5-6 9.5z"/>
+           <circle cx="12" cy="10.8" r="2.2"/>`,
+    refresh: `<path d="M18.6 9A7 7 0 1 0 19 13"/><path d="M19.2 4.6V9h-4.4"/>`,
+    bolt: `<path d="M12.8 3.5 6.5 13h4l-1.3 7.5L15.5 11h-4z"/>`,
+    charge: `<path d="M7 20v-9.5a5 5 0 0 1 10 0V20"/><path d="M9.5 6V3.5M14.5 6V3.5"/>
+             <path d="M12.7 11.5 10.4 15h3.2l-2.3 3.5"/>`,
+    tire: `<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.2"/>
+           <path d="M12 4v2.6M12 17.4V20M4 12h2.6M17.4 12H20"/>`,
+    trip: `<path d="M5 19c6 0 3-7 9-7 4.5 0 3.5-5.5 5-7"/>
+           <circle cx="5" cy="19" r="1.6"/><circle cx="19" cy="5" r="1.6"/>`,
+    fuel: `<path d="M5.5 20V6a2 2 0 0 1 2-2h5a2 2 0 0 1 2 2v14"/><path d="M4 20h10.5"/>
+           <path d="M14.5 10h2l2 2v5a1.5 1.5 0 0 1-3 0v-7.5"/><path d="M6.5 7h5v4h-5z"/>`,
   };
   const icon = (name) =>
-    `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="${ICONS[name]}"/></svg>`;
+    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+          stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`;
+  const iconFilled = (name) =>
+    `<svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true">${ICONS[name]}</svg>`;
 
   const BASE_CSS = `
     :host { display: block; }
@@ -84,17 +187,37 @@
     .micro {
       font-size: 10px; font-weight: 600; letter-spacing: .18em;
       text-transform: uppercase; color: var(--secondary-text-color, #7a7f87);
+      display: flex; align-items: center; gap: 6px;
     }
+    .micro svg { width: 13px; height: 13px; opacity: .8; }
     .hairline { border: 0; border-top: 1px solid var(--divider-color, rgba(120,130,140,.18)); margin: 14px 0 12px; }
     .num { font-weight: 200; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; line-height: 1; }
+
     .car { width: 100%; height: auto; display: block; }
-    .car .body { stroke: currentColor; stroke-width: 5; stroke-linecap: round; opacity: .85; }
-    .car .glass { stroke: currentColor; stroke-width: 3.5; opacity: .35; }
-    .car .hair  { stroke: currentColor; stroke-width: 2.5; opacity: .3; }
-    .car .wheel { stroke: currentColor; stroke-width: 5; opacity: .85; }
-    .car .hub   { stroke: currentColor; stroke-width: 3; opacity: .45; }
-    .car .ground{ stroke: currentColor; stroke-width: 2; opacity: .12; stroke-dasharray: 2 10; stroke-linecap: round; }
-    .car.charging .body, .car.charging .wheel { stroke: ${ACCENT}; filter: drop-shadow(0 0 6px color-mix(in srgb, ${ACCENT} 55%, transparent)); }
+    .car .shadow { fill: rgba(0,0,0,.28); }
+    .car .glow { fill: transparent; transition: fill .5s ease; }
+    .car .paint { fill: var(--geely-car-paint, url(#gp)); stroke: rgba(0,0,0,.18); stroke-width: 1.5; }
+    .car .rocker { fill: rgba(0,0,0,.18); }
+    .car .crease { stroke: rgba(255,255,255,.4); stroke-width: 1.6; fill: none; }
+    .car .glass { fill: url(#gg); }
+    .car .streak { stroke: rgba(255,255,255,.14); stroke-width: 7; stroke-linecap: round; }
+    .car .hoodline { stroke: rgba(0,0,0,.14); stroke-width: 2; fill: none; }
+    .car .pillar { stroke: rgba(0,0,0,.4); stroke-width: 4; }
+    .car .mirror { fill: #6d7681; stroke: rgba(0,0,0,.2); }
+    .car .handle { fill: rgba(0,0,0,.25); }
+    .car .headlight { fill: #eef4fa; stroke: rgba(0,0,0,.12); }
+    .car .taillight { fill: #d05252; opacity: .9; }
+    .car .port { fill: rgba(0,0,0,.22); }
+    .car .portdot { fill: rgba(255,255,255,.35); transition: fill .3s ease; }
+    .car .tire { fill: #20242a; }
+    .car .disc { fill: none; stroke: #4a525b; stroke-width: 9; }
+    .car .hubcap { fill: #cfd5db; }
+    .car .ind { fill: ${AMBER}; opacity: 0; transition: opacity .3s ease; }
+    .car .ind.on { opacity: 1; animation: geely-blink 1.4s ease infinite; }
+    @keyframes geely-blink { 50% { opacity: .35; } }
+    .car.charging .glow { fill: color-mix(in srgb, ${ACCENT} 38%, transparent); }
+    .car.charging .portdot { fill: ${ACCENT}; filter: drop-shadow(0 0 4px ${ACCENT}); }
+
     .chips { display: flex; flex-wrap: wrap; gap: 6px; }
     .chip {
       display: inline-flex; align-items: center; gap: 5px;
@@ -102,6 +225,7 @@
       border: 1px solid var(--divider-color, rgba(120,130,140,.25));
       color: var(--secondary-text-color, #7a7f87); white-space: nowrap;
     }
+    .chip svg { width: 12px; height: 12px; }
     .chip.on { color: ${ACCENT}; border-color: color-mix(in srgb, ${ACCENT} 45%, transparent); }
     .chip.warn { color: ${AMBER}; border-color: color-mix(in srgb, ${AMBER} 45%, transparent); }
     .actions { display: flex; gap: 8px; justify-content: space-between; }
@@ -252,6 +376,16 @@
                 title="${esc(opts.title || label)}">${icon(ic)}<span>${esc(text)}</span></button>`;
     }
 
+    _openMap() {
+      const on = (d) => { const st = this._st(`binary_sensor.${d}`); return st && st.state === "on"; };
+      return {
+        hood: on("hood"),
+        front: on("door_driver") || on("door_passenger"),
+        rear: on("door_rear_left") || on("door_rear_right"),
+        trunk: on("trunk"),
+      };
+    }
+
     _carState() {
       const conn = this._st("sensor.charger_connection");
       const charging = conn && conn.state === "Charging";
@@ -311,7 +445,7 @@
       const chips = [
         s.locked && `<span class="chip ${s.locked.state === "locked" ? "" : "warn"}">
             ${s.locked.state === "locked" ? "Locked" : "Unlocked"}</span>`,
-        s.charging && `<span class="chip on">${icon("bolt")} ${power != null ? power.toFixed(1) + " kW" : "Charging"}</span>`,
+        s.charging && `<span class="chip on">${iconFilled("bolt")} ${power != null ? power.toFixed(1) + " kW" : "Charging"}</span>`,
         !s.charging && s.conn && s.conn.state === "Plugged in" && `<span class="chip">Plugged in</span>`,
         climateOn && `<span class="chip on">Climate on</span>`,
         s.doorsOpen.length > 0 && `<span class="chip warn">${s.doorsOpen.length} open</span>`,
@@ -322,11 +456,11 @@
         .title { font-size:13px; font-weight:600; letter-spacing:.02em; display:flex; align-items:center; gap:7px; }
         .dot { width:6px; height:6px; border-radius:50%; background:${ACCENT}; }
         .dot.off { background:${AMBER}; }
-        .hero { display:flex; align-items:center; gap:18px; margin:10px 0 4px; }
+        .hero { display:flex; align-items:center; gap:14px; margin:8px 0 2px; }
         .hero .n { font-size:44px; }
         .hero .u { font-size:13px; color: var(--secondary-text-color); margin-left:3px; }
         .hero .sub { margin-top:4px; }
-        .carwrap { flex:1; max-width:270px; margin-left:auto; opacity:.9; }
+        .carwrap { flex:1; max-width:300px; margin-left:auto; }
         </style>
         <div class="shell">
           <div class="head">
@@ -341,7 +475,7 @@
               <div class="num n ${OK(s.range) ? "" : "unavail"}">${range}<span class="u">km</span></div>
               <div class="micro sub">Range</div>
             </div>
-            <div class="carwrap">${CAR_SVG(s.charging ? "charging" : "")}</div>
+            <div class="carwrap">${CAR_SVG(s.charging ? "charging" : "", this._openMap())}</div>
           </div>
           <div class="bar ${low ? "low" : ""} ${s.charging ? "charging" : ""}" style="margin:2px 0 10px">
             <i style="width:${batt === "—" ? 0 : batt}%"></i>
@@ -442,11 +576,14 @@
         .hero .side { margin-left:auto; text-align:right; }
         .hero .side .num { font-size:26px; }
         .hero .side .u2 { font-size:11px; color: var(--secondary-text-color); }
-        .carwrap { margin:8px auto 2px; max-width:430px; }
+        .carwrap { margin:10px auto 0; max-width:470px; }
+        .actions { display:grid; grid-template-columns:repeat(4, 1fr); }
         .grid { display:grid; grid-template-columns:1fr 1fr; gap:2px 26px; }
-        .row { display:flex; justify-content:space-between; align-items:baseline;
+        .row { display:flex; justify-content:space-between; align-items:baseline; gap:8px;
                font-size:12.5px; padding:5px 0; color: var(--secondary-text-color); }
-        .row b { font-weight:500; color: var(--primary-text-color); font-variant-numeric: tabular-nums; }
+        .row span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .row b { font-weight:500; color: var(--primary-text-color);
+                 font-variant-numeric: tabular-nums; white-space:nowrap; }
         .row.accent b { color:${ACCENT}; }
         .row.warn b { color:${AMBER}; }
         .tires { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; text-align:center; }
@@ -454,7 +591,7 @@
                     border-radius:12px; padding:8px 4px 6px; }
         .tires .t b { font-size:15px; font-weight:400; font-variant-numeric:tabular-nums; }
         .tires .t i { font-style:normal; font-size:9px; color:var(--secondary-text-color); margin-left:2px; }
-        .tires .t .micro { margin-top:3px; font-size:8.5px; }
+        .tires .t .micro { margin-top:3px; font-size:8.5px; justify-content:center; }
         .sec { margin-top:2px; }
         .footer { display:flex; justify-content:space-between; margin-top:10px; }
         .footer .micro { letter-spacing:.1em; }
@@ -485,9 +622,9 @@
             <i style="width:${batt === "—" ? 0 : batt}%"></i>
           </div>
 
-          <div class="carwrap">${CAR_SVG(s.charging ? "charging" : "")}</div>
+          <div class="carwrap">${CAR_SVG(s.charging ? "charging" : "", this._openMap())}</div>
 
-          <div class="actions" style="margin-top:6px">
+          <div class="actions" style="margin-top:8px">
             ${this._actBtn("lock", "Lock", "lock", { on: s.locked && s.locked.state === "locked" })}
             ${this._actBtn("unlock", "Unlock", "unlock")}
             ${this._actBtn("climate", "Climate", "climate", { on: climateOn })}
@@ -499,7 +636,7 @@
           </div>
 
           <hr class="hairline">
-          <p class="micro">Charging</p>
+          <p class="micro">${icon("charge")} Charging</p>
           <div class="grid sec">
             ${this._row("Charger", s.conn)}
             ${this._row("Power", power, { accent: s.charging })}
@@ -517,7 +654,7 @@
 
           ${hybrid ? `
           <hr class="hairline">
-          <p class="micro">Fuel</p>
+          <p class="micro">${icon("fuel")} Fuel</p>
           <div class="grid sec">
             ${this._row("Fuel level", this._st("sensor.fuel_level"))}
             ${this._row("Fuel range", fuelRange)}
@@ -525,7 +662,7 @@
           </div>` : ""}
 
           <hr class="hairline">
-          <p class="micro">Tires</p>
+          <p class="micro">${icon("tire")} Tires</p>
           <div class="tires" style="margin-top:8px">
             <div class="t"><b>${tire("front_left")}</b><div class="micro">FL</div></div>
             <div class="t"><b>${tire("front_right")}</b><div class="micro">FR</div></div>
@@ -534,7 +671,7 @@
           </div>
 
           <hr class="hairline">
-          <p class="micro">Trip &amp; health</p>
+          <p class="micro">${icon("trip")} Trip &amp; health</p>
           <div class="grid sec">
             ${this._row("Odometer", this._st("sensor.total_mileage"))}
             ${this._row("Trip meter", this._st("sensor.trip_meter"))}
