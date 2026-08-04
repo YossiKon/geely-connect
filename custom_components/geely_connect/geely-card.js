@@ -802,8 +802,34 @@
       console.warn(`geely-card: define(${tag}) skipped:`, err);
     }
   };
-  defineOnce("geely-card-compact", GeelyCardCompact);
-  defineOnce("geely-card", GeelyCard);
+  const registerElements = () => {
+    defineOnce("geely-card-compact", GeelyCardCompact);
+    defineOnce("geely-card", GeelyCard);
+  };
+  registerElements();
+
+  // Some cards (anything built on lit's scoped registries - Mushroom,
+  // button-card and friends) ship the scoped-custom-element-registry
+  // polyfill, which REPLACES window.customElements wholesale. Definitions
+  // made on the original registry are invisible to the replacement's get(),
+  // so if this file runs first - and as an extra script it usually does -
+  // the card picker asks the new registry, finds nothing, and spins forever.
+  // Watch for the swap for a while and re-register through whichever
+  // registry is current; the polyfill scopes its native names, so the old
+  // definition does not block the new one.
+  let knownRegistry = window.customElements;
+  let watchLeft = 120;                      // 120 x 500 ms = one minute
+  const watchdog = setInterval(() => {
+    if (window.customElements !== knownRegistry ||
+        !window.customElements.get("geely-card")) {
+      if (window.customElements !== knownRegistry) {
+        console.info("geely-card: custom element registry was replaced - re-registering");
+      }
+      knownRegistry = window.customElements;
+      registerElements();
+    }
+    if (--watchLeft <= 0) clearInterval(watchdog);
+  }, 500);
 
   // A breadcrumb for support: when a dashboard says "Custom element not
   // found: geely-card", this line's presence (or absence) in the browser
