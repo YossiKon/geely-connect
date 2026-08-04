@@ -5,6 +5,7 @@ tokens, certificates, VIN or GPS location.
 """
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from homeassistant.components.diagnostics import async_redact_data
@@ -54,4 +55,28 @@ async def async_get_config_entry_diagnostics(
         # server and has carried a vin field, so it goes through as well.
         "capabilities": _clean(bundle.get("capabilities") or {}),
         "status": _clean((coordinator.data if coordinator else {}) or {}),
+        # Whether the dashboard cards are actually being served, and from
+        # where: the first thing to check when a card reads "Custom element
+        # not found" but the vehicle itself is fine.
+        "cards": _card_status(hass),
+    }
+
+
+def _card_status(hass: HomeAssistant) -> dict[str, Any]:
+    from . import cards
+
+    path = os.path.join(os.path.dirname(__file__), "frontend", "geely-card.js")
+    resources = getattr(hass.data.get("lovelace"), "resources", None)
+    listed = []
+    if resources is not None and hasattr(resources, "async_items"):
+        try:
+            listed = [i.get("url") for i in resources.async_items() or []
+                      if cards.CARD_URL in str(i.get("url", ""))]
+        except Exception:  # noqa: BLE001 - diagnostics must never raise
+            listed = ["<unreadable>"]
+    return {
+        "file_present": os.path.isfile(path),
+        "url": cards.CARD_URL,
+        "registered": bool(hass.data.get(f"{DOMAIN}_cards_registered")),
+        "lovelace_resources": listed,
     }

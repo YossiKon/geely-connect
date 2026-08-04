@@ -76,9 +76,73 @@ def test_the_report_is_still_worth_reading():
     if not have_homeassistant():
         skip("homeassistant not installed")
     r = _report()
-    assert set(r) == {"entry_data", "options", "capabilities", "status"}
+    assert set(r) == {"entry_data", "options", "capabilities", "status", "cards"}
     assert r["options"]["pressure_unit"] == "psi"
     assert r["status"]["_state"]["parkComfortState"] == "1"
+
+
+def test_the_report_lists_the_card_resource_when_lovelace_has_one():
+    """The resource entry is the thing to check first; the report should show
+    it rather than sending anyone into Settings."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    import types
+    diag = load("diagnostics")
+
+    class Entry:
+        entry_id = "e1"
+        data = {"vin": FAKE_VIN}
+        options = {}
+
+    class _Res:
+        def async_items(self):
+            return [{"url": "/geely_connect/geely-card.js?v=1.2.3"},
+                    {"url": "/hacsfiles/other/other.js"}]
+
+    class Hass:
+        data = {"geely_connect": {}, "geely_connect_cards_registered": True,
+                "lovelace": types.SimpleNamespace(resources=_Res())}
+
+    cards = asyncio.run(
+        diag.async_get_config_entry_diagnostics(Hass(), Entry()))["cards"]
+    assert cards["lovelace_resources"] == ["/geely_connect/geely-card.js?v=1.2.3"]
+    assert cards["registered"] is True
+
+
+def test_a_resource_list_that_will_not_be_read_does_not_break_the_report():
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    import types
+    diag = load("diagnostics")
+
+    class Entry:
+        entry_id = "e1"
+        data = {"vin": FAKE_VIN}
+        options = {}
+
+    class _Angry:
+        def async_items(self):
+            raise RuntimeError("not loaded")
+
+    class Hass:
+        data = {"geely_connect": {},
+                "lovelace": types.SimpleNamespace(resources=_Angry())}
+
+    cards = asyncio.run(
+        diag.async_get_config_entry_diagnostics(Hass(), Entry()))["cards"]
+    assert cards["lovelace_resources"] == ["<unreadable>"]
+
+
+def test_the_report_says_whether_the_cards_can_load():
+    """"Custom element not found: geely-card" with a healthy vehicle has one
+    cause worth ruling out first - the file never reaching the browser. The
+    report answers that without asking anyone for a console."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    cards = _report()["cards"]
+    assert cards["file_present"] is True, "the shipped card file is missing"
+    assert cards["url"] == "/geely_connect/geely-card.js"
+    assert "registered" in cards and "lovelace_resources" in cards
 
 
 def test_a_report_can_be_produced_before_the_coordinator_exists():

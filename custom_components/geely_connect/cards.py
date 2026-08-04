@@ -43,6 +43,20 @@ async def async_register_cards(hass: HomeAssistant) -> None:
     hass.data[_REGISTERED] = True
     try:
         path = os.path.join(os.path.dirname(__file__), "frontend", "geely-card.js")
+        if not await hass.async_add_executor_job(os.path.isfile, path):
+            # A partial download (HACS interrupted, a manual copy that missed
+            # the subdirectory) leaves the integration working and the cards
+            # silently absent - "Custom element not found: geely-card" in the
+            # browser, with nothing in the log to connect it to.
+            hass.data[_REGISTERED] = False
+            _LOGGER.error(
+                "The dashboard card file is missing from this installation "
+                "(%s). The vehicle works, but the Geely cards cannot load. "
+                "Re-download the integration in HACS (or copy the whole "
+                "custom_components/geely_connect folder if you installed by "
+                "hand) and restart.", path,
+            )
+            return
         await hass.http.async_register_static_paths(
             [StaticPathConfig(CARD_URL, path, cache_headers=True)]
         )
@@ -84,7 +98,10 @@ async def async_register_cards(hass: HomeAssistant) -> None:
                     )
 
             hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _retry)
-        _LOGGER.debug("Dashboard cards at %s (lovelace resource: %s)", url, registered)
+        # INFO, not debug: when a card does not show up this one line answers
+        # "is it even being served, and from where" without a log-level dance.
+        _LOGGER.info("Geely dashboard cards served at %s (Lovelace resource: %s)",
+                     url, registered)
     except Exception as e:  # noqa: BLE001
         # Release the claim so a later reload can retry.
         hass.data[_REGISTERED] = False

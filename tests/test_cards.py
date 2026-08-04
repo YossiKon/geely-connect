@@ -87,6 +87,9 @@ class _Hass:
         if resources is not None:
             self.data["lovelace"] = types.SimpleNamespace(resources=resources)
 
+    async def async_add_executor_job(self, fn, *args):
+        return fn(*args)
+
 
 def _patched(c, version="9.9.9"):
     urls = []
@@ -344,3 +347,33 @@ def test_a_running_instance_does_not_schedule_a_retry():
     with _patched(c):
         asyncio.run(c.async_register_cards(hass))
     assert EVENT_HOMEASSISTANT_STARTED not in hass.bus.listeners
+
+
+def test_a_missing_card_file_is_an_error_not_a_silent_absence():
+    """A partial download leaves the vehicle working and the cards gone, with
+    "Custom element not found" in the browser and nothing in the log tying the
+    two together."""
+    import logging
+    c = _cards()
+    hass = _Hass()
+    seen = []
+
+    class _Grab(logging.Handler):
+        def emit(self, record):
+            if record.levelno >= logging.ERROR:
+                seen.append(record.getMessage())
+
+    logger = logging.getLogger("gc.cards")
+    logger.addHandler(_Grab())
+    orig = c.os.path.isfile
+    c.os.path.isfile = lambda p: False
+    try:
+        with _patched(c) as urls:
+            asyncio.run(c.async_register_cards(hass))
+    finally:
+        c.os.path.isfile = orig
+        logger.handlers = [h for h in logger.handlers if not isinstance(h, _Grab)]
+    assert seen and "missing" in seen[0].lower()
+    assert urls == [], "nothing may be advertised that cannot be served"
+    assert hass.http.paths == [], "no route for a file that is not there"
+    assert not hass.data.get("geely_connect_cards_registered"),         "a re-download plus reload must be able to retry"
