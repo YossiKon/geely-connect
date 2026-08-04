@@ -196,7 +196,7 @@ views:
       - type: grid
         cards:
           - type: heading
-            heading: Doors &amp; security
+            heading: Doors & security
             heading_style: title
             icon: mdi:shield-car
           # Shows only while the car is unlocked - a gentle nudge.
@@ -541,7 +541,7 @@ views:
             heading_style: title
             icon: mdi:car-door
           # Every entity in this section is DISABLED BY DEFAULT.
-          # Enable them first: Settings -> Devices &amp; Services -> Geely
+          # Enable them first: Settings -> Devices & Services -> Geely
           # Connect -> your car -> click the entity -> gear -> Enable.
           # Until then they show as "unavailable".
           - type: tile
@@ -572,9 +572,9 @@ views:
             grid_options: {columns: 4}
 
   # ===================================================================
-  #  VIEW 4 - TRIP &amp; HEALTH
+  #  VIEW 4 - TRIP & HEALTH
   # ===================================================================
-  - title: Trip &amp; Health
+  - title: Trip & Health
     path: trip-health
     icon: mdi:clipboard-pulse
     type: sections
