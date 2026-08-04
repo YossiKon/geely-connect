@@ -109,12 +109,42 @@ def test_an_unrecognised_wording_falls_back_too():
 
 def test_a_declared_hybrid_with_no_charge_block_is_a_non_plug_hybrid():
     """`混动` alone cannot distinguish a PHEV from an HEV, so the plug is
-    observed. An HEV must not get charging entities it cannot use."""
+    observed. An HEV must not get charging entities it cannot use - which is
+    what `charges` answers for the platforms."""
     p = _mod()
     v = p.classify("\u6df7\u52a8", _status(plug=False))
     assert v.kind is p.Propulsion.HYBRID
     assert v.has_tank is True
     assert v.has_plug is False
+    assert v.charges is False
+
+
+def test_a_declared_petrol_car_is_a_tank_with_no_plug():
+    """The FUEL branch: a fuel burner gets its tank half and no charging."""
+    p = _mod()
+    v = p.classify("\u6c7d\u6cb9", _status(plug=False))
+    assert v.kind is p.Propulsion.FUEL
+    assert v.has_tank is True
+    assert v.has_plug is False
+    assert v.charges is False
+
+
+def test_a_declared_petrol_car_with_charge_telemetry_warns_and_keeps_no_plug():
+    """Declared FUEL against an observed plug is a real contradiction - unlike
+    the hybrid case - so it must be reported, and the declaration decides."""
+    p = _mod()
+    v, warned = _warnings_from(lambda: p.classify("\u6c7d\u6cb9", _status()))
+    assert v.kind is p.Propulsion.FUEL
+    assert v.has_plug is False
+    assert warned, "a fuel car reporting charge telemetry went unreported"
+
+
+def test_charges_stays_permissive_without_positive_no_plug_evidence():
+    """The gate only closes on evidence. UNKNOWN keeps the pre-hybrid set."""
+    p = _mod()
+    assert p.classify(None, None).charges is True
+    assert p.classify("\u7eaf\u7535\u52a8", _status(fuel=False)).charges is True
+    assert p.classify("\u6df7\u52a8", _status()).charges is True
 
 
 def _warnings_from(fn):
@@ -168,3 +198,14 @@ def test_an_empty_fuel_block_is_not_a_tank():
     v = p.classify("", {"vehicleStatus": {"additionalVehicleStatus": {
         "fuelStatus": {}, "runningStatus": {"fuelLevel": ""}}}})
     assert v.has_tank is False
+
+
+def test_a_nulled_fuel_block_is_not_a_tank_either():
+    """Backends commonly send the full schema with every value blank. That is
+    a shape, not a tank - a BEV whose entry also lost its powerType must not
+    grow a row of dead fuel entities from it."""
+    p = _mod()
+    v = p.classify("", {"vehicleStatus": {"additionalVehicleStatus": {
+        "fuelStatus": {"odometerOnFuelOnly": None, "fuelUpDate": ""}}}})
+    assert v.has_tank is False
+    assert v.kind is p.Propulsion.UNKNOWN

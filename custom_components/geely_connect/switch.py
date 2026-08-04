@@ -110,8 +110,15 @@ SWITCH_DEFS: list[tuple] = [
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entities: AddEntitiesCallback) -> None:
     bundle = hass.data[DOMAIN][entry.entry_id]
     caps = bundle.get("capabilities") or {}
+    verdict = bundle.get("propulsion")
+    # A car with no socket - a non-plug hybrid or a petrol car - cannot start
+    # a charge, so the charging switches would only ever fail. See
+    # Verdict.charges; a missing verdict keeps the pre-hybrid entity set.
+    charges = verdict.charges if verdict else True
     entities: list[SwitchEntity] = []
     for defn in SWITCH_DEFS:
+        if defn[0] == "charging" and not charges:
+            continue
         flag = defn[-1]
         if flag and not caps.get(flag, True):
             _LOGGER.debug("switch %s skipped (capability flag %s=False)", defn[0], flag)
@@ -123,7 +130,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
         entities.append(GeelyGCleanSwitch(hass, bundle))
     if caps.get("ac.enabled", True) and caps.get("defrost.enabled", True):
         entities.append(GeelyDefrostSwitch(hass, bundle))
-    if caps.get("scheduled_charging.enabled", True) or caps.get("charging.enabled", True):
+    if charges and (caps.get("scheduled_charging.enabled", True)
+                    or caps.get("charging.enabled", True)):
         entities.append(GeelyScheduledChargingSwitch(hass, bundle))
     add_entities(entities)
 

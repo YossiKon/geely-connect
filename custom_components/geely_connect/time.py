@@ -60,6 +60,10 @@ def _fmt_hhmm(t: dtime) -> str:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entities: AddEntitiesCallback) -> None:
     bundle = hass.data[DOMAIN][entry.entry_id]
     caps = bundle.get("capabilities") or {}
+    verdict = bundle.get("propulsion")
+    if verdict and not verdict.charges:
+        _LOGGER.debug("No socket on this car - skipping the charging schedule")
+        return
     if not caps.get("scheduled_charging.enabled", True) and not caps.get("charging.enabled", True):
         _LOGGER.info("Capability says scheduled charging not supported - skipping time entities")
         return

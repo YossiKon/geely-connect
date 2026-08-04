@@ -58,6 +58,15 @@ def test_dc_charging_uses_the_dc_pair():
     assert _power(_status(dcChargeUAct="400.0", dcChargeIAct="125.0")) == 50.0
 
 
+def test_a_payload_with_no_ac_pair_still_reports_the_fast_charge():
+    """A trim that omits the AC keys entirely must not read unknown while DC
+    fast charging - one absent pair falls through to the other."""
+    data = _status(dcChargeUAct="400.0", dcChargeIAct="125.0")
+    ev = data["vehicleStatus"]["additionalVehicleStatus"]["electricVehicleStatus"]
+    del ev["chargeUAct"], ev["chargeIAct"]
+    assert _power(data) == 50.0
+
+
 def test_the_live_leg_is_chosen_by_current_never_by_voltage():
     """The trap: DC volts are always the larger number. If the rule compared
     voltages, an AC charge would be reported at the DC pack voltage."""

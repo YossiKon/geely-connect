@@ -164,6 +164,74 @@ def test_an_entry_with_no_verdict_at_all_behaves_like_a_bev():
     assert leaked == set(), leaked
 
 
+_CHARGING_KEYS = frozenset({
+    "charger_connected", "time_to_full_min", "charge_complete",
+    "charge_power", "charge_current", "charge_voltage",
+    "bs_charger_plugged_in", "sw_charging", "sw_scheduled_charging",
+    "time_scheduled_charging_start", "time_scheduled_charging_end",
+})
+
+
+def test_a_socketless_car_gets_no_charging_entities():
+    """The other half of the propulsion gate: an HEV or a petrol car must not
+    carry charging tiles that can only read unavailable, or charging commands
+    that can only fail."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    p = load("propulsion")
+    for kind in (p.Propulsion.HYBRID, p.Propulsion.FUEL):
+        verdict = p.Verdict(kind=kind, has_tank=True, has_plug=False,
+                            source="declared", declared_raw="x")
+        leaked = _keys(_build_all(propulsion=verdict)) & _CHARGING_KEYS
+        assert leaked == set(), (kind, leaked)
+
+
+def test_a_missing_or_unknown_verdict_keeps_the_charging_entities():
+    """A BEV with an unreadable first payload must not lose its charging
+    tiles - the gate closes on positive no-plug evidence only."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    p = load("propulsion")
+    for extra in ({}, {"propulsion": p.classify(None, None)}):
+        got = _keys(_build_all(**extra))
+        assert _CHARGING_KEYS <= got, _CHARGING_KEYS - got
+
+
+def test_full_exposure_keeps_fields_whose_curated_twin_was_not_built():
+    """A path is only skipped by the raw pass when the curated entity that
+    owns it was actually created. On a BEV the fuel rows do not exist, so a
+    stray fuel field must still surface as a raw sensor - suppressed there it
+    would be visible nowhere. The charge-leg fields stay suppressed because
+    their computed owners ARE built."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    import copy
+
+    class _FullEntry(_Entry):
+        data = {"vin": FAKE_VIN, "pressure_unit": "psi", "full_exposure": True}
+
+    class _RichCoord(_Coord):
+        data = copy.deepcopy(STATUS)
+
+    add = _RichCoord.data["vehicleStatus"]["additionalVehicleStatus"]
+    add["runningStatus"]["fuelLevel"] = "0"
+    add["electricVehicleStatus"]["chargeUAct"] = "0.0"
+
+    hass, entry = _Hass(), _FullEntry()
+    hass.data["geely_connect"] = {"e1": {
+        "api": object(), "coordinator": _RichCoord(), "vin": FAKE_VIN,
+        "device_name": "Geely EX5 (0000)", "capabilities": {}}}
+    got = []
+    asyncio.run(load("sensor").async_setup_entry(
+        hass, entry, lambda e, *a, **k: got.extend(list(e))))
+    raw = {getattr(e, "_attr_unique_id", "") for e in got
+           if type(e).__name__ == "GeelyRawSensor"}
+    assert any(uid.endswith("runningStatus.fuelLevel") for uid in raw), \
+        "the unowned fuel field vanished from full exposure"
+    assert not any(uid.endswith("electricVehicleStatus.chargeUAct") for uid in raw), \
+        "the charge leg grew a raw twin despite its computed owner"
+
+
 def test_a_hybrid_gets_the_whole_fuel_set_and_keeps_the_electric_one():
     if not have_homeassistant():
         skip("homeassistant not installed")

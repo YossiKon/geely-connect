@@ -86,8 +86,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
     device_name = bundle.get("device_name") or f"Geely ({vin})"
     verdict = bundle.get("propulsion")
     specs = SPECS + (HYBRID_SPECS if verdict and verdict.has_tank else ())
+    charges = verdict.charges if verdict else True
     entities: list[BinarySensorEntity] = [
         GeelyBinarySensor(coordinator, vin, device_name, *s) for s in specs
+        # No socket, no plug sensor - see Verdict.charges.
+        if charges or s[0] != "charger_plugged_in"
     ]
     # Connectivity: is the integration currently reaching the car's cloud?
     entities.append(GeelyConnectivity(coordinator, vin, device_name))

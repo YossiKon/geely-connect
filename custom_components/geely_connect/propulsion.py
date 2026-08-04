@@ -106,6 +106,18 @@ class Verdict:
     def is_hybrid(self) -> bool:
         return self.kind is Propulsion.HYBRID
 
+    @property
+    def charges(self) -> bool:
+        """Whether charging entities make sense on this car.
+
+        False only on positive evidence there is no socket: a fuel burner
+        (declared or observed) whose payload carries no charge telemetry.
+        UNKNOWN stays True on purpose - an unreadable payload must degrade to
+        the pre-hybrid entity set, not strip a BEV of its charging tiles.
+        """
+        return self.has_plug or self.kind not in (Propulsion.HYBRID,
+                                                  Propulsion.FUEL)
+
 
 def declared(power_type: str | None) -> Propulsion:
     """Map the server's `powerType` string onto a propulsion kind."""
@@ -127,9 +139,12 @@ def _observed_tank(status: dict[str, Any]) -> bool:
 
     An empty `fuelStatus` block does not count: presence of the container says
     nothing, and treating it as a tank would put fuel entities on a BEV whose
-    payload happens to carry the key.
+    payload happens to carry the key. The same goes for a container holding
+    only nulls - backends commonly send the full schema with every value
+    blank, which is a shape, not a tank.
     """
-    if walk(status, _FUEL):
+    fuel = walk(status, _FUEL)
+    if isinstance(fuel, dict) and any(v not in (None, "") for v in fuel.values()):
         return True
     return any(walk(status, (*_RUN, k)) not in (None, "")
                for k in ("fuelLevel", "fuelLevelPct", "aveFuelConsumption"))

@@ -356,14 +356,23 @@ class _AutoPrecision(SensorEntity):
         return _display_precision(unit, self._value_kind)
 
 
-# Paths already covered by a curated sensor above - skip them in the dynamic
-# full-exposure pass so we don't create duplicates.
-_CURATED_PATHS: set[str] = {".".join(spec[2]) for spec in (*SENSOR_SPECS, *HYBRID_SPECS)}
-# Paths no spec row names, because a computed sensor above owns them. Without
-# this, turning on full exposure hands back a raw twin of each - the duplication
-# that pass exists to avoid.
-_CURATED_PATHS |= {".".join((*_EV, k)) for k in
-                   ("chargeUAct", "chargeIAct", "dcChargeUAct", "dcChargeIAct")}
+# Spec keys that only mean something on a car with a socket - see
+# Verdict.charges in propulsion.py. A non-plug hybrid or a petrol car gets
+# neither the tiles nor the forever-unavailable states they would carry.
+_PLUG_ONLY_KEYS = frozenset({"charger_connected", "time_to_full_min"})
+
+# The four raw fields the charge-rate resolver owns - suppressed from full
+# exposure only while the resolver sensors exist to cover them.
+_CHARGE_LEG_PATHS = frozenset(
+    ".".join((*_EV, k))
+    for k in ("chargeUAct", "chargeIAct", "dcChargeUAct", "dcChargeIAct"))
+
+# Every path a curated or computed sensor CAN own. The full-exposure pass
+# skips a path only when the owning entity was actually created for this car
+# (see async_setup_entry) - suppressing a field whose curated twin does not
+# exist would make it invisible everywhere, breaking full exposure's contract.
+_CURATED_PATHS: set[str] = ({".".join(spec[2]) for spec in (*SENSOR_SPECS, *HYBRID_SPECS)}
+                            | _CHARGE_LEG_PATHS)
 
 
 _MAX_FLATTEN_DEPTH = 12   # deeper than any real status payload nests
@@ -413,15 +422,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
     pressure_unit = (entry.options.get(CONF_PRESSURE_UNIT)
                      or entry.data.get(CONF_PRESSURE_UNIT, DEFAULT_PRESSURE_UNIT))
 
-    # 1) Curated, nicely-named sensors.
-    add_entities(GeelySensor(coordinator, vin, device_name, *spec,
-                             pressure_unit=pressure_unit) for spec in SENSOR_SPECS)
-
-    # A car that burns fuel gets the other half of itself. The verdict is
-    # decided once in __init__ so every platform agrees; a BEV skips this block
-    # and is exactly as it was before hybrids were supported.
+    # The verdict is decided once in __init__ so every platform agrees; a BEV
+    # (or a missing verdict) takes every gate the permissive way and is
+    # exactly as it was before hybrids were supported.
     verdict = bundle.get("propulsion")
     has_tank = bool(verdict and verdict.has_tank)
+    charges = verdict.charges if verdict else True
+
+    # 1) Curated, nicely-named sensors. A car with no socket - a non-plug
+    #    hybrid or a petrol car - skips the charging rows rather than carrying
+    #    tiles that can only ever read unavailable.
+    add_entities(GeelySensor(coordinator, vin, device_name, *spec,
+                             pressure_unit=pressure_unit)
+                 for spec in SENSOR_SPECS
+                 if charges or spec[0] not in _PLUG_ONLY_KEYS)
+
+    # A car that burns fuel gets the other half of itself.
     if has_tank:
         add_entities(GeelySensor(coordinator, vin, device_name, *spec,
                                  pressure_unit=pressure_unit) for spec in HYBRID_SPECS)
@@ -430,17 +446,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
     add_entities([
         GeelyEfficiencySensor(coordinator, vin, device_name),
         GeelyLastUpdatedSensor(coordinator, vin, device_name),
-        GeelyChargeCompleteSensor(coordinator, vin, device_name),
         GeelyFullRangeSensor(coordinator, vin, device_name),
         GeelyLastTripSensor(coordinator, vin, device_name),
         GeelyTripInProgressSensor(coordinator, vin, device_name),
         # Charging: the car sends volts and amps but never their product, so
-        # "how fast is it charging" has no entity without these. Not gated on
-        # propulsion - every plug-in Geely charges, and a car with no charge
-        # telemetry reports unknown rather than a wrong zero.
-        GeelyChargePowerSensor(coordinator, vin, device_name),
-        GeelyChargeCurrentSensor(coordinator, vin, device_name),
-        GeelyChargeVoltageSensor(coordinator, vin, device_name),
+        # "how fast is it charging" has no entity without these. Gated with
+        # the other charging entities - a car with a socket but no charge
+        # telemetry still gets them and reports unknown rather than a wrong
+        # zero, but a car with no socket gets none.
+        *((GeelyChargeCompleteSensor(coordinator, vin, device_name),
+           GeelyChargePowerSensor(coordinator, vin, device_name),
+           GeelyChargeCurrentSensor(coordinator, vin, device_name),
+           GeelyChargeVoltageSensor(coordinator, vin, device_name))
+          if charges else ()),
         *(GeelyTireSensor(coordinator, vin, device_name, key, name, path,
                           pressure_unit)
           for key, name, path in _TIRE_CORNERS),
@@ -460,6 +478,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
             or entry.data.get(CONF_FULL_EXPOSURE, False)):
         return
 
+    # Skip only the paths whose curated twin was actually created above. On a
+    # BEV the hybrid rows do not exist, and on a socketless car the charging
+    # rows do not - their raw fields, should the server send them anyway, must
+    # stay visible here or they would be visible nowhere.
+    curated: set[str] = {".".join(spec[2]) for spec in SENSOR_SPECS
+                         if charges or spec[0] not in _PLUG_ONLY_KEYS}
+    if has_tank:
+        curated |= {".".join(spec[2]) for spec in HYBRID_SPECS}
+    if charges:
+        curated |= _CHARGE_LEG_PATHS
+
     known: set[str] = set()
 
     def _discover_and_add() -> None:
@@ -467,7 +496,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
         flat = _flatten(data)
         new_entities = []
         for path, _val in flat.items():
-            if path in known or path in _CURATED_PATHS:
+            if path in known or path in curated:
                 continue
             known.add(path)
             new_entities.append(GeelyRawSensor(coordinator, vin, device_name, path))
