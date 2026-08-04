@@ -791,12 +791,19 @@
     }
   }
 
-  if (!customElements.get("geely-card-compact")) {
-    customElements.define("geely-card-compact", GeelyCardCompact);
-  }
-  if (!customElements.get("geely-card")) {
-    customElements.define("geely-card", GeelyCard);
-  }
+  // This file is delivered both as a Lovelace resource (module) and as an
+  // extra script, so it can execute twice in one page. The guard handles the
+  // common case; the try absorbs anything the platform throws anyway, because
+  // a failed re-define must never abort the run before customCards is filled.
+  const defineOnce = (tag, cls) => {
+    try {
+      if (!customElements.get(tag)) customElements.define(tag, cls);
+    } catch (err) {
+      console.warn(`geely-card: define(${tag}) skipped:`, err);
+    }
+  };
+  defineOnce("geely-card-compact", GeelyCardCompact);
+  defineOnce("geely-card", GeelyCard);
 
   // A breadcrumb for support: when a dashboard says "Custom element not
   // found: geely-card", this line's presence (or absence) in the browser
