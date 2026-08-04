@@ -110,7 +110,9 @@ def test_no_module_references_an_unimported_name():
     problems = {}
     for f in sorted(glob.glob(os.path.join(PKG, "*.py"))):
         tree = ast.parse(io.open(f, encoding="utf-8").read())
-        defined = set(dir(builtins))
+        # Module dunders are guaranteed globals but not builtins attributes.
+        defined = set(dir(builtins)) | {
+            "__file__", "__name__", "__package__", "__spec__", "__loader__"}
         for n in ast.walk(tree):
             if isinstance(n, ast.Import):
                 for a in n.names:

@@ -24,6 +24,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from . import api as geely_api
+from . import cards
 from . import propulsion
 from .api import GeelyApi, GeelyAuthError, GeelyControlError, GeelyTLSPinError, redact
 from .const import (
@@ -293,6 +294,7 @@ def _adaptive_interval(data: dict, idle_streak: int, profile: dict) -> timedelta
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Geely (international) from a config entry."""
+    await cards.async_register_cards(hass)
     await _maybe_refetch_vehicle_metadata(hass, entry)
     _purge_obsolete_entities(hass, entry)
     _refresh_device_name(hass, entry)

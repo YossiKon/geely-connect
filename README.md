@@ -36,6 +36,9 @@ polished setup on top.
 - 🗣️ **Translated setup** - the configuration dialogs are in English, Hebrew,
   Arabic, Russian and French. Entity names follow Home Assistant's own
   language.
+- 🚙 **Two custom cards included** - `custom:geely-card` (the full cockpit) and
+  `custom:geely-card-compact` appear in the card picker automatically the
+  moment the integration is set up. Zero config, zero extra installs.
 - 🖥️ **Ready-made cards, widgets, a four-view dashboard and Blueprints**, all
   built-in Lovelace cards - no extra HACS frontend packages.
 - 📈 **Long-term statistics** on every numeric entity, so history survives the
@@ -392,6 +395,32 @@ everything else.
 ---
 
 ## 🖥️ Dashboards & cards
+
+### 🚙 The built-in cards - zero setup
+
+The integration ships two custom cards and registers them by itself - no HACS
+frontend package, no resource to add, nothing to copy. Open any dashboard,
+**Add card**, and search "Geely":
+
+| Card | What it is |
+|---|---|
+| **Geely Card** (`custom:geely-card`) | The full cockpit: range and battery up top, a live car silhouette that glows while charging, one-tap Lock / Unlock / Climate / Defrost / Vent / Trunk / Find / Sync, then charging, tires, trip and service health - each row hides itself when the car doesn't report it (a BEV shows no fuel section) |
+| **Geely Card (compact)** (`custom:geely-card-compact`) | The essentials in one tile: battery, range, status chips, and the five controls that matter |
+
+With one Geely on the account the cards find their entities on their own.
+With several, point each card at a car:
+
+```yaml
+type: custom:geely-card
+prefix: my_geely_ex5      # the slug in sensor.my_geely_ex5_battery
+```
+
+Two touches worth knowing: **Unlock and Trunk arm on the first tap and fire
+on the second** (a stray touch on a wall tablet can't open the car), and the
+accent colour follows the state - teal while charging, amber when something
+needs a look. `--geely-accent` / `--geely-warn` theme variables override both.
+
+### 📐 The YAML collection
 
 First, find your **entity suffix**: Settings → Devices & Services → Geely Connect
 → your car → click any entity. Your ids will look like

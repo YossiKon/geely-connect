@@ -5,7 +5,10 @@
     "@YossiKon"
   ],
   "config_flow": true,
-  "dependencies": [],
+  "dependencies": [
+    "http",
+    "frontend"
+  ],
   "documentation": "https://github.com/YossiKon/geely-connect",
   "integration_type": "device",
   "iot_class": "cloud_polling",
@@ -18,5 +21,5 @@
     "Pillow>=10.0.1",
     "scipy>=1.11.0"
   ],
-  "version": "1.13.0"
+  "version": "1.14.0"
 }
