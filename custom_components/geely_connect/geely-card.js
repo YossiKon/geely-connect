@@ -791,6 +791,41 @@
     }
   }
 
+  // As a module there is no document.currentScript, and import.meta is a
+  // syntax error in the classic-script fallback - so find this file's own
+  // tag in the DOM. The version is what tells a screenshot which build ran.
+  const VERSION = (() => {
+    let src = (document.currentScript && document.currentScript.src) || "";
+    if (!src) {
+      const tag = [...document.querySelectorAll('script[src*="geely-card.js"]')].pop();
+      src = (tag && tag.src) || "";
+    }
+    const m = /[?&]v=([^&]+)/.exec(src);
+    return m ? decodeURIComponent(m[1]) : "?";
+  })();
+
+  const T0 = Date.now();
+  const STATUS = {
+    version: VERSION, swaps: 0, losses: 0, defineError: "", firstDefine: null,
+    lastLossAt: null, lastFixAt: null,
+    line() {
+      const full = !!window.customElements.get("geely-card");
+      const compact = !!window.customElements.get("geely-card-compact");
+      const ms = (t) => (t === null ? "?" : `${t}ms`);
+      return [
+        `v${this.version}`,
+        "script ran",
+        `geely-card ${full ? "OK" : "MISSING"}`,
+        `compact ${compact ? "OK" : "MISSING"}`,
+        `first define ${this.firstDefine === false ? "FAILED" : ms(this.firstDefine)}`,
+        this.losses ? `lost x${this.losses} (last at ${ms(this.lastLossAt)})` : "never lost",
+        this.swaps ? `registry swapped x${this.swaps}` : "no registry swap",
+        this.lastFixAt !== null ? `restored at ${ms(this.lastFixAt)}` : null,
+        this.defineError ? `define error: ${this.defineError}` : null,
+      ].filter(Boolean).join(" · ");
+    },
+  };
+
   // This file is delivered both as a Lovelace resource (module) and as an
   // extra script, so it can execute twice in one page. The guard handles the
   // common case; the try absorbs anything the platform throws anyway, because
@@ -808,6 +843,8 @@
     defineOnce("geely-card", GeelyCard);
   };
   registerElements();
+  STATUS.firstDefine = window.customElements.get("geely-card")
+    ? Date.now() - T0 : false;
 
   // Some cards (anything built on lit's scoped registries - Mushroom,
   // button-card and friends) ship the scoped-custom-element-registry
@@ -837,6 +874,10 @@
     const lost = !window.customElements.get("geely-card") ||
       !window.customElements.get("geely-card-compact");
     if (swapped || lost) {
+      if (lost) {
+        STATUS.losses += 1;
+        STATUS.lastLossAt = Date.now() - T0;
+      }
       if (swapped) {
         STATUS.swaps += 1;
         console.info(
@@ -846,6 +887,9 @@
       knownRegistry = window.customElements;
       knownDefine = window.customElements.define;
       registerElements();
+      if (lost && window.customElements.get("geely-card")) {
+        STATUS.lastFixAt = Date.now() - T0;
+      }
     }
     if (statusEntry) statusEntry.description = STATUS.line();
   };
@@ -873,18 +917,6 @@
   // found: geely-card", this line's presence (or absence) in the browser
   // console separates "the file never ran" from "it ran and something else
   // is wrong" - the two have opposite fixes.
-  // As a module there is no document.currentScript, and import.meta is a
-  // syntax error in the classic-script fallback - so find this file's own
-  // tag in the DOM. The version is what tells a screenshot which build ran.
-  const VERSION = (() => {
-    let src = (document.currentScript && document.currentScript.src) || "";
-    if (!src) {
-      const tag = [...document.querySelectorAll('script[src*="geely-card.js"]')].pop();
-      src = (tag && tag.src) || "";
-    }
-    const m = /[?&]v=([^&]+)/.exec(src);
-    return m ? decodeURIComponent(m[1]) : "?";
-  })();
   console.info(
     `%c GEELY-CARD %c ${VERSION} loaded - geely-card, geely-card-compact registered`,
     "background:#2fd6a4;color:#0b2b22;font-weight:600;border-radius:3px 0 0 3px",
@@ -894,17 +926,6 @@
   /* A status tile that renders as plain text in the picker (preview: false
    * never creates an element, so it shows even when everything else is
    * broken) - live diagnosis for phone-only users, no console needed. */
-  const STATUS = {
-    version: VERSION, swaps: 0, defineError: "",
-    line() {
-      const full = !!window.customElements.get("geely-card");
-      const compact = !!window.customElements.get("geely-card-compact");
-      return `v${this.version} · script ran · geely-card ${full ? "OK" : "MISSING"}` +
-        ` · compact ${compact ? "OK" : "MISSING"}` +
-        (this.swaps ? ` · registry swapped x${this.swaps}` : "") +
-        (this.defineError ? ` · define error: ${this.defineError}` : "");
-    },
-  };
 
   class GeelyCardStatus extends HTMLElement {
     setConfig() {}
