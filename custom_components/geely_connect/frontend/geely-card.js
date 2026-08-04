@@ -24,6 +24,23 @@
 "use strict";
 
 (() => {
+  /* Every entity suffix the cards may touch, longest first so a longer
+   * suffix always wins the match (_12v_battery before _battery). */
+  const SUFFIXES = [
+    "scheduled_charging_start", "scheduled_charging_end", "engine_coolant_temperature",
+    "range_at_full_charge", "interior_temperature", "exterior_temperature",
+    "time_to_full_charge", "average_consumption", "window_ventilation",
+    "distance_to_service", "days_to_service", "last_updated",
+    "scheduled_charging", "charger_connection", "tire_front_right",
+    "tire_front_left", "tire_rear_right", "door_rear_right", "charging_power",
+    "tire_rear_left", "door_rear_left", "combined_range", "charge_complete",
+    "charge_voltage", "electric_range", "charge_current", "door_passenger",
+    "charger_plug", "total_mileage", "refresh_data", "unlock_trunk",
+    "door_driver", "12v_battery", "trip_meter", "fuel_level", "fuel_range",
+    "pack_power", "efficiency", "find_car", "connected", "defrost",
+    "charging", "climate", "battery", "trunk", "doors", "speed", "hood",
+  ].sort((a, b) => b.length - a.length);
+
   const ACCENT = "var(--geely-accent, #2fd6a4)";
   const AMBER = "var(--geely-warn, #e8a13a)";
 
@@ -322,22 +339,63 @@
     _detectPrefix(hass) {
       // The battery sensor exists on every Geely; its object_id carries the
       // device slug this integration derives every other entity id from.
-      const fromPlatform = Object.keys(hass.entities || {}).find(
+      const ents = hass.entities || {};
+      const fromPlatform = Object.keys(ents).find(
         (id) =>
-          hass.entities[id].platform === "geely_connect" &&
+          ents[id].platform === "geely_connect" &&
           id.startsWith("sensor.") && id.endsWith("_battery"),
       );
-      const found = fromPlatform ||
-        Object.keys(hass.states).find(
-          (id) => id.startsWith("sensor.") && id.endsWith("_battery") &&
-            hass.states[`climate.${id.slice(7, -8)}_climate`],
-        );
+      if (fromPlatform) {
+        return fromPlatform.slice("sensor.".length, -"_battery".length);
+      }
+      // Battery renamed? Recover the slug from any platform entity whose id
+      // still ends in a known suffix (longest suffix wins, so _12v_battery
+      // cannot masquerade as _battery).
+      for (const id in ents) {
+        if (ents[id].platform !== "geely_connect") continue;
+        const object = id.split(".")[1] || "";
+        for (const s of SUFFIXES) {
+          if (object.length > s.length + 1 && object.endsWith("_" + s)) {
+            return object.slice(0, -(s.length + 1));
+          }
+        }
+      }
+      const found = Object.keys(hass.states).find(
+        (id) => id.startsWith("sensor.") && id.endsWith("_battery") &&
+          hass.states[`climate.${id.slice(7, -8)}_climate`],
+      );
       return found ? found.slice("sensor.".length, -"_battery".length) : null;
+    }
+
+    /* Entity resolution: the fast path joins prefix + suffix; when a user has
+     * hand-renamed an entity id, a lazily-built suffix map over the
+     * integration's own entities takes over, so one rename never blanks the
+     * card. */
+    _eid(domain, suffix) {
+      const strict = `${domain}.${this._prefix}_${suffix}`;
+      if (this._hass.states[strict]) return strict;
+      if (this._mapFor !== this._hass.entities) {
+        this._mapFor = this._hass.entities;
+        this._map = {};
+        const ents = this._hass.entities || {};
+        for (const id in ents) {
+          if (ents[id].platform !== "geely_connect") continue;
+          const [dom, object] = id.split(".");
+          for (const s of SUFFIXES) {
+            if (object === s || object.endsWith("_" + s)) {
+              const key = `${dom}.${s}`;
+              if (!(key in this._map)) this._map[key] = id;
+              break;
+            }
+          }
+        }
+      }
+      return this._map[`${domain}.${suffix}`] || strict;
     }
 
     _st(entity) {
       const [domain, suffix] = entity.split(".");
-      return this._hass.states[`${domain}.${this._prefix}_${suffix}`];
+      return this._hass.states[this._eid(domain, suffix)];
     }
 
     _signature(hass) {
@@ -349,7 +407,7 @@
 
     _call(domain, service, entitySuffix, data = {}) {
       this._hass.callService(domain, service, {
-        entity_id: `${domain}.${this._prefix}_${entitySuffix}`,
+        entity_id: this._eid(domain, entitySuffix),
         ...data,
       });
     }
