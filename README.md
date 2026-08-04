@@ -341,12 +341,23 @@ The whole setup flow runs **from the Home Assistant machine** - not from your
 browser - so VPNs or DNS settings on the laptop don't matter, only the network
 the HA box itself is on. During setup it must reach:
 
-| Host | Used for |
-|---|---|
-| `captcha4.geely.com` | Geely's captcha - **the very first step**, before the email is even requested. Hosted in mainland China |
-| `access-app-global.geely.com` | Sends the login email, then the OTP login |
-| `m-lcmsam-eu.geely.com` | Vehicle list after login |
-| `api.ecloudkr.com`, `m-lcmsam-kr.geely.com`, `apis.ecloudkr.com` | APAC-market cars only, after login |
+| Host | Where | When |
+|---|---|---|
+| `captcha4.geely.com` | 🇨🇳 China (Alibaba, Hangzhou) | **Login only** - the captcha that runs before the email code |
+| `access-app-global.geely.com` | 🇩🇪 Frankfurt | Login only - sends the email code, exchanges the OTP |
+| `m-lcmsam-eu.geely.com` | 🇩🇪 Frankfurt | Login only - the vehicle list |
+| `api.ecloudeu.com` | 🇩🇪 Frankfurt (AWS) | Once at setup - provisions the certificate |
+| `apis.ecloudeu.com` | 🇩🇪 Frankfurt (AWS) | **Ongoing** - every poll and every command |
+
+An APAC-market car uses the Korean pair instead: `api.ecloudkr.com` and
+`apis.ecloudkr.com` (AWS, Seoul/Incheon) plus `m-lcmsam-kr.geely.com`.
+
+**Blocking China after setup is fine.** Only the captcha lives there, and only
+the login touches it - day-to-day polling and commands never do. Lift the block
+when you add a car, or if Home Assistant ever asks you to re-authenticate.
+Note the captcha host resolves through `*.geely-auto-gtm.com` to rotating
+Alibaba addresses, so a static IP allowlist will not hold; scope a firewall
+rule to the Home Assistant machine instead.
 
 If the form spins and then reports the captcha server as unreachable, the
 usual culprits are DNS filtering (Pi-hole / AdGuard / router blocklists that
