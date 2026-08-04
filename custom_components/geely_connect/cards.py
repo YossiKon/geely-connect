@@ -56,6 +56,17 @@ async def async_register_cards(hass: HomeAssistant) -> None:
         # exactly once either way.
         registered = await _async_register_resource(hass, url)
         add_extra_js_url(hass, url)
+        if not registered and hass.state is not CoreState.starting:
+            # Nothing else will retry, so say plainly what is missing and how
+            # to add it by hand. Without the resource the card can lose the
+            # frontend's 2-second lookup race and the picker spins forever.
+            _LOGGER.warning(
+                "Could not add the Geely cards to Lovelace's resources "
+                "(YAML-mode dashboards keep that list read-only). The cards "
+                "may not appear in the card picker. Add this to your "
+                "configuration.yaml under lovelace: resources: "
+                "- url: %s / type: module", url,
+            )
         if not registered and hass.state is CoreState.starting:
             # Lovelace may simply not be set up yet - this entry can be
             # restored before it. Try once more when the boot is complete,
@@ -63,6 +74,14 @@ async def async_register_cards(hass: HomeAssistant) -> None:
             async def _retry(_event) -> None:
                 if await _async_register_resource(hass, url):
                     _LOGGER.debug("Card resource registered after startup")
+                else:
+                    _LOGGER.warning(
+                        "Could not add the Geely cards to Lovelace's "
+                        "resources (YAML-mode dashboards keep that list "
+                        "read-only). The cards may not appear in the card "
+                        "picker. Add this to your configuration.yaml under "
+                        "lovelace: resources: - url: %s / type: module", url,
+                    )
 
             hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _retry)
         _LOGGER.debug("Dashboard cards at %s (lovelace resource: %s)", url, registered)

@@ -286,6 +286,57 @@ def test_a_boot_that_beats_lovelace_retries_when_home_assistant_starts():
     assert [i["url"] for i in res.items] == [f"{c.CARD_URL}?v=9.9.9"]
 
 
+def test_yaml_mode_says_out_loud_what_to_add_by_hand():
+    """A silent debug line strands YAML-mode users on the racy path with no
+    idea why the picker spins."""
+    import logging
+    c = _cards()
+    hass = _Hass()   # no lovelace resources, already running
+    seen = []
+
+    class _Grab(logging.Handler):
+        def emit(self, record):
+            if record.levelno >= logging.WARNING:
+                seen.append(record.getMessage())
+
+    logger = logging.getLogger("gc.cards")
+    h = _Grab()
+    logger.addHandler(h)
+    try:
+        with _patched(c):
+            asyncio.run(c.async_register_cards(hass))
+    finally:
+        logger.removeHandler(h)
+    assert seen, "no warning for a read-only resource list"
+    assert "resources" in seen[0] and c.CARD_URL in seen[0]
+
+
+def test_the_startup_retry_warns_when_it_also_comes_up_empty():
+    from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+    from homeassistant.core import CoreState
+    import logging
+    c = _cards()
+    hass = _Hass(state=CoreState.starting)
+    seen = []
+
+    class _Grab(logging.Handler):
+        def emit(self, record):
+            if record.levelno >= logging.WARNING:
+                seen.append(record.getMessage())
+
+    logger = logging.getLogger("gc.cards")
+    h = _Grab()
+    logger.addHandler(h)
+    try:
+        with _patched(c):
+            asyncio.run(c.async_register_cards(hass))
+            assert seen == [], "a starting instance must wait for the retry"
+            hass.bus.fire(EVENT_HOMEASSISTANT_STARTED)
+    finally:
+        logger.removeHandler(h)
+    assert seen and c.CARD_URL in seen[0]
+
+
 def test_a_running_instance_does_not_schedule_a_retry():
     from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
     c = _cards()
