@@ -73,9 +73,14 @@ async def async_register_cards(hass: HomeAssistant) -> None:
         # means an updated card reaches browsers without any cache dance.
         hass.http.register_view(GeelyCardView())
         integration = await async_get_integration(hass, DOMAIN)
-        # The version query busts browser caches on upgrade; without it the
-        # previous release's card survives every restart until a hard refresh.
-        url = f"{CARD_URL}?v={integration.version}"
+        # Version AND file timestamp. Home Assistant's service worker keeps a
+        # CacheFirst "file-cache" over every unmatched path for 24 hours, so it
+        # answers from its own copy without asking the server at all - no-cache
+        # headers never get a say. Only a URL the worker has not seen forces a
+        # fetch, and the timestamp changes on every download, including the
+        # re-downloads of one version while a fix is being tested.
+        stamp = await hass.async_add_executor_job(_card_mtime, path)
+        url = f"{CARD_URL}?v={integration.version}&m={stamp}"
         # Both paths, deliberately: the resource is what Lovelace awaits, the
         # extra-module URL covers panels that never read the resource list.
         # They carry the same URL, so the browser's module map runs the file
@@ -204,6 +209,13 @@ async def _async_verify_served(hass: HomeAssistant, url: str) -> None:
 
 def _card_path() -> str:
     return os.path.join(os.path.dirname(__file__), "geely-card.js")
+
+
+def _card_mtime(path: str) -> int:
+    try:
+        return int(os.path.getmtime(path))
+    except OSError:
+        return 0
 
 
 class GeelyCardView(HomeAssistantView):

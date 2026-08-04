@@ -115,6 +115,14 @@ def _patched(c, version="9.9.9"):
     return _Ctx()
 
 
+
+def _expected_url(c, version="9.9.9"):
+    """The card URL carries a file timestamp after the version: Home
+    Assistant's service worker keeps a CacheFirst copy of every file for 24
+    hours, so only a URL it has never seen forces a fetch."""
+    return f"{c.CARD_URL}?v={version}&m="
+
+
 def test_the_cards_register_once_with_a_version_busted_url():
     c = _cards()
     hass = _Hass()
@@ -122,7 +130,7 @@ def test_the_cards_register_once_with_a_version_busted_url():
         asyncio.run(c.async_register_cards(hass))
         asyncio.run(c.async_register_cards(hass))
     assert len(urls) == 1, "a second entry must not re-register"
-    assert urls[0] == f"{c.CARD_URL}?v=9.9.9", \
+    assert urls[0].startswith(_expected_url(c)), \
         "without the version query the old card survives every upgrade"
     (view,) = hass.http.views
     assert view.url == c.CARD_URL
@@ -171,7 +179,7 @@ def test_the_card_is_registered_as_a_lovelace_resource():
     hass = _Hass(resources=res)
     with _patched(c) as urls:
         asyncio.run(c.async_register_cards(hass))
-    assert [i["url"] for i in res.items] == [f"{c.CARD_URL}?v=9.9.9"]
+    assert len(res.items) == 1 and res.items[0]["url"].startswith(_expected_url(c))
     assert res.items[0]["type"] == "module"
     assert res.loaded, "the collection must be loaded before it is read"
     assert urls == [], (
@@ -190,7 +198,7 @@ def test_an_upgrade_moves_the_existing_resource_to_the_new_version():
     hass = _Hass(resources=res)
     with _patched(c):
         asyncio.run(c.async_register_cards(hass))
-    assert [i["url"] for i in res.items] == [f"{c.CARD_URL}?v=9.9.9"]
+    assert len(res.items) == 1 and res.items[0]["url"].startswith(_expected_url(c))
     assert len(res.items) == 1, "an upgrade must not add a second entry"
 
 
@@ -204,18 +212,17 @@ def test_duplicate_resources_are_collapsed_to_one():
     hass = _Hass(resources=res)
     with _patched(c):
         asyncio.run(c.async_register_cards(hass))
-    assert [i["url"] for i in res.items] == [f"{c.CARD_URL}?v=9.9.9"]
+    assert len(res.items) == 1 and res.items[0]["url"].startswith(_expected_url(c))
 
 
 def test_an_already_current_resource_is_left_alone():
     c = _cards()
-    res = _Resources([{"id": "1", "url": f"{load('cards').CARD_URL}?v=9.9.9",
-                       "type": "module"}])
+    current = f"{c.CARD_URL}?v=9.9.9&m={c._card_mtime(c._card_path())}"
+    res = _Resources([{"id": "1", "url": current, "type": "module"}])
     hass = _Hass(resources=res)
     with _patched(c):
         asyncio.run(c.async_register_cards(hass))
-    assert res.items == [{"id": "1", "url": f"{c.CARD_URL}?v=9.9.9",
-                          "type": "module"}]
+    assert res.items == [{"id": "1", "url": current, "type": "module"}]
 
 
 def test_yaml_mode_lovelace_falls_back_to_the_module_url():
@@ -229,7 +236,7 @@ def test_yaml_mode_lovelace_falls_back_to_the_module_url():
             hass.data["lovelace"] = data
         with _patched(c) as urls:
             asyncio.run(c.async_register_cards(hass))
-        assert urls == [f"{c.CARD_URL}?v=9.9.9"], data
+        assert len(urls) == 1 and urls[0].startswith(_expected_url(c)), data
 
 
 def test_a_dict_shaped_lovelace_store_is_still_understood():
@@ -250,7 +257,7 @@ def test_a_collection_that_refuses_the_write_degrades_quietly():
     with _patched(c) as urls:
         asyncio.run(c.async_register_cards(hass))
     assert res.items == []
-    assert urls == [f"{c.CARD_URL}?v=9.9.9"], "the fallback must still happen"
+    assert len(urls) == 1 and urls[0].startswith(_expected_url(c)), "the fallback must still happen"
 
 
 def test_a_collection_without_get_info_is_loaded_the_old_way():
@@ -290,13 +297,13 @@ def test_a_boot_that_beats_lovelace_retries_when_home_assistant_starts():
     hass = _Hass(state=CoreState.starting)
     with _patched(c) as urls:
         asyncio.run(c.async_register_cards(hass))
-        assert urls == [f"{c.CARD_URL}?v=9.9.9"]
+        assert len(urls) == 1 and urls[0].startswith(_expected_url(c))
         assert EVENT_HOMEASSISTANT_STARTED in hass.bus.listeners,             "no retry was scheduled"
         # Lovelace arrives late; the retry must pick it up.
         res = _Resources()
         hass.data["lovelace"] = types.SimpleNamespace(resources=res)
         hass.bus.fire(EVENT_HOMEASSISTANT_STARTED)
-    assert [i["url"] for i in res.items] == [f"{c.CARD_URL}?v=9.9.9"]
+    assert len(res.items) == 1 and res.items[0]["url"].startswith(_expected_url(c))
 
 
 def test_yaml_mode_says_out_loud_what_to_add_by_hand():
@@ -544,3 +551,11 @@ def test_the_view_reports_a_vanished_file_as_404_not_a_crash():
     finally:
         c._card_path = orig
     assert resp.status == 404
+
+
+def test_a_file_with_no_timestamp_still_produces_a_url():
+    """A filesystem that refuses stat (odd container mounts) must cost the
+    cache-busting suffix, not the card."""
+    c = _cards()
+    assert c._card_mtime(c._card_path() + ".nope") == 0
+    assert c._card_mtime(c._card_path()) > 0

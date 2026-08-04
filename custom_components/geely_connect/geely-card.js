@@ -941,7 +941,29 @@
     }
   } catch (err) { /* status must never break the file */ }
 
-  if (!window.customCards.some((c) => c.type === "geely-card")) {
+  /* Home Assistant's service worker keeps a CacheFirst copy of every file for
+   * 24 hours, so a page can genuinely run an older copy of this script beside
+   * a newer one - which is how a fixed card keeps behaving like the broken
+   * one. Whoever is newer wins: drop the other copy's picker entries instead
+   * of skipping ours. */
+  const OURS = ["geely-card", "geely-card-compact", "geely-card-status"];
+  const rank = (v) => String(v || "0").split(".").reduce(
+    (acc, part) => acc * 1000 + (parseInt(part, 10) || 0), 0);
+  const previous = window.__geelyCardVersion;
+  if (previous !== undefined && rank(previous) > rank(VERSION)) {
+    console.info(`geely-card: v${previous} already loaded, not downgrading to v${VERSION}`);
+  } else {
+    if (previous !== undefined) {
+      console.info(`geely-card: replacing the v${previous} picker entries with v${VERSION}`);
+    }
+    window.__geelyCardVersion = VERSION;
+    // Mutate in place. Home Assistant imports this array once and keeps that
+    // reference, so assigning a new array hands it a list it will never read
+    // again - the cards then vanish from the picker entirely. (Caught by the
+    // picker test after doing exactly that.)
+    for (let i = window.customCards.length - 1; i >= 0; i--) {
+      if (OURS.includes(window.customCards[i].type)) window.customCards.splice(i, 1);
+    }
     window.customCards.push(
       {
         type: "geely-card",
@@ -957,7 +979,7 @@
       },
       {
         type: "geely-card-status",
-        name: "Geely Card (status)",
+        name: `Geely Card (status v${VERSION})`,
         description: STATUS.line(),
         preview: false,
       },
