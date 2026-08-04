@@ -54,6 +54,18 @@ class GeelyRegionError(Exception):
     an unsupported region."""
 
 
+class GeelyCaptchaUnreachableError(Exception):
+    """Raised when the captcha host cannot be reached at the network level.
+
+    The captcha retries exist for the solver's ~85% accuracy, not for the
+    network: an unreachable host will not become reachable 45 seconds from
+    now, and each dead attempt burns the full connect timeout per resolved
+    address. Common causes are DNS filtering (Pi-hole/AdGuard blocklists)
+    and router or firewall geo-blocking - captcha4.geely.com is hosted in
+    mainland China. The config flow maps this onto a message that names the
+    host so the user has something to act on."""
+
+
 class GeelyControlError(Exception):
     """Raised when the Geely server rejects a control command.
 
@@ -1390,6 +1402,8 @@ def cidpsso_send_otp(email: str, country_code: str = "GB", *,
     `max_attempts` times. Returns the first successful /getCaptcha response,
     or the last response/error encountered.
     """
+    import requests
+
     from . import geetest_solver
 
     last_response: dict | None = None
@@ -1400,6 +1414,14 @@ def cidpsso_send_otp(email: str, country_code: str = "GB", *,
     for attempt in range(1, max_attempts + 1):
         try:
             captcha = geetest_solver.solve(verbose=False)
+        except requests.exceptions.ConnectionError as e:
+            # Network-level failure, not solver inaccuracy: fail fast with
+            # the host name instead of burning every retry on a dead route.
+            _LOGGER.debug("captcha attempt %d could not reach the host: %s",
+                          attempt, e)
+            raise GeelyCaptchaUnreachableError(
+                f"cannot reach {geetest_solver.GEELY_HOST} from this "
+                "Home Assistant host") from e
         except Exception as e:  # noqa: BLE001
             last_error = f"captcha solve threw: {e}"
             _LOGGER.debug("captcha attempt %d threw: %s", attempt, e)

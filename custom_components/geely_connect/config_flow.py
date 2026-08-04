@@ -147,6 +147,11 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         idfa=self._idfa, idfv=self._idfv,
                     )
                 )
+            except geely_api.GeelyCaptchaUnreachableError:
+                # Issue #5: a generic "try again in a minute" on a
+                # network-level failure sent users into a useless retry loop.
+                _LOGGER.exception("send-otp failed: captcha host unreachable")
+                errors["base"] = "captcha_unreachable"
             except Exception:
                 _LOGGER.exception("send-otp failed")
                 errors["base"] = "send_code_failed"

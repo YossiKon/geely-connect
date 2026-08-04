@@ -331,6 +331,35 @@ Or manually:
 Copy `custom_components/geely_connect/` into `config/custom_components/` and
 restart.
 
+### 🛜 Setup times out? Check these hosts are reachable
+
+The whole setup flow runs **from the Home Assistant machine** - not from your
+browser - so VPNs or DNS settings on the laptop don't matter, only the network
+the HA box itself is on. During setup it must reach:
+
+| Host | Used for |
+|---|---|
+| `captcha4.geely.com` | Geely's captcha - **the very first step**, before the email is even requested. Hosted in mainland China |
+| `access-app-global.geely.com` | Sends the login email, then the OTP login |
+| `m-lcmsam-eu.geely.com` | Vehicle list after login |
+| `api.ecloudkr.com`, `m-lcmsam-kr.geely.com`, `apis.ecloudkr.com` | APAC-market cars only, after login |
+
+If the form spins and then reports the captcha server as unreachable, the
+usual culprits are DNS filtering (Pi-hole / AdGuard / router blocklists that
+include Chinese domains) or firewall geo-blocking of Chinese IP ranges. Test
+from the HA box itself:
+
+```sh
+curl -sv --connect-timeout 10 https://captcha4.geely.com/ -o /dev/null
+# or, if curl is missing:
+python3 -c "import socket;s=socket.create_connection(('captcha4.geely.com',443),10);print('TCP OK ->',s.getpeername());s.close()"
+```
+
+A healthy DNS answer chains through `geely-auto-gtm.com` to
+`*.cn-shanghai.alb.aliyuncsslb.com`; if your resolver returns `0.0.0.0` or a
+private address instead, allowlist `captcha4.geely.com`,
+`*.geely-auto-gtm.com` and `*.aliyuncsslb.com` and try again.
+
 ---
 
 ## 🔄 Updating

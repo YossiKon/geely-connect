@@ -98,6 +98,24 @@ def test_a_failed_otp_send_re_renders_the_form_with_an_error():
     assert res["errors"]["base"] == "send_code_failed"
 
 
+def test_an_unreachable_captcha_host_gets_its_own_error():
+    """The generic "try again in a minute" on a network-level failure sent
+    users into a useless retry loop (issue #5). The distinct key maps to a
+    message naming the blocked host."""
+    cf, flow = _flow()
+
+    def _boom(*a, **k):
+        raise cf.geely_api.GeelyCaptchaUnreachableError(
+            "cannot reach https://captcha4.geely.com")
+
+    cf.geely_api.cidpsso_send_otp = _boom
+    res = asyncio.run(flow.async_step_user(
+        {"email": EMAIL, "country_code": "GB", "pressure_unit": "psi",
+         "poll_mode": "normal"}))
+    assert res["type"] == "form"
+    assert res["errors"]["base"] == "captcha_unreachable"
+
+
 def test_the_form_is_prefilled_after_an_error():
     """The captcha behind the OTP send is unreliable, so retyping the address
     on every retry is the normal case."""

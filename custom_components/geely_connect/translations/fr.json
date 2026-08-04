@@ -28,6 +28,7 @@
     },
     "error": {
       "send_code_failed": "Échec de l'envoi du code. Réessayez.",
+      "captcha_unreachable": "Home Assistant n'a pas pu joindre le serveur captcha de Geely (captcha4.geely.com). La configuration s'exécute depuis la machine Home Assistant, et cet hôte se trouve en Chine continentale - vérifiez que votre réseau ou DNS ne le bloque pas (listes de blocage Pi-hole/AdGuard, géofiltres du routeur), puis réessayez.",
       "invalid_code": "Code refusé (code à usage unique).",
       "no_vehicles": "Connexion réussie mais aucun véhicule trouvé.",
       "unknown": "Une erreur s'est produite. Consultez les journaux."
@@ -36,7 +37,7 @@
       "already_configured": "Ce véhicule est déjà configuré.",
       "all_configured": "Tous les véhicules du compte sont déjà configurés.",
       "cert_failed": "Échec de l'émission du certificat mTLS.",
-      "wrong_region": "Ce compte Geely est géré par un backend régional pour lequel cette intégration n'a pas d'identifiants. Les clouds EU/International et nord-américain sont pris en charge ; l'APAC et l'Amérique du Sud nécessitent leurs propres identifiants d'application, non publics. La ligne de journal indique la région détectée.",
+      "wrong_region": "Ce compte Geely est servi par un backend régional pour lequel cette intégration n'a pas d'identifiants. Elle prend en charge les clouds UE/International, Amérique du Nord et APAC ; les autres régions nécessitent leurs propres identifiants d'application, qui ne sont pas publics. La ligne de journal indique la région détectée.",
       "reauth_successful": "Ré-authentification réussie.",
       "unknown": "Une erreur s'est produite.",
       "reauth_account_mismatch": "La ré-authentification a utilisé un compte Geely différent de celui avec lequel cette entrée a été créée. Connectez-vous avec le compte d'origine, ou supprimez l'entrée et ajoutez à nouveau le véhicule."

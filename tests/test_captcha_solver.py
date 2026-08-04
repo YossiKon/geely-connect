@@ -176,3 +176,36 @@ def test_an_error_envelope_does_not_log_the_session_material():
         assert SECRET not in str(e), "captcha session material reached the error text"
         return
     raise AssertionError("did not raise")
+
+
+def test_an_unreachable_captcha_host_fails_fast_not_five_times():
+    """Issue #5: with the host blocked, every attempt burned ~45 s of connect
+    timeouts (15 s per resolved address) and the loop ran all five before the
+    user saw a generic "try again in a minute". Network-level failure is not
+    solver inaccuracy - one attempt, then a distinct exception naming the
+    host so there is something to act on."""
+    if importlib.util.find_spec("requests") is None:
+        skip("requests not installed")
+    import requests
+    api = load("api")
+    gs = load("geetest_solver")
+    calls = []
+
+    def _unreachable(**kw):
+        calls.append(1)
+        raise requests.exceptions.ConnectTimeout(
+            "Connection to the captcha host timed out")
+
+    orig = gs.solve
+    gs.solve = _unreachable
+    try:
+        try:
+            api.cidpsso_send_otp("user@example.com", "AU")
+            raised = None
+        except api.GeelyCaptchaUnreachableError as e:
+            raised = e
+    finally:
+        gs.solve = orig
+    assert raised is not None, "no distinct exception for the unreachable host"
+    assert "captcha4.geely.com" in str(raised), raised
+    assert len(calls) == 1, f"retried {len(calls)} times against a dead network"
