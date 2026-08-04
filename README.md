@@ -418,33 +418,13 @@ frontend package, no resource to add, nothing to copy. Open any dashboard,
 | **Geely Card** (`custom:geely-card`) | The full cockpit: range and battery up top, a live car silhouette that glows while charging, one-tap Lock / Unlock / Climate / Defrost / Vent / Trunk / Find / Sync, then charging, tires, trip and service health - each row hides itself when the car doesn't report it (a BEV shows no fuel section) |
 | **Geely Card (compact)** (`custom:geely-card-compact`) | The essentials in one tile: battery, range, status chips, and the five controls that matter |
 
-> ### ⚠️ Cards stuck on a spinner in the card picker - being worked on
->
-> **Status: open, under active investigation** -
-> [#8](https://github.com/YossiKon/geely-connect/issues/8).
->
-> One cause was found and fixed in **v1.15.0**: the card's JavaScript reached
-> the browser through a channel Lovelace does not wait for, so the frontend's
-> 2-second lookup for the card class could time out and leave the tile
-> spinning. It is now registered as a Lovelace resource, which Home Assistant
-> loads *before* it builds any card, and that path is verified end to end
-> against a real Home Assistant.
->
-> Some installs still report the spinner after updating, so **this is not
-> considered closed**. If you hit it:
->
-> 1. Update, **restart** Home Assistant, then reload the page - in the mobile
->    app, **Settings → Companion App → Reset frontend cache**.
-> 2. Check **Settings → Dashboards → ⋮ → Resources** for an entry reading
->    `/geely_connect/geely-card.js?v=<version>`. If it is missing and your
->    dashboards are in YAML mode, add it there by hand - the integration logs
->    a warning with the exact lines to paste.
-> 3. Meanwhile the card still works when added by hand: **Add card → Manual**,
->    then `type: custom:geely-card`.
->
-> Reports on [#8](https://github.com/YossiKon/geely-connect/issues/8) are very
-> welcome - especially whether the resource entry above exists on your system,
-> which separates the two possible causes.
+> ℹ️ **Known issue:** on some installations the cards don't yet appear in the
+> card picker - this is [being actively worked on](https://github.com/YossiKon/geely-connect/issues/8),
+> and updates land quickly. Everything else about the integration is
+> unaffected, and the cards themselves work when added manually:
+> **Add card → Manual** → `type: custom:geely-card`. Thank you for the
+> patience - and if you'd like to help, a note on the issue with what you see
+> is always welcome.
 
 With one Geely on the account the cards find their entities on their own.
 With several, point each card at a car:
