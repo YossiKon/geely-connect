@@ -574,7 +574,11 @@
       const fromPlatform = Object.keys(ents).find(
         (id) =>
           ents[id].platform === "geely_connect" &&
-          id.startsWith("sensor.") && id.endsWith("_battery"),
+          id.startsWith("sensor.") && id.endsWith("_battery") &&
+          // The 12V battery also ends in _battery, and whichever the
+          // registry lists first would win - binding every card lookup to
+          // the wrong prefix while looking perfectly plausible (#16).
+          !id.endsWith("_12v_battery"),
       );
       if (fromPlatform) {
         return fromPlatform.slice("sensor.".length, -"_battery".length);

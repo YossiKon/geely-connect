@@ -942,7 +942,14 @@ def _charge_leg(data: dict) -> tuple[float, float] | None:
     # its positive-only rule: a negative AC current is V2L discharge, and
     # showing it as charging power would be a lie in the other direction.
     live = []
-    if ac is not None and ac[0] > 0 and ac[1] > 0:
+    # Plausibility gate on the AC pair: a Brazilian EX5 reports
+    # chargeUAct 1581 at chargeIAct 16.3 on a 240 V wallbox (#17) - an
+    # impossible mains voltage whose product published 25.77 kW on a 6 kW
+    # charge. No AC supply on earth exceeds ~500 V phase-to-phase or ~150 A,
+    # so a reading outside those walls is a mis-scaled field, and the DC
+    # pair (the pack itself, ~460 V at -13 A on that session) carries the
+    # truthful rate instead.
+    if ac is not None and 0 < ac[0] <= 500 and 0 < ac[1] <= 150:
         live.append(ac)
     if dc is not None and dc[0] > 0 and abs(dc[1]) > 0:
         live.append(dc)

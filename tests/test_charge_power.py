@@ -343,3 +343,22 @@ def test_charge_complete_survives_a_dc_session():
     idle = _status(timeToFullyCharged="2047")
     s2 = sensor.GeelyChargeCompleteSensor(_Coord(idle), FAKE_VIN, "Geely (0000)")
     assert s2.native_value is None
+
+
+def test_an_impossible_ac_pair_loses_to_the_pack():
+    """#17, verbatim: chargeUAct 1581 V at 16.3 A on a 240 V / 6 kW wallbox.
+    No AC supply reaches 1581 V - the mis-scaled pair published 25.77 kW.
+    The pack pair carries the truthful rate and must win."""
+    data = _charging(chargeUAct="1581.0", chargeIAct="16.3",
+                     dcChargeUAct="460.0", dcChargeIAct="-13.7")
+    assert _power(data) == 6.3
+    assert _make("GeelyChargeVoltageSensor", data).native_value == 460.0
+    assert _make("GeelyChargeCurrentSensor", data).native_value == 13.7
+
+
+def test_a_plausible_ac_pair_still_wins_by_product():
+    """The EU car's honest 233 V x 29.5 A must keep beating the pack pair -
+    the gate is a wall against impossible values, not a DC preference."""
+    data = _charging(chargeUAct="233.0", chargeIAct="29.5",
+                     dcChargeUAct="460.0", dcChargeIAct="-13.7")
+    assert _power(data) == 6.87
