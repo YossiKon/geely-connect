@@ -674,22 +674,6 @@
           this._call("climate", on ? "turn_off" : "turn_on", "climate");
           break;
         }
-        case "heat": case "cool": {
-          const c = this._st("climate.climate");
-          const on = c && c.state !== "off";
-          const target = c && c.attributes ? NUM({ state: c.attributes.temperature }) : null;
-          const heating = key === "heat";
-          // Tapping the active preset turns the climate off; anything else
-          // sets a decisive target and switches on.
-          if (on && target != null && (heating ? target >= 25 : target <= 20)) {
-            this._call("climate", "turn_off", "climate");
-          } else {
-            this._call("climate", "set_temperature", "climate",
-              { temperature: heating ? 28 : 18 });
-            this._call("climate", "set_hvac_mode", "climate", { hvac_mode: "heat_cool" });
-          }
-          break;
-        }
         case "tempdown": case "tempup": {
           const c = this._st("climate.climate");
           if (!c || !c.attributes) break;
@@ -703,12 +687,14 @@
           this._call("climate", "set_temperature", "climate", { temperature: next });
           break;
         }
-        case "rapidheat":
-          this._call("climate", "set_preset_mode", "climate", { preset_mode: "Rapid Warming" });
+        case "rapidheat": case "rapidcool": {
+          const want = key === "rapidheat" ? "Rapid Warming" : "Rapid Cooling";
+          const c = this._st("climate.climate");
+          const cur = c && c.attributes && c.attributes.preset_mode;
+          if (cur === want) this._call("climate", "turn_off", "climate");
+          else this._call("climate", "set_preset_mode", "climate", { preset_mode: want });
           break;
-        case "rapidcool":
-          this._call("climate", "set_preset_mode", "climate", { preset_mode: "Rapid Cooling" });
-          break;
+        }
         case "seat_heat_driver": case "seat_heat_passenger":
         case "seat_vent_driver": case "seat_vent_passenger": {
           // Tap cycles Off -> Low -> Medium -> High -> Off.
@@ -724,6 +710,8 @@
         case "shade_open": this._call("cover", "open_cover", "sunshade"); break;
         case "shade_close": this._call("cover", "close_cover", "sunshade"); break;
         case "gclean": this._call("switch", "toggle", "g_clean"); break;
+        case "charging_sw": this._call("switch", "toggle", "charging"); break;
+        case "sched_sw": this._call("switch", "toggle", "scheduled_charging"); break;
         case "defrost": this._call("switch", "toggle", "defrost"); break;
         case "vent": this._call("switch", "toggle", "window_ventilation"); break;
         case "find": this._call("button", "press", "find_car"); break;
@@ -734,6 +722,26 @@
     _wire() {
       this.shadowRoot.querySelectorAll("[data-act]").forEach((el) =>
         el.addEventListener("click", () => this._onAction(el.dataset.act)));
+    }
+
+    _preset() {
+      const c = this._st("climate.climate");
+      return (c && c.attributes && c.attributes.preset_mode) || "none";
+    }
+
+    /* Charging on/off and the schedule arm - the two switches the charging
+     * section reads about but could not touch (#15). Hidden entirely on a
+     * car with no charging switches. */
+    _chargingControls() {
+      const sw = this._st("switch.charging");
+      const sched = this._st("switch.scheduled_charging");
+      if (!sw && !sched) return "";
+      return `<div class="crow wrap" style="margin:2px 0 6px">
+        ${sw ? `<button class="cbtn ${sw.state === "on" ? "on" : ""}" data-act="charging_sw"
+          title="Start / stop charging">${icon("bolt")}<span>Charging</span></button>` : ""}
+        ${sched ? `<button class="cbtn ${sched.state === "on" ? "on" : ""}" data-act="sched_sw"
+          title="Scheduled charging on / off">${icon("charge")}<span>Schedule</span></button>` : ""}
+      </div>`;
     }
 
     /* The full climate panel: temperature stepper, the car's own rapid
@@ -928,7 +936,8 @@
           <div class="actions">
             ${this._actBtn("lock", "Lock", "lock", { on: s.locked && s.locked.state === "locked" })}
             ${this._actBtn("unlock", "Unlock", "unlock")}
-            ${this._actBtn("climate", "Climate", "climate", { on: climateOn })}
+            ${this._actBtn("rapidheat", "Heat", "heat", { on: this._preset() === "Rapid Warming" })}
+            ${this._actBtn("rapidcool", "Cool", "cool", { on: this._preset() === "Rapid Cooling" })}
             ${this._actBtn("defrost", "Defrost", "defrost", { on: defrost && defrost.state === "on" })}
             ${this._actBtn("trunk", "Trunk", "trunk")}
           </div>
@@ -1077,6 +1086,7 @@
 
           <hr class="hairline">
           <p class="micro">${icon("charge")} Charging</p>
+          ${this._chargingControls()}
           <div class="grid sec">
             ${this._row("Charger", s.conn)}
             ${this._row("Power", power, { accent: s.charging })}
@@ -1208,7 +1218,6 @@
       const low = s.battery != null && s.battery <= 20;
       const power = NUM(this._st("sensor.charging_power"));
       const locked = s.locked && s.locked.state === "locked";
-      const climateOn = s.climate && s.climate.state !== "off";
       const online = this._st("binary_sensor.connected");
       const statusLine = s.charging
         ? `Charging${power != null ? " · " + power.toFixed(1) + " kW" : ""}`
@@ -1251,7 +1260,8 @@
               ${locked
                 ? this._actBtn("unlock", "Unlock", "unlock")
                 : this._actBtn("lock", "Lock", "lock")}
-              ${this._actBtn("climate", "Climate", "climate", { on: climateOn })}
+              ${this._actBtn("rapidheat", "Heat", "heat", { on: this._preset() === "Rapid Warming" })}
+              ${this._actBtn("rapidcool", "Cool", "cool", { on: this._preset() === "Rapid Cooling" })}
               ${this._actBtn("trunk", "Trunk", "trunk")}
               ${this._actBtn("find", "Find", "find")}
             </div>
@@ -1286,11 +1296,7 @@
       const temp = NUM(this._st("sensor.interior_temperature"));
       const power = NUM(this._st("sensor.charging_power"));
       const locked = s.locked && s.locked.state === "locked";
-      const climateOn = s.climate && s.climate.state !== "off";
-      const target = s.climate && s.climate.attributes
-        ? NUM({ state: s.climate.attributes.temperature }) : null;
-      const heatOn = climateOn && target != null && target >= 25;
-      const coolOn = climateOn && target != null && target <= 20;
+      const preset = this._preset();
       const online = this._st("binary_sensor.connected");
       const statusLine = s.charging
         ? `Charging${power != null ? " · " + power.toFixed(1) + " kW" : ""}`
@@ -1334,8 +1340,8 @@
             ${locked
               ? this._actBtn("unlock", "Unlock", "unlock")
               : this._actBtn("lock", "Lock", "lock")}
-            ${this._actBtn("heat", "Heat", "heat", { on: heatOn })}
-            ${this._actBtn("cool", "Cool", "cool", { on: coolOn })}
+            ${this._actBtn("rapidheat", "Heat", "heat", { on: preset === "Rapid Warming" })}
+            ${this._actBtn("rapidcool", "Cool", "cool", { on: preset === "Rapid Cooling" })}
           </div>
         </div>`;
       this._wire();
@@ -1356,7 +1362,7 @@
         "sensor.distance_to_service", "sensor.last_updated", "sensor.speed",
         "sensor.fuel_level", "sensor.fuel_range", "sensor.combined_range",
         "sensor.pack_power", "lock.doors", "climate.climate", "switch.defrost",
-        "switch.window_ventilation", "switch.scheduled_charging",
+        "switch.charging", "switch.window_ventilation", "switch.scheduled_charging",
         "select.seat_heat_driver", "select.seat_heat_passenger",
         "select.seat_vent_driver", "select.seat_vent_passenger",
         "time.scheduled_charging_start", "time.scheduled_charging_end",
@@ -1488,6 +1494,7 @@
 
           <hr class="hairline">
           <p class="micro">${icon("charge")} Charging</p>
+          ${this._chargingControls()}
           <div class="grid sec">
             ${this._row("Charger", s.conn)}
             ${this._row("Power", power, { accent: s.charging })}
@@ -1681,7 +1688,7 @@
       {
         type: "geely-card-compact",
         name: "Geely Card (compact)",
-        description: "Battery, range and the controls that matter - lock, climate, defrost, trunk.",
+        description: "Battery, range and the controls that matter - lock, rapid heat / cool, defrost, trunk.",
         preview: true,
       },
       {
@@ -1699,7 +1706,7 @@
       {
         type: "geely-card-strip",
         name: "Geely Card (strip)",
-        description: "One row: range, battery, lock state - and lock, climate, trunk and find as icon buttons.",
+        description: "One row: range, battery, lock state - and lock, rapid heat / cool, trunk and find as icon buttons.",
         preview: true,
       },
       {
