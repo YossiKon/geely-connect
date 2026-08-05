@@ -232,3 +232,77 @@ def test_the_raw_charge_fields_are_not_duplicated_by_full_exposure():
     ev = "vehicleStatus.additionalVehicleStatus.electricVehicleStatus"
     for k in ("chargeUAct", "chargeIAct", "dcChargeUAct", "dcChargeIAct"):
         assert f"{ev}.{k}" in sensor._CURATED_PATHS, k
+
+
+# ---------------------------------------------------- the DC session of #10 -
+# A real 41-minute DC fast charge on an AU-market EX5, logged poll by poll:
+# statusOfChargerConnection sat at 1 ("Plugged in") from plug to unplug while
+# the car pulled ~92 kW. The DC contactor (dcDcConnectStatus 3) and the sign
+# of dcChargeIAct (negative = into the pack) are the signals that actually
+# moved. Values below are verbatim samples from that log.
+
+def _dc_session(**ev):
+    ev.setdefault("statusOfChargerConnection", "1")
+    ev.setdefault("dcDcConnectStatus", "3")
+    ev.setdefault("chargerState", "15")
+    return _status(**ev)
+
+
+def test_a_dc_fast_charge_reports_its_power_despite_the_stuck_status():
+    """23:21:11 - 459.7 V at -198.9 A, status still 1 -> 91.43 kW, not 0."""
+    data = _dc_session(dcChargeUAct="459.7", dcChargeIAct="-198.9")
+    assert _power(data) == 91.43
+
+
+def test_the_dc_taper_steps_read_correctly_too():
+    """23:57:59 - 458.5 V at -56.7 A near the top of the charge."""
+    assert _power(_dc_session(dcChargeUAct="458.5", dcChargeIAct="-56.7")) == 26.0
+
+
+def test_dc_current_reports_magnitude_not_direction():
+    """The Charge Current entity is device_class current on a charge port:
+    198.9 A, not -198.9 A - the sign is the pack's bookkeeping."""
+    data = _dc_session(dcChargeUAct="459.7", dcChargeIAct="-198.9")
+    assert _make("GeelyChargeCurrentSensor", data).native_value == 198.9
+
+
+def test_driving_with_a_glitched_contactor_still_reads_zero():
+    """The pack pair reads +52.4 A while DRIVING (positive = out of the pack).
+    Even if dcDcConnectStatus glitched to 3 on the road, the current's sign
+    must keep the phantom 17.7 kW charge off the graph."""
+    data = _status(statusOfChargerConnection="0", dcDcConnectStatus="3",
+                   dcChargeUAct="338.2", dcChargeIAct="52.4")
+    assert _power(data) == 0.0
+
+
+def test_plugged_idle_after_a_dc_session_reads_zero():
+    """00:02:35, just unplugged: 452.0 V, 0.5 A, contactor back to 0."""
+    data = _status(statusOfChargerConnection="0", dcDcConnectStatus="0",
+                   dcChargeUAct="452.0", dcChargeIAct="0.5")
+    assert _power(data) == 0.0
+
+
+def test_a_contactor_without_a_current_field_is_not_charging():
+    """A trim that reports dcDcConnectStatus but no dcChargeIAct must fall
+    back to the official field rather than guess."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    sensor = load("sensor")
+    data = _status(statusOfChargerConnection="1", dcDcConnectStatus="3")
+    ev = data["vehicleStatus"]["additionalVehicleStatus"]["electricVehicleStatus"]
+    del ev["dcChargeIAct"]
+    assert sensor._is_charging(data) is False
+
+
+def test_the_charging_switch_follows_the_dc_session():
+    """switch.charging gates on the same composite: on mid-session, off after
+    unplug - the field it used to read alone never says DC."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    switch = load("switch")
+    sensor = load("sensor")
+    mid = _dc_session(dcChargeUAct="459.7", dcChargeIAct="-198.9")
+    after = _status(statusOfChargerConnection="0", dcDcConnectStatus="0",
+                    dcChargeUAct="452.0", dcChargeIAct="0.5")
+    assert sensor._is_charging(mid) is True
+    assert sensor._is_charging(after) is False

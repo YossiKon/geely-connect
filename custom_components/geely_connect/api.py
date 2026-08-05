@@ -908,7 +908,21 @@ class GeelyApi:
         if _is_auth_failure(j):
             raise GeelyAuthError(f"session/secure rejected our auth: {redact(j)}")
         if j.get("code") not in (1000, "1000"):
-            raise RuntimeError(f"session/secure failed: {redact(j)}")
+            # Still retryable, never GeelyAuthError: 8500 also shows up as a
+            # plain transient fault on healthy EU accounts, and escalating it
+            # to re-auth would cost a captcha and an email code each time.
+            # But when it repeats on every attempt from the very first setup,
+            # the known cause is regional (#9): the login code was minted by
+            # a backend this integration has no credentials for - South
+            # America / LATAM being the reported case - and this host will
+            # refuse it forever. Say so, because the raw 8500 text is
+            # unreadable garbage.
+            hint = (
+                " (if this happens on every setup attempt, the account may "
+                "live on an unsupported regional backend such as South "
+                "America - see issue #9)"
+            ) if j.get("code") in (8500, "8500") else ""
+            raise RuntimeError(f"session/secure failed{hint}: {redact(j)}")
         d = j["data"]
         self._jwt = d["accessToken"]
         self._jwt_uid = d["userId"]

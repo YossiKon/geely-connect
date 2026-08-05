@@ -666,7 +666,11 @@
 
     _carState() {
       const conn = this._st("sensor.charger_connection");
-      const charging = conn && conn.state === "Charging";
+      // Real power flowing counts too: DC fast charge can hold the connection
+      // field at "Plugged in" for a whole session (#10).
+      const chargePower = NUM(this._st("sensor.charging_power"));
+      const charging = (conn && conn.state === "Charging") ||
+        (chargePower != null && chargePower > 0.3);
       const battery = NUM(this._st("sensor.battery"));
       const range = this._st("sensor.electric_range");
       const locked = this._st("lock.doors");

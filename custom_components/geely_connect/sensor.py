@@ -777,6 +777,20 @@ def _fuel_range_km(data: dict) -> float | None:
     a true 0 km, and hiding it would blank Combined Range exactly when the
     driver is running on the last of both.
     """
+    # If this trim reports a fuel range of its own, believe it. The EX5
+    # payloads carry no such field, but the Starray's cluster shows one the
+    # projection below cannot match (#11): a plug-in hybrid's lifetime L/100km
+    # average is mostly-electric driving, so projecting the tank with it can
+    # triple the real number.
+    for section in (_RUN, _EV):
+        for key in ("distanceToEmptyOnFuel", "distanceToEmptyOnFuelOnly",
+                    "fuelRange"):
+            try:
+                reported = float(_walk(data, (*section, key)))
+            except (TypeError, ValueError):
+                continue
+            if reported >= 0:
+                return reported
     try:
         litres = float(_walk(data, (*_RUN, "fuelLevel")))
         per_100 = float(_walk(data, (*_RUN, "aveFuelConsumption")))
@@ -848,8 +862,27 @@ class GeelyCombinedRangeSensor(CoordinatorEntity, _AutoPrecision):
 
 
 def _is_charging(data: dict) -> bool:
-    """Whether the car says it is charging, per the field behind the label sensor."""
-    return _walk(data, (*_EV, "statusOfChargerConnection")) in _CHARGING_CODES
+    """Whether the car is actually charging, from either signal it gives.
+
+    `statusOfChargerConnection == 3` is the official word, and AC sessions do
+    say it. DC fast charge is another story: a 41-minute ~92 kW session on an
+    AU-market EX5 (#10) held the field at 1 - "Plugged in" - from plug to
+    unplug. The truthful DC signals in that log are the DC contactor
+    (`dcDcConnectStatus` 3 for exactly the connected window) and the *sign* of
+    the pack current: about -200 A flowing in while charging, +52 A while
+    driving, 0.5 A idle. Requiring the contactor AND a clearly negative
+    current keeps driving and plugged-idle out - the contactor alone would
+    misfire if it ever glitched during a drive, and the current alone could
+    catch regen.
+    """
+    if _walk(data, (*_EV, "statusOfChargerConnection")) in _CHARGING_CODES:
+        return True
+    if str(_walk(data, (*_EV, "dcDcConnectStatus"))) == "3":
+        try:
+            return float(_walk(data, (*_EV, "dcChargeIAct"))) < -0.5
+        except (TypeError, ValueError):
+            pass
+    return False
 
 
 def _charge_leg(data: dict) -> tuple[float, float] | None:
@@ -893,9 +926,20 @@ def _charge_leg(data: dict) -> tuple[float, float] | None:
         return None
     if not _is_charging(data):
         return (0.0, 0.0)
-    live = [leg for leg in (ac, dc) if leg is not None and leg[0] > 0 and leg[1] > 0]
+    # Sign rules differ per pair. The DC pair is the pack: negative current
+    # flows INTO it - the #10 fast-charge log ran at about -200 A the whole
+    # session - so either direction is a live reading once the charging gate
+    # has passed, and the magnitude compares and reports. The AC pair keeps
+    # its positive-only rule: a negative AC current is V2L discharge, and
+    # showing it as charging power would be a lie in the other direction.
+    live = []
+    if ac is not None and ac[0] > 0 and ac[1] > 0:
+        live.append(ac)
+    if dc is not None and dc[0] > 0 and abs(dc[1]) > 0:
+        live.append(dc)
     if live:
-        return max(live, key=lambda leg: leg[0] * leg[1])
+        volts, amps = max(live, key=lambda leg: leg[0] * abs(leg[1]))
+        return (volts, abs(amps))
     return ac if ac is not None else dc
 
 

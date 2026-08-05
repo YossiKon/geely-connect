@@ -249,7 +249,11 @@ def _poll_flags(d: dict) -> tuple[bool, bool]:
     add = vs.get("additionalVehicleStatus") or {}
     ev = add.get("electricVehicleStatus") or {}
     basic = vs.get("basicVehicleStatus") or {}
-    charging = str(ev.get("statusOfChargerConnection")) == "3"
+    # The composite from sensor.py: DC fast charge can hold
+    # statusOfChargerConnection at 1 for a whole session (#10), and a car
+    # mid-fast-charge is exactly when polling should stay fast.
+    from .sensor import _is_charging
+    charging = _is_charging(d)
     try:
         driving = float(basic.get("speed")) > 0
     except (TypeError, ValueError):
@@ -268,6 +272,9 @@ def _poll_signature(d: dict) -> tuple:
         ev.get("chargeLevel"), ev.get("distanceToEmptyOnBatteryOnly"),
         ev.get("statusOfChargerConnection"), safe.get("centralLockingStatus"),
         basic.get("speed"),
+        # DC sessions move only these two (#10) - without them a fast charge
+        # can look like an idle car and slow its own polling down.
+        ev.get("dcDcConnectStatus"), ev.get("dcChargeIAct"),
     )
 
 

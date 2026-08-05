@@ -155,6 +155,7 @@ class GeelySwitch(CoordinatorEntity, SwitchEntity):
         self._command_off = command_off
         self._state_path = state_path
         self._on_when_in = on_when_in
+        self._key = key
         self._attr_unique_id = f"geely_{self._vin}_sw_{key}"
         self._attr_name = name
         if icon:
@@ -170,6 +171,13 @@ class GeelySwitch(CoordinatorEntity, SwitchEntity):
         v = _walk(self.coordinator.data or {}, self._state_path)
         if v is None:
             return None
+        if self._key == "charging":
+            # DC fast charge never moves statusOfChargerConnection off 1 on
+            # some cars (#10); the composite in sensor._is_charging reads the
+            # DC contactor and current sign as well, so the switch shows on
+            # for the sessions that field misses.
+            from .sensor import _is_charging
+            return _is_charging(self.coordinator.data or {})
         return _state_in(v, self._on_when_in)
 
     async def async_turn_on(self, **_: Any) -> None:

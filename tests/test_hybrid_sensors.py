@@ -188,3 +188,25 @@ def test_the_cumulative_odometers_are_total_increasing_not_measurement():
     for key in ("mileage_on_fuel", "mileage_on_battery"):
         assert key in sensor._TOTAL_INCREASING_KEYS, key
         assert key not in sensor._MEASUREMENT_KEYS, key
+
+
+def test_a_reported_fuel_range_beats_the_projection():
+    """#11: the Starray's cluster showed 157 km while the projection said
+    448 km - a PHEV's lifetime average is mostly-electric driving, so litres
+    over lifetime-L/100km can triple the truth. When the payload carries a
+    fuel range of its own, that number wins."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    sensor = load("sensor")
+    data = _status(running={"fuelLevel": "11.2", "aveFuelConsumption": "2.5",
+                             "distanceToEmptyOnFuel": "157"})
+    assert sensor._fuel_range_km(data) == 157.0
+
+
+def test_a_junk_reported_fuel_range_falls_back_to_the_projection():
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    sensor = load("sensor")
+    data = _status(running={"fuelLevel": "11.2", "aveFuelConsumption": "2.5",
+                             "distanceToEmptyOnFuel": "not-a-number"})
+    assert abs(sensor._fuel_range_km(data) - 448.0) < 0.1
