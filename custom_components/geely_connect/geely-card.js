@@ -990,12 +990,12 @@
     lastLossAt: null, lastFixAt: null,
     line() {
       const missing = ["geely-card", "geely-card-compact", "geely-card-top",
-        "geely-card-mini"].filter((n) => !window.customElements.get(n));
+        "geely-card-mini", "geely-card-strip"].filter((n) => !window.customElements.get(n));
       const ms = (t) => (t === null ? "?" : `${t}ms`);
       return [
         `v${this.version}`,
         "script ran",
-        missing.length ? `MISSING: ${missing.join(", ")}` : "all 4 cards OK",
+        missing.length ? `MISSING: ${missing.join(", ")}` : "all 5 cards OK",
         `first define ${this.firstDefine === false ? "FAILED" : ms(this.firstDefine)}`,
         this.losses ? `lost x${this.losses} (last at ${ms(this.lastLossAt)})` : "never lost",
         this.swaps ? `registry swapped x${this.swaps}` : "no registry swap",
@@ -1017,6 +1017,87 @@
       console.warn(`geely-card: define(${tag}) skipped:`, err);
     }
   };
+  /* ---------------------------------------------------------- strip ----- */
+
+  class GeelyCardStrip extends GeelyCardBase {
+    _watched() {
+      return ["sensor.battery", "sensor.electric_range", "sensor.charging_power",
+        "lock.doors", "climate.climate", "binary_sensor.connected",
+        "binary_sensor.door_driver", "binary_sensor.door_passenger",
+        "binary_sensor.door_rear_left", "binary_sensor.door_rear_right",
+        "binary_sensor.trunk", "binary_sensor.hood"];
+    }
+
+    getCardSize() { return 2; }
+
+    static getGridOptions() {
+      return { columns: 12, rows: 2, min_columns: 6, min_rows: 1 };
+    }
+
+    _render() {
+      if (!this._prefix) return this._missing();
+      const s = this._carState();
+      const range = OK(s.range) ? Math.round(NUM(s.range)) : "—";
+      const batt = s.battery == null ? "—" : Math.round(s.battery);
+      const low = s.battery != null && s.battery <= 20;
+      const power = NUM(this._st("sensor.charging_power"));
+      const locked = s.locked && s.locked.state === "locked";
+      const climateOn = s.climate && s.climate.state !== "off";
+      const online = this._st("binary_sensor.connected");
+      const statusLine = s.charging
+        ? `Charging${power != null ? " · " + power.toFixed(1) + " kW" : ""}`
+        : s.doorsOpen.length ? `${s.doorsOpen.length} open`
+        : locked ? "Locked" : s.locked ? "Unlocked" : "Parked";
+
+      this.shadowRoot.innerHTML = `<style>${BASE_CSS}
+        .shell { padding: 12px 16px 10px; }
+        .rowline { display:flex; align-items:center; gap:14px; }
+        .left { flex:1; min-width:0; }
+        .topline { display:flex; align-items:baseline; gap:8px; min-width:0; }
+        .dot { width:5px; height:5px; border-radius:50%; background:${ACCENT};
+               flex:none; align-self:center; }
+        .dot.off { background:${AMBER}; }
+        .rng { font-size:24px; }
+        .rng .u { font-size:11px; color: var(--secondary-text-color); margin-left:2px; }
+        .pct { font-size:12px; color: var(--secondary-text-color);
+               font-variant-numeric: tabular-nums; }
+        .status { font-size:11px; color: var(--secondary-text-color); margin-top:1px;
+                  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .status.charging { color:${ACCENT}; }
+        .status.warn { color:${AMBER}; }
+        .actions { display:flex; gap:6px; flex:none; }
+        .act { width:44px; padding:8px 0 7px; border-radius:12px; }
+        .act span { display:none; }
+        .act svg { width:19px; height:19px; }
+        .bar { margin-top:9px; }
+        </style>
+        <div class="shell">
+          <div class="rowline">
+            <div class="left">
+              <div class="topline">
+                <i class="dot ${online && online.state === "off" ? "off" : ""}"></i>
+                <span class="num rng ${OK(s.range) ? "" : "unavail"}">${range}<span class="u">km</span></span>
+                <span class="pct">${batt}%</span>
+              </div>
+              <div class="status ${s.charging ? "charging" : s.doorsOpen.length ? "warn" : ""}">${esc(statusLine)}</div>
+            </div>
+            <div class="actions">
+              ${locked
+                ? this._actBtn("unlock", "Unlock", "unlock")
+                : this._actBtn("lock", "Lock", "lock")}
+              ${this._actBtn("climate", "Climate", "climate", { on: climateOn })}
+              ${this._actBtn("trunk", "Trunk", "trunk")}
+              ${this._actBtn("find", "Find", "find")}
+            </div>
+          </div>
+          <div class="bar ${low ? "low" : ""} ${s.charging ? "charging" : ""}">
+            <i style="width:${batt === "—" ? 0 : batt}%"></i>
+          </div>
+        </div>`;
+      this._wire();
+    }
+  }
+
   /* ----------------------------------------------------------- mini ----- */
 
   class GeelyCardMini extends GeelyCardBase {
@@ -1293,6 +1374,7 @@
     defineOnce("geely-card-compact", GeelyCardCompact);
     defineOnce("geely-card-top", GeelyCardTop);
     defineOnce("geely-card-mini", GeelyCardMini);
+    defineOnce("geely-card-strip", GeelyCardStrip);
     defineOnce("geely-card", GeelyCard);
   };
   registerElements();
@@ -1327,7 +1409,8 @@
     const lost = !window.customElements.get("geely-card") ||
       !window.customElements.get("geely-card-compact") ||
       !window.customElements.get("geely-card-top") ||
-      !window.customElements.get("geely-card-mini");
+      !window.customElements.get("geely-card-mini") ||
+      !window.customElements.get("geely-card-strip");
     if (swapped || lost) {
       if (lost) {
         STATUS.losses += 1;
@@ -1401,7 +1484,7 @@
    * a newer one - which is how a fixed card keeps behaving like the broken
    * one. Whoever is newer wins: drop the other copy's picker entries instead
    * of skipping ours. */
-  const OURS = ["geely-card", "geely-card-compact", "geely-card-top", "geely-card-mini", "geely-card-status"];
+  const OURS = ["geely-card", "geely-card-compact", "geely-card-top", "geely-card-mini", "geely-card-strip", "geely-card-status"];
   const rank = (v) => String(v || "0").split(".").reduce(
     (acc, part) => acc * 1000 + (parseInt(part, 10) || 0), 0);
   const previous = window.__geelyCardVersion;
@@ -1442,6 +1525,12 @@
         type: "geely-card-mini",
         name: "Geely Card (mini)",
         description: "A small square: range, cabin temperature, status, a lock button that follows the car, and quick heat / cool.",
+        preview: true,
+      },
+      {
+        type: "geely-card-strip",
+        name: "Geely Card (strip)",
+        description: "One row: range, battery, lock state - and lock, climate, trunk and find as icon buttons.",
         preview: true,
       },
       {

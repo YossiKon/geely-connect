@@ -408,7 +408,7 @@ everything else.
 
 ### 🚙 The built-in cards - zero setup
 
-The integration ships **four custom cards** and registers them by itself - no
+The integration ships **five custom cards** and registers them by itself - no
 HACS frontend package, no resource to add, nothing to copy. Open any
 dashboard, **Add card**, and search "Geely":
 
@@ -417,7 +417,8 @@ dashboard, **Add card**, and search "Geely":
 | **Geely Card** (`custom:geely-card`) | The full cockpit: range and battery up top, the EX5 silhouette that glows while charging and flags every opening, one-tap Lock / Unlock / Climate / Defrost / Vent / Trunk / Find / Sync, then charging, tires, trip and service health - each row hides itself when the car doesn't report it |
 | **Geely Card (top view)** (`custom:geely-card-top`) | The car from above: tire pressure beside each wheel, live status on every door, the hood, the sunroof and the trunk, with the same header and controls |
 | **Geely Card (compact)** (`custom:geely-card-compact`) | The essentials in one tile: battery, range, status chips, and the five controls that matter |
-| **Geely Card (mini)** (`custom:geely-card-mini`) | A small square: range, cabin temperature, status, and lock / unlock / climate |
+| **Geely Card (mini)** (`custom:geely-card-mini`) | A small square: range, cabin temperature, status, a lock button that follows the car (locked offers Unlock, unlocked offers Lock), and one-tap quick heat / quick cool |
+| **Geely Card (strip)** (`custom:geely-card-strip`) | One row: range, battery and lock state, with lock, climate, trunk and find as icon buttons - for the top of a dashboard or a narrow column |
 
 | Full | Top view |
 |---|---|
@@ -426,6 +427,8 @@ dashboard, **Add card**, and search "Geely":
 | Compact | Mini |
 |---|---|
 | ![Geely Card compact](docs/images/card-compact.png) | ![Geely Card mini](docs/images/card-mini.png) |
+
+![Geely Card strip](docs/images/card-strip.png)
 
 With one Geely on the account the cards find their entities on their own -
 even after you rename them. With several cars, point each card at one:
