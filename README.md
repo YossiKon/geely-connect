@@ -36,12 +36,193 @@ polished setup on top.
 - 🗣️ **Translated setup** - the configuration dialogs are in English, Hebrew,
   Arabic, Russian and French. Entity names follow Home Assistant's own
   language.
-- 🚙 **Two custom cards included** - `custom:geely-card` (the full cockpit) and
-  `custom:geely-card-compact` appear in the card picker automatically the
-  moment the integration is set up. Zero config, zero extra installs.
 - 🖥️ **Five built-in dashboard cards** - a full cockpit with a complete climate panel, a top-down status view, a compact tile, a mini square and a one-row strip - registered automatically, plus ready-made automations and Blueprints
 - 📈 **Long-term statistics** on every numeric entity, so history survives the
   recorder's purge window.
+
+---
+
+## 📚 Contents
+
+- [Installation](#-installation-hacs) · [Updating](#-updating)
+- [The built-in dashboard cards](#%EF%B8%8F-dashboards--cards)
+- [Sensors](#-what-you-can-see-sensors) · [Controls](#%EF%B8%8F-what-you-can-do-controls)
+- [Polling modes](#-efficient-adaptive-polling)
+- [Automations, dashboards & widgets](#-automations-dashboards--widgets)
+- [Security](#-security) · [Supported regions](#-supported-regions)
+- [Changing settings later](#%EF%B8%8F-changing-settings-later) · [Known limitation](#%EF%B8%8F-known-limitation---one-session-per-account)
+- [Repository structure](#-repository-structure) · [License & credits](#-license--credits)
+
+---
+
+## 📥 Installation (HACS)
+
+Geely Connect is in the **HACS default store**, so there is no repository URL
+to add.
+
+**One-click:** [![Add to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=YossiKon&repository=geely-connect&category=integration)
+
+Or manually:
+
+1. HACS → search **Geely Connect** → open it → **Download**, then **restart
+   Home Assistant**
+2. Settings → Devices & Services → **Add Integration** → **Geely Connect**
+3. Enter your email, pick **country / tire-pressure unit / polling mode**, then
+   enter the 6-digit code sent to your inbox
+
+### The repository doesn't show up in HACS?
+
+- Clear any active filters in the HACS search box, and make sure you are
+  looking under **Integrations**.
+- HACS caches its repository list. Force a refresh with ⋮ → **Reload data** on
+  the HACS main page.
+
+> **Added it as a custom repository before?** It still works, but you can tidy
+> up: HACS → ⋮ → **Custom repositories** → 🗑 next to this repository. Removing
+> the *custom repository entry* does not uninstall the integration - the store
+> copy takes over and updates continue normally.
+
+### Manual installation
+Copy `custom_components/geely_connect/` into `config/custom_components/` and
+restart.
+
+### 🛜 Setup times out? Check these hosts are reachable
+
+The whole setup flow runs **from the Home Assistant machine** - not from your
+browser - so VPNs or DNS settings on the laptop don't matter, only the network
+the HA box itself is on. During setup it must reach:
+
+| Host | Where | When |
+|---|---|---|
+| `captcha4.geely.com` | 🇨🇳 China (Alibaba, Hangzhou) | **Login only** - the captcha that runs before the email code |
+| `access-app-global.geely.com` | 🇩🇪 Frankfurt | Login only - sends the email code, exchanges the OTP |
+| `m-lcmsam-eu.geely.com` | 🇩🇪 Frankfurt | Login only - the vehicle list |
+| `api.ecloudeu.com` | 🇩🇪 Frankfurt (AWS) | Once at setup - provisions the certificate |
+| `apis.ecloudeu.com` | 🇩🇪 Frankfurt (AWS) | **Ongoing** - every poll and every command |
+
+An APAC-market car uses the Korean pair instead: `api.ecloudkr.com` and
+`apis.ecloudkr.com` (AWS, Seoul/Incheon) plus `m-lcmsam-kr.geely.com`.
+
+**Blocking China after setup is fine.** Only the captcha lives there, and only
+the login touches it - day-to-day polling and commands never do. Lift the block
+when you add a car, or if Home Assistant ever asks you to re-authenticate.
+Note the captcha host resolves through `*.geely-auto-gtm.com` to rotating
+Alibaba addresses, so a static IP allowlist will not hold; scope a firewall
+rule to the Home Assistant machine instead.
+
+If the form spins and then reports the captcha server as unreachable, the
+usual culprits are DNS filtering (Pi-hole / AdGuard / router blocklists that
+include Chinese domains) or firewall geo-blocking of Chinese IP ranges. Test
+from the HA box itself:
+
+```sh
+curl -sv --connect-timeout 10 https://captcha4.geely.com/ -o /dev/null
+# or, if curl is missing:
+python3 -c "import socket;s=socket.create_connection(('captcha4.geely.com',443),10);print('TCP OK ->',s.getpeername());s.close()"
+```
+
+A healthy DNS answer chains through `geely-auto-gtm.com` to
+`*.cn-shanghai.alb.aliyuncsslb.com`; if your resolver returns `0.0.0.0` or a
+private address instead, allowlist `captcha4.geely.com`,
+`*.geely-auto-gtm.com` and `*.aliyuncsslb.com` and try again.
+
+---
+
+## 🔄 Updating
+
+**You never need to remove and re-add the integration.** Your vehicle, history,
+automations and dashboards all survive an update.
+
+1. HACS → **Geely Connect** → **Update**
+2. **Restart Home Assistant** - always required. Python caches modules it has
+   already imported, so *Reload* on the integration rebuilds the entities from
+   the code already in memory and will not pick up a new version.
+
+Turn on HACS → ⋮ → **Settings** → *Show notification when a new version is
+available* and updates also appear under Settings → **Updates** alongside
+everything else.
+
+### No update showing?
+
+- HACS refreshes repository data on a timer. Force it: HACS → **Geely Connect**
+  → ⋮ → **Update information**, or ⋮ → **Reload data** on the HACS main page.
+- If you installed before the first release existed, HACS is tracking the
+  **branch**, not releases, and has no version to compare against. Fix it once:
+  ⋮ → **Redownload** → pick a version such as `v1.4.0` from the dropdown. Every
+  later release then shows up as a normal update.
+- Conversely, choosing **main** in that same dropdown tracks the branch, so
+  every push is available immediately without waiting for a release - handy
+  while a change is being tested.
+
+---
+
+## 🖥️ Dashboards & cards
+
+### 🚙 The built-in cards - zero setup
+
+The integration ships **five custom cards** and registers them by itself - no
+HACS frontend package, no resource to add, nothing to copy. Open any
+dashboard, **Add card**, and search "Geely":
+
+| Card | What it is |
+|---|---|
+| **Geely Card** (`custom:geely-card`) | The full cockpit: range and battery up top, the EX5 silhouette that glows while charging and flags every opening, one-tap Lock / Unlock / Climate / Defrost / Vent / Trunk / Find / Sync, a full climate panel (temperature, rapid heat / cool, seat heating and cooling, fresh air, sunroof and shade), then charging, tires, trip and service health - each block hides itself when the car doesn't report it |
+| **Geely Card (top view)** (`custom:geely-card-top`) | The car from above: tire pressure beside each wheel, bold live status on every door, the hood, the sunroof and the trunk - with the same header, actions and climate panel |
+| **Geely Card (compact)** (`custom:geely-card-compact`) | The essentials in one tile: battery, range, status chips, and the five controls that matter |
+| **Geely Card (mini)** (`custom:geely-card-mini`) | A small square: range, cabin temperature, status, a lock button that follows the car (locked offers Unlock, unlocked offers Lock), and one-tap quick heat / quick cool |
+| **Geely Card (strip)** (`custom:geely-card-strip`) | One row: range, battery and lock state, with lock, climate, trunk and find as icon buttons - for the top of a dashboard or a narrow column |
+
+| Full | Top view |
+|---|---|
+| ![Geely Card](docs/images/card-full.png) | ![Geely Card top view](docs/images/card-top.png) |
+
+| Compact | Mini |
+|---|---|
+| ![Geely Card compact](docs/images/card-compact.png) | ![Geely Card mini](docs/images/card-mini.png) |
+
+![Geely Card strip](docs/images/card-strip.png)
+
+With one Geely on the account the cards find their entities on their own -
+even after you rename them. With several cars, point each card at one:
+
+```yaml
+type: custom:geely-card
+prefix: my_geely_ex5      # the slug in sensor.my_geely_ex5_battery
+```
+
+#### The climate panel
+
+The full and top-view cards carry a complete **Climate** section:
+
+- **Temperature stepper** - bound to the climate entity's own min / max / step
+  (15.5-28.5 °C in 0.5° steps on the EX5), so it can never send a value the
+  car refuses.
+- **Heat / Cool** - the car's real *Rapid Warming* / *Rapid Cooling* presets,
+  which also run the seats and ventilation, exactly as the official app does.
+- **Seat heating / Seat cooling** per front seat - each tap steps
+  Off → Low → Medium → High → Off.
+- **Fresh air** (G-Clean), and **Open / Close** for the sunroof and the
+  sunshade.
+- Every block hides itself on a trim that lacks the entity - and there is no
+  fan-speed control because the car's cloud API simply has none.
+
+Two touches worth knowing: **Unlock and Trunk arm on the first tap and fire
+on the second** (a stray touch on a wall tablet can't open the car), and the
+accent colour follows the state - teal while charging, amber when something
+needs a look. `--geely-accent` / `--geely-warn` theme variables override both.
+
+#### If a card ever misbehaves
+
+The picker holds one more entry, **Geely Card (status vX.Y.Z)** - a plain
+text tile that always renders, shows which version of the card script is
+actually running in *your* browser, and reports the registration timeline.
+If a card sticks on a spinner or looks outdated after an update, a
+screenshot of that tile is the whole bug report. (Old cards after an update
+usually mean a cached copy: update, **restart Home Assistant**, then hard
+refresh - or *Reset frontend cache* in the companion app.)
+
+> The YAML card and view files that used to live in `cards/` and `views/`
+> are gone - the built-in cards replace them and stay current on their own.
 
 ---
 
@@ -254,223 +435,7 @@ climate before departure).
 
 ---
 
-## 🔒 Security
-
-Security was a first-class goal of this build. Every connection is validated
-against the public CAs. The two Geely control gateways that use Geely's own
-private CA - `apis.ecloudeu.com` and `apis.ecloudus.com` - are each verified
-against a public-key pin that ships with the integration, so they are checked
-from the very first connection and a man-in-the-middle is refused rather than
-trusted. No other host may use that fallback, and a host that has validated
-publicly once can never be pushed onto it. Credentials are stored with owner-only access, secrets are masked in logs
-and in the diagnostics report, and all traffic goes only to Geely's own servers
-- no telemetry, no third parties.
-
-If Geely ever rotates that gateway's key you will see a `GeelyTLSPinError`
-naming the host and the key it presented. That is the pin doing its job - it
-cannot tell a legitimate rotation from an attacker, and neither can you from
-the error alone. So:
-
-1. **Do not pin the reported key.** If the error was caused by someone
-   intercepting your connection, that key is *theirs*, and pinning it would
-   hand them exactly the trust the pin exists to withhold.
-2. [Open an issue](https://github.com/YossiKon/geely-connect/issues) with the
-   host and key from the error. A rotation hits everyone at once, so it is
-   quickly confirmed from other reports and networks, and a release with the
-   new pin ships. The integration keeps showing the last known data meanwhile
-   - you lose remote commands, not the car.
-3. Only if you must unblock yourself sooner: confirm the same key is reported
-   from a **different network** (e.g. mobile hotspot instead of home Wi-Fi -
-   an attacker rarely controls both), and only then add it to the `pins` list
-   for that host in `.storage/geely_connect/<VIN>/server_pins.json` and
-   restart.
-
-### What "hardened" means here
-
-Because this account can unlock and start your car, the transport gets treated
-like a credential path rather than a convenience:
-
-| | How this integration handles it |
-|---|---|
-| **Certificate validation** | Strict public-CA validation with hostname checking on every connection. The private-CA fallback is allowlisted to two known gateways, requires a private-CA verify code, and is permanently disabled for any host that has ever validated publicly - so a bad certificate cannot force a downgrade |
-| **Server identity** | SPKI public-key pins ship with the integration and are remembered on disk, so a swapped server key is caught across restarts, before any credential is sent |
-| **Logs & diagnostics** | Tokens, certificates and the captcha secret are masked; VIN, user ID, e-mail and device IDs are reduced to their last four characters. The diagnostics download is redacted separately, so a bug report is safe to attach |
-| **Request building** | The VIN, user ID and server-supplied headers are rejected if they contain CR/LF, so a hostile backend value cannot smuggle a second request onto the authenticated socket |
-| **Stored secrets** | The mTLS private key is created `0600` from the first byte - never briefly world-readable - inside a `0700` directory |
-| **Identifiers** | VIN and user ID must match a strict charset before they reach a filesystem path or a request line |
-| **Re-authentication** | Signing in as a different Geely account is refused rather than silently rebinding the entry |
-| **Where data goes** | Only Geely's own servers. No telemetry, no analytics, no third-party host |
-
----
-
-## 📥 Installation (HACS)
-
-Geely Connect is in the **HACS default store**, so there is no repository URL
-to add.
-
-**One-click:** [![Add to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=YossiKon&repository=geely-connect&category=integration)
-
-Or manually:
-
-1. HACS → search **Geely Connect** → open it → **Download**, then **restart
-   Home Assistant**
-2. Settings → Devices & Services → **Add Integration** → **Geely Connect**
-3. Enter your email, pick **country / tire-pressure unit / polling mode**, then
-   enter the 6-digit code sent to your inbox
-
-### The repository doesn't show up in HACS?
-
-- Clear any active filters in the HACS search box, and make sure you are
-  looking under **Integrations**.
-- HACS caches its repository list. Force a refresh with ⋮ → **Reload data** on
-  the HACS main page.
-
-> **Added it as a custom repository before?** It still works, but you can tidy
-> up: HACS → ⋮ → **Custom repositories** → 🗑 next to this repository. Removing
-> the *custom repository entry* does not uninstall the integration - the store
-> copy takes over and updates continue normally.
-
-### Manual installation
-Copy `custom_components/geely_connect/` into `config/custom_components/` and
-restart.
-
-### 🛜 Setup times out? Check these hosts are reachable
-
-The whole setup flow runs **from the Home Assistant machine** - not from your
-browser - so VPNs or DNS settings on the laptop don't matter, only the network
-the HA box itself is on. During setup it must reach:
-
-| Host | Where | When |
-|---|---|---|
-| `captcha4.geely.com` | 🇨🇳 China (Alibaba, Hangzhou) | **Login only** - the captcha that runs before the email code |
-| `access-app-global.geely.com` | 🇩🇪 Frankfurt | Login only - sends the email code, exchanges the OTP |
-| `m-lcmsam-eu.geely.com` | 🇩🇪 Frankfurt | Login only - the vehicle list |
-| `api.ecloudeu.com` | 🇩🇪 Frankfurt (AWS) | Once at setup - provisions the certificate |
-| `apis.ecloudeu.com` | 🇩🇪 Frankfurt (AWS) | **Ongoing** - every poll and every command |
-
-An APAC-market car uses the Korean pair instead: `api.ecloudkr.com` and
-`apis.ecloudkr.com` (AWS, Seoul/Incheon) plus `m-lcmsam-kr.geely.com`.
-
-**Blocking China after setup is fine.** Only the captcha lives there, and only
-the login touches it - day-to-day polling and commands never do. Lift the block
-when you add a car, or if Home Assistant ever asks you to re-authenticate.
-Note the captcha host resolves through `*.geely-auto-gtm.com` to rotating
-Alibaba addresses, so a static IP allowlist will not hold; scope a firewall
-rule to the Home Assistant machine instead.
-
-If the form spins and then reports the captcha server as unreachable, the
-usual culprits are DNS filtering (Pi-hole / AdGuard / router blocklists that
-include Chinese domains) or firewall geo-blocking of Chinese IP ranges. Test
-from the HA box itself:
-
-```sh
-curl -sv --connect-timeout 10 https://captcha4.geely.com/ -o /dev/null
-# or, if curl is missing:
-python3 -c "import socket;s=socket.create_connection(('captcha4.geely.com',443),10);print('TCP OK ->',s.getpeername());s.close()"
-```
-
-A healthy DNS answer chains through `geely-auto-gtm.com` to
-`*.cn-shanghai.alb.aliyuncsslb.com`; if your resolver returns `0.0.0.0` or a
-private address instead, allowlist `captcha4.geely.com`,
-`*.geely-auto-gtm.com` and `*.aliyuncsslb.com` and try again.
-
----
-
-## 🔄 Updating
-
-**You never need to remove and re-add the integration.** Your vehicle, history,
-automations and dashboards all survive an update.
-
-1. HACS → **Geely Connect** → **Update**
-2. **Restart Home Assistant** - always required. Python caches modules it has
-   already imported, so *Reload* on the integration rebuilds the entities from
-   the code already in memory and will not pick up a new version.
-
-Turn on HACS → ⋮ → **Settings** → *Show notification when a new version is
-available* and updates also appear under Settings → **Updates** alongside
-everything else.
-
-### No update showing?
-
-- HACS refreshes repository data on a timer. Force it: HACS → **Geely Connect**
-  → ⋮ → **Update information**, or ⋮ → **Reload data** on the HACS main page.
-- If you installed before the first release existed, HACS is tracking the
-  **branch**, not releases, and has no version to compare against. Fix it once:
-  ⋮ → **Redownload** → pick a version such as `v1.4.0` from the dropdown. Every
-  later release then shows up as a normal update.
-- Conversely, choosing **main** in that same dropdown tracks the branch, so
-  every push is available immediately without waiting for a release - handy
-  while a change is being tested.
-
----
-
-## 🖥️ Dashboards & cards
-
-### 🚙 The built-in cards - zero setup
-
-The integration ships **five custom cards** and registers them by itself - no
-HACS frontend package, no resource to add, nothing to copy. Open any
-dashboard, **Add card**, and search "Geely":
-
-| Card | What it is |
-|---|---|
-| **Geely Card** (`custom:geely-card`) | The full cockpit: range and battery up top, the EX5 silhouette that glows while charging and flags every opening, one-tap Lock / Unlock / Climate / Defrost / Vent / Trunk / Find / Sync, a full climate panel (temperature, rapid heat / cool, seat heating and cooling, fresh air, sunroof and shade), then charging, tires, trip and service health - each block hides itself when the car doesn't report it |
-| **Geely Card (top view)** (`custom:geely-card-top`) | The car from above: tire pressure beside each wheel, bold live status on every door, the hood, the sunroof and the trunk - with the same header, actions and climate panel |
-| **Geely Card (compact)** (`custom:geely-card-compact`) | The essentials in one tile: battery, range, status chips, and the five controls that matter |
-| **Geely Card (mini)** (`custom:geely-card-mini`) | A small square: range, cabin temperature, status, a lock button that follows the car (locked offers Unlock, unlocked offers Lock), and one-tap quick heat / quick cool |
-| **Geely Card (strip)** (`custom:geely-card-strip`) | One row: range, battery and lock state, with lock, climate, trunk and find as icon buttons - for the top of a dashboard or a narrow column |
-
-| Full | Top view |
-|---|---|
-| ![Geely Card](docs/images/card-full.png) | ![Geely Card top view](docs/images/card-top.png) |
-
-| Compact | Mini |
-|---|---|
-| ![Geely Card compact](docs/images/card-compact.png) | ![Geely Card mini](docs/images/card-mini.png) |
-
-![Geely Card strip](docs/images/card-strip.png)
-
-With one Geely on the account the cards find their entities on their own -
-even after you rename them. With several cars, point each card at one:
-
-```yaml
-type: custom:geely-card
-prefix: my_geely_ex5      # the slug in sensor.my_geely_ex5_battery
-```
-
-#### The climate panel
-
-The full and top-view cards carry a complete **Climate** section:
-
-- **Temperature stepper** - bound to the climate entity's own min / max / step
-  (15.5-28.5 °C in 0.5° steps on the EX5), so it can never send a value the
-  car refuses.
-- **Heat / Cool** - the car's real *Rapid Warming* / *Rapid Cooling* presets,
-  which also run the seats and ventilation, exactly as the official app does.
-- **Seat heating / Seat cooling** per front seat - each tap steps
-  Off → Low → Medium → High → Off.
-- **Fresh air** (G-Clean), and **Open / Close** for the sunroof and the
-  sunshade.
-- Every block hides itself on a trim that lacks the entity - and there is no
-  fan-speed control because the car's cloud API simply has none.
-
-Two touches worth knowing: **Unlock and Trunk arm on the first tap and fire
-on the second** (a stray touch on a wall tablet can't open the car), and the
-accent colour follows the state - teal while charging, amber when something
-needs a look. `--geely-accent` / `--geely-warn` theme variables override both.
-
-#### If a card ever misbehaves
-
-The picker holds one more entry, **Geely Card (status vX.Y.Z)** - a plain
-text tile that always renders, shows which version of the card script is
-actually running in *your* browser, and reports the registration timeline.
-If a card sticks on a spinner or looks outdated after an update, a
-screenshot of that tile is the whole bug report. (Old cards after an update
-usually mean a cached copy: update, **restart Home Assistant**, then hard
-refresh - or *Reset frontend cache* in the companion app.)
-
-> The YAML card and view files that used to live in `cards/` and `views/`
-> are gone - the built-in cards replace them and stay current on their own.
+## 💡 Automations, dashboards & widgets
 
 ### 📐 Finding your entity suffix
 
@@ -480,13 +445,6 @@ like `sensor.geely_ex5_4143_battery` - the device name always ends in the
 last four VIN characters - so there the suffix is `geely_ex5_4143`.
 `my_geely_ex5` in every file below is a **placeholder** - search-replace it
 with your own suffix.
-
-### 📱 Home-screen widgets - [`android-widgets/`](android-widgets/)
-Not dashboard cards. These are **Jinja templates** for the companion app's
-**Template widget**, which puts a live line of text on your phone's home screen.
-Pasting card YAML into that field shows you the YAML as text - different thing
-entirely. Start with **`all-in-one.jinja`**: lock, charge bar, charging and its
-finish time, what's open, any warning, and data age, all in one widget.
 
 ### 🤖 Automations - [`automations/`](automations/)
 Ready-to-paste automations. Append a file to your `automations.yaml`, or copy
@@ -521,14 +479,19 @@ A **dashboard** starts with `title:` / `views:` and is pasted via
 > tile. The fuel, engine and electric-vs-petrol sections are the exception:
 > they hide themselves on a battery-only car, so leave them alone either way.
 
----
+### 📱 Home-screen widgets - [`android-widgets/`](android-widgets/)
+Not dashboard cards. These are **Jinja templates** for the companion app's
+**Template widget**, which puts a live line of text on your phone's home screen.
+Pasting card YAML into that field shows you the YAML as text - different thing
+entirely. Start with **`all-in-one.jinja`**: lock, charge bar, charging and its
+finish time, what's open, any warning, and data age, all in one widget.
 
-## 💡 Usage examples
 
-Beyond the dashboards, here are copy-paste automations. Replace `my_geely_ex5`
-with your suffix and `notify.mobile_app_xxxx` with your phone's notify service.
-Ready-made **Blueprints** for these live in [`blueprints/`](blueprints/) if you
-prefer a UI.
+### ✍️ Copy-paste examples
+
+Replace `my_geely_ex5` with your suffix and `notify.mobile_app_xxxx` with your
+phone's notify service. Ready-made **Blueprints** for these live in
+[`blueprints/`](blueprints/) if you prefer a UI.
 
 **Notify when charging finishes**
 ```yaml
@@ -620,6 +583,55 @@ automation:
 
 Tip: press the **Refresh Data** button (or call `button.press` on
 `button.my_geely_ex5_refresh_data`) any time you want an immediate update.
+
+---
+
+## 🔒 Security
+
+Security was a first-class goal of this build. Every connection is validated
+against the public CAs. The two Geely control gateways that use Geely's own
+private CA - `apis.ecloudeu.com` and `apis.ecloudus.com` - are each verified
+against a public-key pin that ships with the integration, so they are checked
+from the very first connection and a man-in-the-middle is refused rather than
+trusted. No other host may use that fallback, and a host that has validated
+publicly once can never be pushed onto it. Credentials are stored with owner-only access, secrets are masked in logs
+and in the diagnostics report, and all traffic goes only to Geely's own servers
+- no telemetry, no third parties.
+
+If Geely ever rotates that gateway's key you will see a `GeelyTLSPinError`
+naming the host and the key it presented. That is the pin doing its job - it
+cannot tell a legitimate rotation from an attacker, and neither can you from
+the error alone. So:
+
+1. **Do not pin the reported key.** If the error was caused by someone
+   intercepting your connection, that key is *theirs*, and pinning it would
+   hand them exactly the trust the pin exists to withhold.
+2. [Open an issue](https://github.com/YossiKon/geely-connect/issues) with the
+   host and key from the error. A rotation hits everyone at once, so it is
+   quickly confirmed from other reports and networks, and a release with the
+   new pin ships. The integration keeps showing the last known data meanwhile
+   - you lose remote commands, not the car.
+3. Only if you must unblock yourself sooner: confirm the same key is reported
+   from a **different network** (e.g. mobile hotspot instead of home Wi-Fi -
+   an attacker rarely controls both), and only then add it to the `pins` list
+   for that host in `.storage/geely_connect/<VIN>/server_pins.json` and
+   restart.
+
+### What "hardened" means here
+
+Because this account can unlock and start your car, the transport gets treated
+like a credential path rather than a convenience:
+
+| | How this integration handles it |
+|---|---|
+| **Certificate validation** | Strict public-CA validation with hostname checking on every connection. The private-CA fallback is allowlisted to two known gateways, requires a private-CA verify code, and is permanently disabled for any host that has ever validated publicly - so a bad certificate cannot force a downgrade |
+| **Server identity** | SPKI public-key pins ship with the integration and are remembered on disk, so a swapped server key is caught across restarts, before any credential is sent |
+| **Logs & diagnostics** | Tokens, certificates and the captcha secret are masked; VIN, user ID, e-mail and device IDs are reduced to their last four characters. The diagnostics download is redacted separately, so a bug report is safe to attach |
+| **Request building** | The VIN, user ID and server-supplied headers are rejected if they contain CR/LF, so a hostile backend value cannot smuggle a second request onto the authenticated socket |
+| **Stored secrets** | The mTLS private key is created `0600` from the first byte - never briefly world-readable - inside a `0700` directory |
+| **Identifiers** | VIN and user ID must match a strict charset before they reach a filesystem path or a request line |
+| **Re-authentication** | Signing in as a different Geely account is refused rather than silently rebinding the entry |
+| **Where data goes** | Only Geely's own servers. No telemetry, no analytics, no third-party host |
 
 ---
 
