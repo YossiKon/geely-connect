@@ -460,6 +460,14 @@
              border-radius:14px; font-size:12px; }
     .cpair svg { width:17px; height:17px; }
     .cpair.on { color:${ACCENT}; border-color: color-mix(in srgb, ${ACCENT} 45%, transparent); }
+    .ctime { display:flex; align-items:center; gap:7px; padding:0 6px 0 12px;
+             border:1px solid var(--divider-color, rgba(120,130,140,.25));
+             border-radius:14px; font-size:12px; color: var(--secondary-text-color); }
+    .ctime input { border:none; background:none; color: var(--primary-text-color);
+                   font: inherit; font-size:13px; font-variant-numeric: tabular-nums;
+                   padding:9px 2px; min-height:38px; cursor:pointer; width:74px; }
+    .ctime input:focus { outline:none; }
+    .ctime input::-webkit-calendar-picker-indicator { filter: invert(.5); cursor:pointer; }
     .cmini { border:1px solid var(--divider-color, rgba(120,130,140,.3));
              background:none; color:var(--primary-text-color); font:inherit;
              font-size:11.5px; padding:8px 11px; min-height:34px; border-radius:10px;
@@ -722,6 +730,12 @@
     _wire() {
       this.shadowRoot.querySelectorAll("[data-act]").forEach((el) =>
         el.addEventListener("click", () => this._onAction(el.dataset.act)));
+      this.shadowRoot.querySelectorAll("input[data-time]").forEach((el) =>
+        el.addEventListener("change", () => {
+          if (/^\d\d:\d\d$/.test(el.value)) {
+            this._call("time", "set_value", el.dataset.time, { time: `${el.value}:00` });
+          }
+        }));
     }
 
     _preset() {
@@ -736,11 +750,22 @@
       const sw = this._st("switch.charging");
       const sched = this._st("switch.scheduled_charging");
       if (!sw && !sched) return "";
+      // The start / end editors appear only while the schedule is armed
+      // (#15) - native time inputs, so phones get their own picker.
+      const timeBox = (suffix, label) => {
+        const st = this._st(`time.${suffix}`);
+        if (!st || !/^\d\d:\d\d/.test(st.state)) return "";
+        return `<label class="ctime">${esc(label)}
+          <input type="time" data-time="${suffix}" value="${esc(st.state.slice(0, 5))}"></label>`;
+      };
+      const schedOn = sched && sched.state === "on";
       return `<div class="crow wrap" style="margin:2px 0 6px">
         ${sw ? `<button class="cbtn ${sw.state === "on" ? "on" : ""}" data-act="charging_sw"
           title="Start / stop charging">${icon("bolt")}<span>Charging</span></button>` : ""}
-        ${sched ? `<button class="cbtn ${sched.state === "on" ? "on" : ""}" data-act="sched_sw"
+        ${sched ? `<button class="cbtn ${schedOn ? "on" : ""}" data-act="sched_sw"
           title="Scheduled charging on / off">${icon("charge")}<span>Schedule</span></button>` : ""}
+        ${schedOn ? timeBox("scheduled_charging_start", "Start") : ""}
+        ${schedOn ? timeBox("scheduled_charging_end", "End") : ""}
       </div>`;
     }
 
