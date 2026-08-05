@@ -207,20 +207,27 @@ def test_generic_switch_state_comes_from_its_declared_path():
     if not have_homeassistant():
         skip("homeassistant not installed")
     sw = load("switch")
-    data = _status(ev={"statusOfChargerConnection": "3"},
-                   state={"parkComfortState": "1"})
+    data = _status(ev={"statusOfChargerConnection": "3"})
     hass, b = _bundle(data)
     charging = sw.GeelySwitch(hass, b, *_switch_def(sw, "charging")[:-1])
-    parking = sw.GeelySwitch(hass, b, *_switch_def(sw, "parking_comfort")[:-1])
     assert charging.is_on is True
-    assert parking.is_on is True
     data["vehicleStatus"]["additionalVehicleStatus"][
         "electricVehicleStatus"]["statusOfChargerConnection"] = "0"
-    data["_state"]["parkComfortState"] = "0"
     assert charging.is_on is False
-    assert parking.is_on is False
     hass2, b2 = _bundle(_status())          # path absent entirely
     assert sw.GeelySwitch(hass2, b2, *_switch_def(sw, "charging")[:-1]).is_on is None
+
+
+def test_parking_comfort_reports_unknown_rather_than_trusting_parkcomfortstate():
+    """parkComfortState is an availability flag, not the on/off state: a car
+    with parking comfort off still reports 1. Reading it pinned the switch to
+    `on` forever, so the switch must stay `unknown` even when it is present."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    sw = load("switch")
+    hass, b = _bundle(_status(state={"parkComfortState": "1"}))
+    ent = sw.GeelySwitch(hass, b, *_switch_def(sw, "parking_comfort")[:-1])
+    assert ent.is_on is None
 
 
 def test_a_rejected_generic_switch_command_raises_homeassistanterror():
