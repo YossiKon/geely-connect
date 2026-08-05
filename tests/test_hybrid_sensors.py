@@ -210,3 +210,15 @@ def test_a_junk_reported_fuel_range_falls_back_to_the_projection():
     data = _status(running={"fuelLevel": "11.2", "aveFuelConsumption": "2.5",
                              "distanceToEmptyOnFuel": "not-a-number"})
     assert abs(sensor._fuel_range_km(data) - 448.0) < 0.1
+
+
+def test_a_placeholder_zero_fuel_range_falls_back_to_the_projection():
+    """A trim that carries the field as a constant "0" with litres in the tank
+    must not zero the range - only a truly empty tank reads zero, and the
+    projection already says that on its own."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    sensor = load("sensor")
+    data = _status(running={"fuelLevel": "11.2", "aveFuelConsumption": "2.5",
+                            "distanceToEmptyOnFuel": "0"})
+    assert abs(sensor._fuel_range_km(data) - 448.0) < 0.1

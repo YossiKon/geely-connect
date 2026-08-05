@@ -306,3 +306,40 @@ def test_the_charging_switch_follows_the_dc_session():
                     dcChargeUAct="452.0", dcChargeIAct="0.5")
     assert sensor._is_charging(mid) is True
     assert sensor._is_charging(after) is False
+
+
+def test_the_connection_label_says_charging_during_a_dc_session():
+    """The raw field says 1 ("Plugged in") for the entire DC session; a label
+    reading "Plugged in" during a 90 kW charge is practically wrong."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    sensor = load("sensor")
+    mid = _dc_session(dcChargeUAct="459.7", dcChargeIAct="-198.9")
+    s = sensor.GeelySensor(_Coord(mid), FAKE_VIN, "Geely (0000)",
+                           "charger_connected", "Charger Connection",
+                           ("vehicleStatus", "additionalVehicleStatus",
+                            "electricVehicleStatus", "statusOfChargerConnection"),
+                           None, None, "map", sensor._CHARGER_CONNECTION_MAP)
+    assert s.native_value == "Charging"
+    idle = _status(statusOfChargerConnection="1")
+    s2 = sensor.GeelySensor(_Coord(idle), FAKE_VIN, "Geely (0000)",
+                            "charger_connected", "Charger Connection",
+                            ("vehicleStatus", "additionalVehicleStatus",
+                             "electricVehicleStatus", "statusOfChargerConnection"),
+                            None, None, "map", sensor._CHARGER_CONNECTION_MAP)
+    assert s2.native_value == "Plugged in"
+
+
+def test_charge_complete_survives_a_dc_session():
+    """timeToFullyCharged counted 60 down to 16 during the #10 session while
+    the old status gate hid the estimate completely."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    sensor = load("sensor")
+    mid = _dc_session(dcChargeUAct="459.7", dcChargeIAct="-198.9",
+                      timeToFullyCharged="42")
+    s = sensor.GeelyChargeCompleteSensor(_Coord(mid), FAKE_VIN, "Geely (0000)")
+    assert s.native_value is not None
+    idle = _status(timeToFullyCharged="2047")
+    s2 = sensor.GeelyChargeCompleteSensor(_Coord(idle), FAKE_VIN, "Geely (0000)")
+    assert s2.native_value is None

@@ -573,6 +573,11 @@ class GeelySensor(CoordinatorEntity, _AutoPrecision):
         # Tire pressure stays in its native kPa here; Home Assistant converts
         # it to the unit chosen at setup. Converting it ourselves as well
         # would apply the factor twice.
+        if self._key == "charger_connected" and val == "Plugged in"                 and _is_charging(self.coordinator.data or {}):
+            # DC fast charge holds the raw field at 1 for the whole session
+            # (#10), and a label that says "Plugged in" during a 90 kW charge
+            # is technically true and practically wrong.
+            return "Charging"
         return val
 
 
@@ -720,8 +725,10 @@ class GeelyChargeCompleteSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self):
-        status = _walk(self.coordinator.data or {}, (*_EV, "statusOfChargerConnection"))
-        if str(status) != "3":          # 3 = actively drawing current
+        if not _is_charging(self.coordinator.data or {}):
+            # The composite, not the raw field: during the #10 DC session the
+            # raw field never said charging while timeToFullyCharged counted
+            # 60 down to 16 - a real ETA this sensor was hiding.
             return None
         minutes = _minutes_or_none(_walk(self.coordinator.data or {}, (*_EV, "timeToFullyCharged")))
         if minutes is None:
@@ -789,8 +796,11 @@ def _fuel_range_km(data: dict) -> float | None:
                 reported = float(_walk(data, (*section, key)))
             except (TypeError, ValueError):
                 continue
-            if reported >= 0:
+            if reported > 0:
                 return reported
+            # A reported zero with litres in the tank is a placeholder field,
+            # not an empty tank - a truly empty tank makes the projection
+            # below return its own honest zero.
     try:
         litres = float(_walk(data, (*_RUN, "fuelLevel")))
         per_100 = float(_walk(data, (*_RUN, "aveFuelConsumption")))
