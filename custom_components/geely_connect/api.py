@@ -897,7 +897,15 @@ class GeelyApi:
             self._jwt_uid = d.get("userId") or self.user_id
             self._jwt_exp = int(time.time()) + int(d.get("expiresIn", 7200))
             return d
-        ac = self._get_access_code()
+        # The code must be minted by the SAME regional backend that will
+        # exchange it - the rule the APAC path already documents. A Brazilian
+        # account resolved to NA proved the EU-minted default fails the
+        # apis.ecloudus.com exchange with 8500 (#9); the NA gateway wants its
+        # code from the US cidpsso host.
+        mint_host = ("m-lcmsam-us.geely.com"
+                     if "ecloudus" in (self.control_host or "")
+                     else "m-lcmsam-eu.geely.com")
+        ac = self._get_access_code(host=mint_host)
         body = json.dumps({"authCode": ac}).encode()
         status, resp = self._mtls_send(
             self.control_host, "POST",

@@ -222,3 +222,14 @@ def test_a_placeholder_zero_fuel_range_falls_back_to_the_projection():
     data = _status(running={"fuelLevel": "11.2", "aveFuelConsumption": "2.5",
                             "distanceToEmptyOnFuel": "0"})
     assert abs(sensor._fuel_range_km(data) - 448.0) < 0.1
+
+
+def test_the_starray_reports_fuel_range_in_basic_vehicle_status():
+    """The #11 diagnostics, verbatim: distanceToEmpty 157 under
+    basicVehicleStatus while litres/lifetime-average project 448."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    sensor = load("sensor")
+    data = _status(running={"fuelLevel": "11.2", "aveFuelConsumption": "2.5"})
+    data["vehicleStatus"].setdefault("basicVehicleStatus", {})["distanceToEmpty"] = 157
+    assert sensor._fuel_range_km(data) == 157.0

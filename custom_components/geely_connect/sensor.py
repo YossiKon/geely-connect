@@ -774,33 +774,32 @@ class GeelyFullRangeSensor(CoordinatorEntity, _AutoPrecision):
 
 
 def _fuel_range_km(data: dict) -> float | None:
-    """Kilometres left on the fuel in the tank, at the lifetime average.
+    """Kilometres left on the fuel in the tank.
 
-    The car reports no fuel range of its own - there is no
-    `distanceToEmptyOnFuel` anywhere in the payload - so it has to come from
-    litres and L/100km. None when either is missing, or when the car has
-    never burned fuel and so has no consumption average to project with. A
-    *reported* empty tank is different: zero litres at a known consumption is
-    a true 0 km, and hiding it would blank Combined Range exactly when the
-    driver is running on the last of both.
+    Reported by the car when this trim reports one: the Starray's diagnostics
+    (#11) show `basicVehicleStatus.distanceToEmpty` = 157 at the very moment
+    its cluster's fuel-pump readout said 157 km - while the projection below
+    said 448, because a plug-in hybrid's lifetime L/100km average is
+    mostly-electric driving and triples the truth.
+
+    Projected otherwise (litres over the lifetime average), because the EX5
+    carries no such field anywhere. None when both paths are missing. A
+    *reported* empty tank is different from a missing one: zero litres at a
+    known consumption is a true 0 km through the projection, and hiding it
+    would blank Combined Range exactly when the driver is running on the last
+    of both. A reported *range* of zero with litres still in the tank is the
+    opposite - a placeholder, not a measurement - so it falls through.
     """
-    # If this trim reports a fuel range of its own, believe it. The EX5
-    # payloads carry no such field, but the Starray's cluster shows one the
-    # projection below cannot match (#11): a plug-in hybrid's lifetime L/100km
-    # average is mostly-electric driving, so projecting the tank with it can
-    # triple the real number.
-    for section in (_RUN, _EV):
-        for key in ("distanceToEmptyOnFuel", "distanceToEmptyOnFuelOnly",
-                    "fuelRange"):
-            try:
-                reported = float(_walk(data, (*section, key)))
-            except (TypeError, ValueError):
-                continue
-            if reported > 0:
-                return reported
-            # A reported zero with litres in the tank is a placeholder field,
-            # not an empty tank - a truly empty tank makes the projection
-            # below return its own honest zero.
+    for path in ((*_BASIC, "distanceToEmpty"),
+                 (*_RUN, "distanceToEmptyOnFuel"),
+                 (*_RUN, "distanceToEmptyOnFuelOnly"),
+                 (*_EV, "distanceToEmptyOnFuel")):
+        try:
+            reported = float(_walk(data, path))
+        except (TypeError, ValueError):
+            continue
+        if reported > 0:
+            return reported
     try:
         litres = float(_walk(data, (*_RUN, "fuelLevel")))
         per_100 = float(_walk(data, (*_RUN, "aveFuelConsumption")))

@@ -1245,3 +1245,28 @@ def test_a_rejected_rapid_climate_is_a_control_error():
         assert e.code == "failure"
     else:
         raise AssertionError("a rejected command was reported as success")
+
+
+def test_the_access_code_is_minted_by_the_backend_that_will_exchange_it():
+    """#9: a Brazilian account resolves to NA (apis.ecloudus.com), but the
+    code was always minted by the EU cidpsso host - and the NA gateway
+    refuses foreign codes with 8500, the same rule the APAC path documents.
+    The mint host must follow the exchange host."""
+    a = _client()
+    seen = {}
+    def fake_get(host="m-lcmsam-eu.geely.com"):
+        seen["host"] = host
+        return "AC-X"
+    a._get_access_code = fake_get
+    a.control_host = "apis.ecloudus.com"
+    _scripted_mtls(a, [{"code": 1000, "data": {"accessToken": "T", "userId": "U"}}])
+    a.refresh_jwt()
+    assert seen["host"] == "m-lcmsam-us.geely.com"
+
+    seen.clear()
+    a2 = _client()
+    a2._get_access_code = fake_get
+    a2.control_host = "apis.ecloudeu.com"
+    _scripted_mtls(a2, [{"code": 1000, "data": {"accessToken": "T", "userId": "U"}}])
+    a2.refresh_jwt()
+    assert seen["host"] == "m-lcmsam-eu.geely.com"
