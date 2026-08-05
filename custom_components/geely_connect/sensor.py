@@ -935,27 +935,33 @@ def _charge_leg(data: dict) -> tuple[float, float] | None:
         return None
     if not _is_charging(data):
         return (0.0, 0.0)
-    # Sign rules differ per pair. The DC pair is the pack: negative current
-    # flows INTO it - the #10 fast-charge log ran at about -200 A the whole
-    # session - so either direction is a live reading once the charging gate
-    # has passed, and the magnitude compares and reports. The AC pair keeps
-    # its positive-only rule: a negative AC current is V2L discharge, and
-    # showing it as charging power would be a lie in the other direction.
-    live = []
-    # Plausibility gate on the AC pair: a Brazilian EX5 reports
-    # chargeUAct 1581 at chargeIAct 16.3 on a 240 V wallbox (#17) - an
-    # impossible mains voltage whose product published 25.77 kW on a 6 kW
-    # charge. No AC supply on earth exceeds ~500 V phase-to-phase or ~150 A,
-    # so a reading outside those walls is a mis-scaled field, and the DC
-    # pair (the pack itself, ~460 V at -13 A on that session) carries the
-    # truthful rate instead.
-    if ac is not None and 0 < ac[0] <= 500 and 0 < ac[1] <= 150:
-        live.append(ac)
-    if dc is not None and dc[0] > 0 and abs(dc[1]) > 0:
-        live.append(dc)
-    if live:
-        volts, amps = max(live, key=lambda leg: leg[0] * abs(leg[1]))
-        return (volts, abs(amps))
+    # The car does say which leg is live after all: the DC contactor.
+    # Raw payloads from real sessions on two cars settle the election rule:
+    #
+    #   DC fast charge (#10):  dcDcConnectStatus 3, dcChargeIAct ~ -200 A
+    #   AC wallbox     (#17):  dcDcConnectStatus 0, chargeUAct 236.7 V at
+    #                          28.4 A (honest, matches the 6.7 kW wallbox)
+    #                          while dcChargeUAct reads a nonsense 1586.
+    #
+    # Comparing apparent power - the previous rule - let that nonsense 1586
+    # win the election during AC sessions. The contactor decides instead,
+    # with plausibility walls as backstops: no AC supply exceeds ~500 V or
+    # ~150 A, and a negative AC current is V2L discharge, not charging. The
+    # DC pair keeps its either-sign rule (charging current flows INTO the
+    # pack, about -200 A in the #10 log) and reports magnitudes.
+    dc_ok = dc is not None and dc[0] > 0 and abs(dc[1]) > 0
+    ac_ok = ac is not None and 0 < ac[0] <= 500 and 0 < ac[1] <= 150
+    if str(_walk(data, (*_EV, "dcDcConnectStatus"))) == "3":
+        if dc_ok:
+            return (dc[0], abs(dc[1]))
+        return ac if ac is not None else dc
+    # Contactor open or absent: an AC session when the AC pair is plausible.
+    # The DC pair stays as fallback for trims that fast-charge without
+    # reporting the contactor at all.
+    if ac_ok:
+        return ac
+    if dc_ok:
+        return (dc[0], abs(dc[1]))
     return ac if ac is not None else dc
 
 

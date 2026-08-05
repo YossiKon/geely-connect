@@ -100,11 +100,15 @@ def test_that_same_noise_alone_still_reads_zero():
     assert _power(_status(chargeUAct="0.0", chargeIAct="0.2")) == 0.0
 
 
-def test_the_larger_product_wins_when_both_legs_look_live():
-    """Neither a phantom voltage nor a phantom current can beat real power."""
-    v = _power(_charging(chargeUAct="240.0", chargeIAct="0.1",
-                        dcChargeUAct="349.0", dcChargeIAct="100.0"))
-    assert v == 34.9, v
+def test_the_contactor_decides_between_live_looking_legs():
+    """Product comparison is dead: #17 proved a nonsense DC voltage can carry
+    the bigger product through an AC session. The DC contactor is the
+    referee - closed hands the session to the DC pair, open or absent hands
+    it to a plausible AC pair even when the DC product is larger."""
+    both = dict(chargeUAct="240.0", chargeIAct="0.1",
+                dcChargeUAct="349.0", dcChargeIAct="100.0")
+    assert _power(_charging(dcDcConnectStatus="3", **both)) == 34.9
+    assert _power(_charging(**both)) == 0.02
 
 
 # ------------------------------------------------ measured on the real car ---
@@ -362,3 +366,16 @@ def test_a_plausible_ac_pair_still_wins_by_product():
     data = _charging(chargeUAct="233.0", chargeIAct="29.5",
                      dcChargeUAct="460.0", dcChargeIAct="-13.7")
     assert _power(data) == 6.87
+
+
+def test_the_real_17_payload_reads_the_wallbox_not_the_nonsense():
+    """#17's raw AC-session payload, verbatim: the AC pair is honest
+    (236.7 V x 28.4 A = the 6.7 kW wallbox) while dcChargeUAct reads 1586.
+    The open DC contactor (dcDcConnectStatus 0) must hand the session to the
+    AC pair - apparent-power comparison chose 25.53 kW of fiction here."""
+    data = _charging(chargeUAct="236.7", chargeIAct="28.400",
+                     dcChargeUAct="1586", dcChargeIAct="-16.1",
+                     dcDcConnectStatus="0", chargerState="2")
+    assert _power(data) == 6.72
+    assert _make("GeelyChargeVoltageSensor", data).native_value == 236.7
+    assert _make("GeelyChargeCurrentSensor", data).native_value == 28.4
