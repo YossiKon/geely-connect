@@ -219,9 +219,10 @@ def test_generic_switch_state_comes_from_its_declared_path():
 
 
 def test_parking_comfort_reports_unknown_rather_than_trusting_parkcomfortstate():
-    """parkComfortState is an availability flag, not the on/off state: a car
-    with parking comfort off still reports 1. Reading it pinned the switch to
-    `on` forever, so the switch must stay `unknown` even when it is present."""
+    """parkComfortState is not the on/off state: a car with parking comfort
+    off still reports 1, so reading it pinned the switch to `on` forever. No
+    replacement field is known, so the switch must stay `unknown` even when
+    parkComfortState is present and set."""
     if not have_homeassistant():
         skip("homeassistant not installed")
     sw = load("switch")

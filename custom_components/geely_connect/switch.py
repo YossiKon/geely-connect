@@ -80,18 +80,25 @@ def _state_in(v: Any, on_values: tuple[Any, ...]) -> bool:
 
 # (key, name, icon, service_id, on_params, off_params, command_on, command_off, state_path, on_when_in, capability_flag)
 SWITCH_DEFS: list[tuple] = [
-    # Parking Comfort - reports `unknown` rather than guessing, because
+    # Parking Comfort - the path below is absent on purpose, so is_on returns
+    # None and the switch reports `unknown`.
+    #
     # parkComfortState is not the on/off flag it looks like. On a P145-J1 with
     # parking comfort *off* in the car it still reads 1, alongside
     # activateState, inhibitionState, liveDetectionState, positionUploadState
     # and svtState - six `*State` fields at 1 at once, which no car can be
-    # doing simultaneously, so 1 here reads as "available", not "on". Reading
-    # it as on/off pinned the switch to `on` forever, contradicting the car.
-    # Every other switch keys off an `*Active` field; this was the only
-    # `*State` one. No parkComfort*Active appears in that car's payload, so
-    # the path below is deliberately absent-on-purpose: is_on returns None and
-    # the switch says `unknown` until a capture pins the real field down.
-    # Turning it on/off is unaffected - only the reported state changed.
+    # doing simultaneously. Reading it as on/off pinned the switch to `on`
+    # forever, contradicting the car. Every other switch keys off an `*Active`
+    # field; this was the only `*State` one.
+    #
+    # No replacement field is known, and there may not be one: no
+    # parkComfort*Active appears in that car's 35-key payload, and
+    # charge_server_get("4") - the AVD-verified parking-comfort endpoint, which
+    # nothing currently polls - returns only a schedule (scheduleList,
+    # startTime, endTime) with no state field at all. That fits a feature
+    # activated from inside the car, where the cloud offers a schedule rather
+    # than a toggle. RSM is marked UNVERIFIED on this trim in const.py, so
+    # whether the write path does anything is untested either.
     (
         "parking_comfort", "Parking Comfort", "mdi:sleep",
         SERVICE_PARKING_COMFORT, [], [],
