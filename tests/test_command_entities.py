@@ -207,20 +207,43 @@ def test_generic_switch_state_comes_from_its_declared_path():
     if not have_homeassistant():
         skip("homeassistant not installed")
     sw = load("switch")
-    data = _status(ev={"statusOfChargerConnection": "3"},
-                   state={"parkComfortState": "1"})
+    data = _status(ev={"statusOfChargerConnection": "3"})
     hass, b = _bundle(data)
     charging = sw.GeelySwitch(hass, b, *_switch_def(sw, "charging")[:-1])
-    parking = sw.GeelySwitch(hass, b, *_switch_def(sw, "parking_comfort")[:-1])
     assert charging.is_on is True
-    assert parking.is_on is True
     data["vehicleStatus"]["additionalVehicleStatus"][
         "electricVehicleStatus"]["statusOfChargerConnection"] = "0"
-    data["_state"]["parkComfortState"] = "0"
     assert charging.is_on is False
-    assert parking.is_on is False
     hass2, b2 = _bundle(_status())          # path absent entirely
     assert sw.GeelySwitch(hass2, b2, *_switch_def(sw, "charging")[:-1]).is_on is None
+
+
+def test_parking_comfort_reports_unknown_rather_than_trusting_parkcomfortstate():
+    """parkComfortState is not the on/off state: a car with parking comfort
+    off still reports 1, so reading it pinned the switch to `on` forever. No
+    replacement field is known, so the switch must stay `unknown` even when
+    parkComfortState is present and set."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    sw = load("switch")
+    hass, b = _bundle(_status(state={"parkComfortState": "1"}))
+    ent = sw.GeelySwitch(hass, b, *_switch_def(sw, "parking_comfort")[:-1])
+    assert ent.is_on is None
+
+
+def test_a_trim_that_does_report_parkcomfortactive_gets_a_real_state():
+    """The switch now watches the *Active family. No known car sends it yet,
+    but if one ever does, the state should follow it rather than stay
+    unknown - that is the whole point of pointing at the right field."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    sw = load("switch")
+    hass, b = _bundle(_status(state={"parkComfortActive": "1"}))
+    ent = sw.GeelySwitch(hass, b, *_switch_def(sw, "parking_comfort")[:-1])
+    assert ent.is_on is True
+    hass2, b2 = _bundle(_status(state={"parkComfortActive": "0"}))
+    ent2 = sw.GeelySwitch(hass2, b2, *_switch_def(sw, "parking_comfort")[:-1])
+    assert ent2.is_on is False
 
 
 def test_a_rejected_generic_switch_command_raises_homeassistanterror():
