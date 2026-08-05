@@ -37,7 +37,7 @@
     "charge_voltage", "electric_range", "charge_current", "door_passenger",
     "charger_plug", "total_mileage", "refresh_data", "unlock_trunk",
     "door_driver", "12v_battery", "trip_meter", "fuel_level", "fuel_range",
-    "pack_power", "efficiency", "find_car", "connected", "defrost",
+    "pack_power", "efficiency", "find_car", "connected", "defrost", "sunroof",
     "charging", "climate", "battery", "trunk", "doors", "speed", "hood",
   ].sort((a, b) => b.length - a.length);
 
@@ -67,13 +67,13 @@
   const CAR_SVG = (cls, open = {}) => `
     <svg class="car ${cls}" viewBox="0 0 760 300" fill="none" aria-hidden="true">
       <defs>
-        <linearGradient id="gp" x1="0" y1="90" x2="0" y2="250" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stop-color="#d7dce2"/>
-          <stop offset=".45" stop-color="#aab2bc"/>
-          <stop offset=".8" stop-color="#848d98"/>
+        <linearGradient id="gp" x1="0" y1="29" x2="0" y2="262" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stop-color="#dde2e8"/>
+          <stop offset=".42" stop-color="#b3bac4"/>
+          <stop offset=".78" stop-color="#87909b"/>
           <stop offset="1" stop-color="#6d7681"/>
         </linearGradient>
-        <linearGradient id="gg" x1="0" y1="100" x2="0" y2="150" gradientUnits="userSpaceOnUse">
+        <linearGradient id="gg" x1="0" y1="33" x2="0" y2="100" gradientUnits="userSpaceOnUse">
           <stop offset="0" stop-color="#3d4653"/>
           <stop offset="1" stop-color="#1c222b"/>
         </linearGradient>
@@ -85,71 +85,209 @@
           <feGaussianBlur stdDeviation="7"/>
         </filter>
         <clipPath id="gc">
-          <path d="M178 122 C210 103 250 92 300 87 C330 84 360 85 386 89
-            C420 96 452 112 478 127 L462 131 C400 138 300 136 228 132
-            C205 130 188 127 178 122 Z"/>
+          <path d="M149 73 C165 56 190 45 220 40 C280 35 360 34 430 38
+            C444 39 452 41 458 44 C478 55 504 74 520 88 L521 97
+            C462 96 400 95 340 94 C300 93 260 92 230 90
+            C200 88 170 82 149 73 Z"/>
         </clipPath>
         <mask id="arches">
           <rect x="0" y="0" width="760" height="300" fill="#fff"/>
-          <circle cx="192" cy="225" r="50" fill="#000"/>
-          <circle cx="581" cy="225" r="50" fill="#000"/>
+          <circle cx="186" cy="199" r="70" fill="#000"/>
+          <circle cx="574" cy="199" r="70" fill="#000"/>
         </mask>
       </defs>
 
-      <ellipse class="shadow" cx="382" cy="268" rx="296" ry="11" filter="url(#soft)"/>
-      <ellipse class="glow" cx="382" cy="263" rx="276" ry="9" filter="url(#soft)"/>
+      <ellipse class="shadow" cx="381" cy="268" rx="320" ry="11" filter="url(#soft)"/>
+      <ellipse class="glow" cx="381" cy="263" rx="300" ry="9" filter="url(#soft)"/>
 
       <g mask="url(#arches)">
         <path class="paint" d="
-          M92 250
-          C82 244 78 232 79 218
-          C80 200 81 178 85 158
-          C96 140 108 132 122 127
-          C150 112 190 96 240 86
-          C270 80 300 79 322 80
-          C360 82 390 85 412 90
-          C440 98 470 116 496 130
-          C510 136 520 139 534 141
-          C560 145 600 150 640 156
-          C662 159 676 165 679 174
-          C682 190 681 210 676 226
-          C672 240 664 248 650 251
-          C600 255 560 255 520 255
-          L250 255
-          C190 255 130 253 92 250 Z"/>
-        <path class="rocker" d="M252 248 L516 248 L516 255 L252 255 Z"/>
+          M70 189
+          C62 176 60 170 60 165
+          C60 152 60 145 61 138
+          C63 128 66 121 70 117
+          L80 100
+          C84 86 94 64 108 52
+          C112 44 114 40 118 36
+          C126 32 140 33 159 34
+          C210 30 300 29 360 31
+          C400 31 435 33 462 38
+          C486 50 512 74 536 88
+          C566 96 604 103 639 110
+          C658 113 676 120 690 130
+          C698 137 701 148 701 160
+          C701 175 700 185 697 196
+          C694 206 688 213 676 217
+          C640 220 600 221 560 221
+          L240 221
+          C180 220 130 218 101 215
+          C88 212 76 201 70 189 Z"/>
+        <path class="rocker" d="M248 209 L510 209 L510 222 L248 222 Z"/>
       </g>
 
-      <path class="haunch" d="M128 152 C 170 138 220 136 252 146"/>
-      <path class="crease" d="M110 162 C 300 149 500 147 658 163"/>
+      <path class="cladding" d="M116 210 A70 70 0 0 1 256 210"/>
+      <path class="cladding" d="M504 210 A70 70 0 0 1 644 210"/>
 
-      <path class="glass" d="M178 122 C210 103 250 92 300 87 C330 84 360 85 386 89
-        C420 96 452 112 478 127 L462 131 C400 138 300 136 228 132
-        C205 130 188 127 178 122 Z"/>
-      <path class="streak" clip-path="url(#gc)" d="M330 76 L 282 138 M 376 74 L 324 140"/>
+      <path class="paint" d="M466 35 C460 26 450 24 442 27 L443 35 Z"/>
 
-      <rect class="handle" x="308" y="145" width="26" height="5" rx="2.5"/>
-      <rect class="handle" x="440" y="143" width="26" height="5" rx="2.5"/>
+      <path class="crease" d="M121 109 C250 106 500 106 632 111"/>
+      <path class="haunch" d="M246 143 C320 158 430 152 502 136"/>
 
-      <path class="headlight" d="M624 152 q24 3 33 10 l-5 8 q-15-6-30-8 z"/>
-      <path class="taillight" d="M84 160 l34 -3 1 9 -34 3 z"/>
-      <rect class="port" x="126" y="146" width="14" height="12" rx="4"/>
-      <circle class="portdot" cx="133" cy="152" r="3"/>
+      <path class="glass" d="M149 73 C165 56 190 45 220 40 C280 35 360 34 430 38
+        C444 39 452 41 458 44 C478 55 504 74 520 88 L521 97
+        C462 96 400 95 340 94 C300 93 260 92 230 90
+        C200 88 170 82 149 73 Z"/>
+      <path class="streak" clip-path="url(#gc)" d="M380 42 L330 92 M420 41 L368 93"/>
 
-      <g class="wheel-g" transform="translate(192 225)">${_WHEEL}</g>
-      <g class="wheel-g" transform="translate(581 225)">${_WHEEL}</g>
+      <path class="mirror" d="M506 90 C502 82 509 76 518 77 C526 78 529 84 526 90
+        L524 96 C516 98 509 96 506 90 Z"/>
 
-      <circle class="ind ${open.trunk ? "on" : ""}" cx="110" cy="132" r="7"/>
-      <circle class="ind ${open.rear ? "on" : ""}" cx="300" cy="138" r="7"/>
-      <circle class="ind ${open.front ? "on" : ""}" cx="440" cy="136" r="7"/>
-      <circle class="ind ${open.hood ? "on" : ""}" cx="600" cy="148" r="7"/>
+      <rect class="handle" x="214" y="110" width="26" height="5" rx="2.5"/>
+      <rect class="handle" x="350" y="111" width="26" height="5" rx="2.5"/>
+      <rect class="handle" x="646" y="192" width="46" height="23" rx="7"/>
+
+      <path class="headlight" d="M634 111 C655 114 672 119 684 126 L679 135
+        C665 128 648 123 630 120 Z"/>
+      <path class="taillight" d="M63 103 L118 108 L117 117 L64 113 Z"/>
+      <rect class="port" x="510" y="118" width="13" height="12" rx="4"/>
+      <circle class="portdot" cx="516.5" cy="124" r="3"/>
+
+      <g class="wheel-g" transform="translate(186 199)">${_WHEEL}</g>
+      <g class="wheel-g" transform="translate(574 199)">${_WHEEL}</g>
+
+      <circle class="ind ${open.trunk ? "on" : ""}" cx="95" cy="92" r="7"/>
+      <circle class="ind ${open.rear ? "on" : ""}" cx="258" cy="120" r="7"/>
+      <circle class="ind ${open.front ? "on" : ""}" cx="392" cy="118" r="7"/>
+      <circle class="ind ${open.hood ? "on" : ""}" cx="598" cy="116" r="7"/>
     </svg>`;
 
   const _WHEEL = `
-      <circle class="tire" r="43"/>
-      <circle class="rim" r="27" fill="url(#gr)"/>
-      <circle class="disc" r="17"/>
-      <circle class="hubcap" r="5"/>`;
+      <circle class="tire" r="62"/>
+      <circle class="disc" r="42"/>
+      <g class="spokes">
+        <path d="M-6 -40 L-1 -41 L3 -12 L-4 -11 Z"/>
+        <path d="M2 -41 L7 -40 L6 -32 L4 -13 Z" opacity=".45"/>
+        <path d="M-6 -40 L-1 -41 L3 -12 L-4 -11 Z" transform="rotate(72)"/>
+        <path d="M2 -41 L7 -40 L6 -32 L4 -13 Z" opacity=".45" transform="rotate(72)"/>
+        <path d="M-6 -40 L-1 -41 L3 -12 L-4 -11 Z" transform="rotate(144)"/>
+        <path d="M2 -41 L7 -40 L6 -32 L4 -13 Z" opacity=".45" transform="rotate(144)"/>
+        <path d="M-6 -40 L-1 -41 L3 -12 L-4 -11 Z" transform="rotate(216)"/>
+        <path d="M2 -41 L7 -40 L6 -32 L4 -13 Z" opacity=".45" transform="rotate(216)"/>
+        <path d="M-6 -40 L-1 -41 L3 -12 L-4 -11 Z" transform="rotate(288)"/>
+        <path d="M2 -41 L7 -40 L6 -32 L4 -13 Z" opacity=".45" transform="rotate(288)"/>
+      </g>
+      <circle class="rimring" r="42"/>
+      <circle class="hubcap" r="8"/>`;
+
+  /* The Geely emblem, redrawn from the repository's brand/logo.png - six
+   * rounded tiles over the wordmark. Inline vector: no extra request, no
+   * cache to fight, and it inherits the card's crispness at any size. */
+  const GEELY_LOGO = `
+    <svg class="brandmark" viewBox="0 0 120 64" fill="none" aria-hidden="true">
+      <rect x="12" y="4" width="28" height="19" rx="4" fill="#aec2cc"/>
+      <rect x="46" y="4" width="28" height="19" rx="4" fill="#9db4c0"/>
+      <rect x="80" y="4" width="28" height="19" rx="4" fill="#64808f"/>
+      <rect x="12" y="27" width="28" height="19" rx="4" fill="#8fa8b5"/>
+      <rect x="46" y="27" width="28" height="19" rx="4" fill="#64808f"/>
+      <rect x="80" y="27" width="28" height="19" rx="4" fill="#aec2cc"/>
+      <text x="60" y="60" text-anchor="middle" fill="#9aa2ab"
+        font-family="inherit" font-size="15" font-weight="600"
+        letter-spacing="7">GEELY</text>
+    </svg>`;
+
+  /* Top view for the cockpit card - the same EX5 proportions (4615 x 1901
+   * mm), front pointing up. Every openable part carries its status right
+   * where it sits on the body: pressures beside each wheel, doors on their
+   * sills, hood / sunroof / trunk on their panels. */
+  const CAR_TOP_SVG = (cls, d) => {
+    const stat = (open) => (open == null ? "—" : open ? "Open" : "Closed");
+    const cl = (open) => (open ? "tv-stat open" : "tv-stat");
+    return `
+    <svg class="cartop ${cls}" viewBox="0 0 400 720" fill="none" aria-hidden="true">
+      <defs>
+        <linearGradient id="tp" x1="0" y1="34" x2="0" y2="686" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stop-color="#dde2e8"/>
+          <stop offset=".45" stop-color="#b6bdc7"/>
+          <stop offset="1" stop-color="#7f8894"/>
+        </linearGradient>
+        <linearGradient id="tg" x1="0" y1="196" x2="0" y2="620" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stop-color="#39424f"/>
+          <stop offset="1" stop-color="#171c24"/>
+        </linearGradient>
+        <filter id="tsoft" x="-40%" y="-40%" width="180%" height="180%">
+          <feGaussianBlur stdDeviation="8"/>
+        </filter>
+      </defs>
+
+      <ellipse class="glow" cx="200" cy="368" rx="150" ry="330" filter="url(#tsoft)"/>
+
+      <rect class="tire" x="42" y="105" width="24" height="96" rx="10"/>
+      <rect class="tire" x="334" y="105" width="24" height="96" rx="10"/>
+      <rect class="tire" x="42" y="486" width="24" height="96" rx="10"/>
+      <rect class="tire" x="334" y="486" width="24" height="96" rx="10"/>
+
+      <path class="paint" d="
+        M200 34
+        C148 34 108 44 92 64
+        C78 82 72 112 70 156
+        C68 220 68 320 70 400
+        C71 470 73 540 80 596
+        C88 652 132 686 200 686
+        C268 686 312 652 320 596
+        C327 540 329 470 330 400
+        C332 320 332 220 330 156
+        C328 112 322 82 308 64
+        C292 44 252 34 200 34 Z"/>
+
+      <path class="mirror" d="M70 214 C52 204 40 203 33 209 C30 216 37 223 50 225 L70 228 Z"/>
+      <path class="mirror" d="M330 214 C348 204 360 203 367 209 C370 216 363 223 350 225 L330 228 Z"/>
+
+      <path class="headlight" d="M94 62 q26 -13 50 -15 l1 9 q-23 3 -45 13 z"/>
+      <path class="headlight" d="M306 62 q-26 -13 -50 -15 l-1 9 q23 3 45 13 z"/>
+      <rect class="lightbar" x="122" y="662" width="156" height="7" rx="3.5"/>
+
+      <path class="seam" d="M118 58 C104 100 98 150 96 192"/>
+      <path class="seam" d="M282 58 C296 100 302 150 304 192"/>
+
+      <path class="glass" d="M92 200 C130 190 270 190 308 200 L288 258 C240 250 160 250 112 258 Z"/>
+      <rect class="glass" x="116" y="264" width="168" height="308" rx="26"/>
+      <path class="glass" d="M116 576 C160 585 240 585 284 576 L296 614 C250 624 150 624 104 614 Z"/>
+      <rect class="sunline ${d.sunroof === true ? "open" : ""}" x="124" y="376" width="152" height="2.5" rx="1.25"/>
+
+      <path class="seam" d="M70 262 L94 258 M70 352 L94 350 M70 448 L94 444"/>
+      <path class="seam" d="M330 262 L306 258 M330 352 L306 350 M330 448 L306 444"/>
+
+      <rect class="port" x="66" y="552" width="13" height="15" rx="4"/>
+      <circle class="portdot" cx="72.5" cy="559.5" r="3"/>
+
+      <circle class="ind ${d.doors.fl ? "on" : ""}" cx="84" cy="306" r="6"/>
+      <circle class="ind ${d.doors.rl ? "on" : ""}" cx="84" cy="400" r="6"/>
+      <circle class="ind ${d.doors.fr ? "on" : ""}" cx="316" cy="306" r="6"/>
+      <circle class="ind ${d.doors.rr ? "on" : ""}" cx="316" cy="400" r="6"/>
+
+      <text class="tv-val" x="26" y="146" text-anchor="middle">${d.tires.fl}</text>
+      <text class="tv-lab" x="26" y="163" text-anchor="middle">FL</text>
+      <text class="tv-val" x="374" y="146" text-anchor="middle">${d.tires.fr}</text>
+      <text class="tv-lab" x="374" y="163" text-anchor="middle">FR</text>
+      <text class="tv-val" x="26" y="527" text-anchor="middle">${d.tires.rl}</text>
+      <text class="tv-lab" x="26" y="544" text-anchor="middle">RL</text>
+      <text class="tv-val" x="374" y="527" text-anchor="middle">${d.tires.rr}</text>
+      <text class="tv-lab" x="374" y="544" text-anchor="middle">RR</text>
+
+      <text class="${cl(d.doors.fl)}" x="58" y="311" text-anchor="end">${stat(d.doors.fl)}</text>
+      <text class="${cl(d.doors.rl)}" x="58" y="405" text-anchor="end">${stat(d.doors.rl)}</text>
+      <text class="${cl(d.doors.fr)}" x="342" y="311">${stat(d.doors.fr)}</text>
+      <text class="${cl(d.doors.rr)}" x="342" y="405">${stat(d.doors.rr)}</text>
+
+      <text class="tv-lab onbody" x="200" y="122" text-anchor="middle">HOOD</text>
+      <text class="${cl(d.hood)} onbody" x="200" y="142" text-anchor="middle">${stat(d.hood)}</text>
+      ${d.sunroof == null ? "" : `
+      <text class="tv-lab onglass" x="200" y="322" text-anchor="middle">SUNROOF</text>
+      <text class="${cl(d.sunroof)} onglass" x="200" y="342" text-anchor="middle">${stat(d.sunroof)}</text>`}
+      <text class="tv-lab onbody" x="200" y="634" text-anchor="middle">TRUNK</text>
+      <text class="${cl(d.trunk)} onbody" x="200" y="654" text-anchor="middle">${stat(d.trunk)}</text>
+    </svg>`;
+  };
 
   /* ----------------------------------------------------------- icons ----- */
   /* One cohesive hand-drawn stroke set - 24px grid, 1.8 stroke, round caps. */
@@ -232,6 +370,11 @@
     .car .tire { fill: #20242a; }
     .car .disc { fill: none; stroke: #4a525b; stroke-width: 9; }
     .car .hubcap { fill: #cfd5db; }
+    .car .cladding { stroke: #262b31; stroke-width: 14; fill: none; }
+    .car .mirror { fill: #3a424d; }
+    .car .spokes path { fill: #cfd5db; }
+    .car .disc { fill: #23272d; }
+    .car .rimring { fill: none; stroke: #b9c0c8; stroke-width: 2.5; }
     .car .ind { fill: ${AMBER}; opacity: 0; transition: opacity .3s ease; }
     .car .ind.on { opacity: 1; animation: geely-blink 1.4s ease infinite; }
     @keyframes geely-blink { 50% { opacity: .35; } }
@@ -278,6 +421,36 @@
     }
     @keyframes geely-shimmer { from { transform: translateX(-100%);} to { transform: translateX(100%);} }
     .unavail { opacity: .5; }
+    .brandmark { display: block; width: 58px; margin: 8px auto 0; opacity: .8; }
+    .cartop { display: block; width: 100%; }
+    .cartop .paint { fill: var(--geely-car-paint, url(#tp)); stroke: rgba(0,0,0,.18); stroke-width: 1.5; }
+    .cartop .glass { fill: url(#tg); }
+    .cartop .tire { fill: #23272e; }
+    .cartop .mirror { fill: #3a424d; }
+    .cartop .seam { stroke: rgba(0,0,0,.22); stroke-width: 1.6; fill: none; }
+    .cartop .headlight { fill: #eef4fa; stroke: rgba(0,0,0,.1); }
+    .cartop .lightbar { fill: #d05252; opacity: .85; }
+    .cartop .glow { fill: transparent; transition: fill .5s ease; }
+    .cartop.charging .glow { fill: color-mix(in srgb, ${ACCENT} 30%, transparent); }
+    .cartop.charging .portdot { fill: ${ACCENT}; filter: drop-shadow(0 0 4px ${ACCENT}); }
+    .cartop .port { fill: rgba(0,0,0,.28); }
+    .cartop .portdot { fill: rgba(255,255,255,.35); }
+    .cartop .ind { fill: ${AMBER}; opacity: 0; }
+    .cartop .ind.on { opacity: 1; animation: geely-blink 1.4s ease infinite; }
+    .cartop .sunline { fill: rgba(255,255,255,.22); }
+    .cartop .sunline.open { fill: ${AMBER}; }
+    .cartop text { font-family: inherit; }
+    .tv-val { font-size: 17px; font-weight: 500; fill: var(--primary-text-color);
+              font-variant-numeric: tabular-nums; }
+    .tv-lab { font-size: 10.5px; letter-spacing: .12em; fill: var(--secondary-text-color); }
+    .tv-stat { font-size: 14.5px; fill: var(--secondary-text-color); }
+    .tv-lab.onbody { fill: #6b7280; }
+    .tv-stat.onbody { fill: #454c55; }
+    .tv-stat.open.onbody { fill: #b97a14; }
+    .tv-stat.open { fill: ${AMBER}; font-weight: 600; animation: geely-blink 1.4s ease infinite; }
+    .tv-lab.onglass { fill: rgba(255,255,255,.55); }
+    .tv-stat.onglass { fill: rgba(255,255,255,.8); }
+    .tv-stat.open.onglass { fill: ${AMBER}; }
   `;
 
   /* ------------------------------------------------------------ base ----- */
@@ -569,7 +742,7 @@
               <div class="num n ${OK(s.range) ? "" : "unavail"}">${range}<span class="u">km</span></div>
               <div class="micro sub">Range</div>
             </div>
-            <div class="carwrap">${CAR_SVG(s.charging ? "charging" : "", this._openMap())}</div>
+            <div class="carwrap">${CAR_SVG(s.charging ? "charging" : "", this._openMap())}${GEELY_LOGO}</div>
           </div>
           <div class="bar ${low ? "low" : ""} ${s.charging ? "charging" : ""}" style="margin:2px 0 10px">
             <i style="width:${batt === "—" ? 0 : batt}%"></i>
@@ -716,7 +889,7 @@
             <i style="width:${batt === "—" ? 0 : batt}%"></i>
           </div>
 
-          <div class="carwrap">${CAR_SVG(s.charging ? "charging" : "", this._openMap())}</div>
+          <div class="carwrap">${CAR_SVG(s.charging ? "charging" : "", this._openMap())}${GEELY_LOGO}</div>
 
           <div class="actions" style="margin-top:8px">
             ${this._actBtn("lock", "Lock", "lock", { on: s.locked && s.locked.state === "locked" })}
@@ -809,14 +982,13 @@
     version: VERSION, swaps: 0, losses: 0, defineError: "", firstDefine: null,
     lastLossAt: null, lastFixAt: null,
     line() {
-      const full = !!window.customElements.get("geely-card");
-      const compact = !!window.customElements.get("geely-card-compact");
+      const missing = ["geely-card", "geely-card-compact", "geely-card-top",
+        "geely-card-mini"].filter((n) => !window.customElements.get(n));
       const ms = (t) => (t === null ? "?" : `${t}ms`);
       return [
         `v${this.version}`,
         "script ran",
-        `geely-card ${full ? "OK" : "MISSING"}`,
-        `compact ${compact ? "OK" : "MISSING"}`,
+        missing.length ? `MISSING: ${missing.join(", ")}` : "all 4 cards OK",
         `first define ${this.firstDefine === false ? "FAILED" : ms(this.firstDefine)}`,
         this.losses ? `lost x${this.losses} (last at ${ms(this.lastLossAt)})` : "never lost",
         this.swaps ? `registry swapped x${this.swaps}` : "no registry swap",
@@ -838,8 +1010,199 @@
       console.warn(`geely-card: define(${tag}) skipped:`, err);
     }
   };
+  /* ----------------------------------------------------------- mini ----- */
+
+  class GeelyCardMini extends GeelyCardBase {
+    _watched() {
+      return ["sensor.battery", "sensor.electric_range",
+        "sensor.interior_temperature", "sensor.charging_power",
+        "lock.doors", "climate.climate", "binary_sensor.connected"];
+    }
+
+    getCardSize() { return 3; }
+
+    static getGridOptions() {
+      return { columns: 6, rows: 3, min_columns: 4, min_rows: 3 };
+    }
+
+    _render() {
+      if (!this._prefix) return this._missing();
+      const s = this._carState();
+      const range = OK(s.range) ? Math.round(NUM(s.range)) : "—";
+      const temp = NUM(this._st("sensor.interior_temperature"));
+      const power = NUM(this._st("sensor.charging_power"));
+      const locked = s.locked && s.locked.state === "locked";
+      const climateOn = s.climate && s.climate.state !== "off";
+      const online = this._st("binary_sensor.connected");
+      const statusLine = s.charging
+        ? `Charging${power != null ? " · " + power.toFixed(1) + " kW" : ""}`
+        : s.doorsOpen.length ? `${s.doorsOpen.length} open`
+        : locked ? "Locked" : s.locked ? "Unlocked" : "Parked";
+
+      this.shadowRoot.innerHTML = `<style>${BASE_CSS}
+        .shell { padding: 14px 16px 12px; }
+        .head { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+        .title { font-size:12px; font-weight:600; letter-spacing:.02em;
+                 display:flex; align-items:center; gap:6px; min-width:0; flex:1; }
+        .title em { font-style:normal; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .dot { width:5px; height:5px; border-radius:50%; background:${ACCENT}; flex:none; }
+        .dot.off { background:${AMBER}; }
+        .temp { font-size:12px; color: var(--secondary-text-color); flex:none;
+                font-variant-numeric: tabular-nums; }
+        .mid { margin:8px 0 2px; }
+        .mid .n { font-size:34px; }
+        .mid .u { font-size:12px; color: var(--secondary-text-color); margin-left:2px; }
+        .status { font-size:11px; color: var(--secondary-text-color); margin-top:1px; }
+        .status.charging { color:${ACCENT}; }
+        .status.warn { color:${AMBER}; }
+        .actions { display:flex; gap:6px; margin-top:10px; }
+        .act { flex:1; padding:8px 0 7px; border-radius:12px; }
+        .act span { display:none; }
+        .act svg { width:19px; height:19px; }
+        </style>
+        <div class="shell">
+          <div class="head">
+            <div class="title">
+              <i class="dot ${online && online.state === "off" ? "off" : ""}"></i>
+              <em>${esc(this._title())}</em>
+            </div>
+            <span class="temp">${temp != null ? Math.round(temp) + "° in" : ""}</span>
+          </div>
+          <div class="mid">
+            <span class="num n ${OK(s.range) ? "" : "unavail"}">${range}</span><span class="u">km</span>
+            <div class="status ${s.charging ? "charging" : ""} ${s.doorsOpen.length ? "warn" : ""}">${esc(statusLine)}</div>
+          </div>
+          <div class="actions">
+            ${this._actBtn("lock", "Lock", "lock", { on: locked })}
+            ${this._actBtn("unlock", "Unlock", "unlock")}
+            ${this._actBtn("climate", "Climate", "climate", { on: climateOn })}
+          </div>
+        </div>`;
+      this._wire();
+    }
+  }
+
+  /* ------------------------------------------------------------ top ----- */
+
+  class GeelyCardTop extends GeelyCardBase {
+    _watched() {
+      return ["sensor.battery", "sensor.electric_range", "sensor.charging_power",
+        "sensor.interior_temperature", "sensor.exterior_temperature",
+        "sensor.tire_front_left", "sensor.tire_front_right",
+        "sensor.tire_rear_left", "sensor.tire_rear_right",
+        "lock.doors", "climate.climate", "switch.defrost",
+        "switch.window_ventilation", "cover.sunroof",
+        "binary_sensor.door_driver", "binary_sensor.door_passenger",
+        "binary_sensor.door_rear_left", "binary_sensor.door_rear_right",
+        "binary_sensor.trunk", "binary_sensor.hood", "binary_sensor.connected"];
+    }
+
+    getCardSize() { return 8; }
+
+    _render() {
+      if (!this._prefix) return this._missing();
+      const s = this._carState();
+      const batt = s.battery == null ? "—" : Math.round(s.battery);
+      const low = s.battery != null && s.battery <= 20;
+      const range = OK(s.range) ? Math.round(NUM(s.range)) : "—";
+      const climateOn = s.climate && s.climate.state !== "off";
+      const defrost = this._st("switch.defrost");
+      const vent = this._st("switch.window_ventilation");
+      const online = this._st("binary_sensor.connected");
+      const power = this._st("sensor.charging_power");
+      const interior = this._st("sensor.interior_temperature");
+      const exterior = this._st("sensor.exterior_temperature");
+      const speed = NUM(this._st("sensor.speed"));
+
+      const isOpen = (suffix) => {
+        const st = this._st(`binary_sensor.${suffix}`);
+        return st ? st.state === "on" : null;
+      };
+      const sunroofSt = this._st("cover.sunroof");
+      const tire = (suffix) => {
+        const st = this._st(`sensor.tire_${suffix}`);
+        return OK(st) ? `${Math.round(NUM(st))} ${UNIT(st)}`.trim() : "—";
+      };
+      const statusLine = s.charging
+        ? `Charging${OK(power) ? " · " + power.state + " kW" : ""}`
+        : speed != null && speed > 0 ? `Driving · ${Math.round(speed)} km/h`
+        : s.doorsOpen.length ? `${s.doorsOpen.length} opening${s.doorsOpen.length > 1 ? "s" : ""} open`
+        : s.locked && s.locked.state === "locked" ? "Parked · Locked" : "Parked";
+
+      const d = {
+        tires: { fl: tire("front_left"), fr: tire("front_right"),
+                 rl: tire("rear_left"), rr: tire("rear_right") },
+        // Left-hand drive: the driver's door is the front-left one.
+        doors: { fl: isOpen("door_driver"), fr: isOpen("door_passenger"),
+                 rl: isOpen("door_rear_left"), rr: isOpen("door_rear_right") },
+        hood: isOpen("hood"),
+        trunk: isOpen("trunk"),
+        sunroof: sunroofSt ? sunroofSt.state !== "closed" : null,
+      };
+
+      this.shadowRoot.innerHTML = `<style>${BASE_CSS}
+        .head { display:flex; align-items:baseline; justify-content:space-between; }
+        .title { font-size:14px; font-weight:600; letter-spacing:.02em; display:flex; align-items:center; gap:8px; }
+        .dot { width:6px; height:6px; border-radius:50%; background:${ACCENT}; }
+        .dot.off { background:${AMBER}; }
+        .status { font-size:12px; color: var(--secondary-text-color); margin-top:3px; }
+        .status.charging { color:${ACCENT}; }
+        .hero { display:flex; align-items:flex-end; gap:16px; margin:12px 0 6px; }
+        .hero .n { font-size:46px; }
+        .hero .u { font-size:14px; color: var(--secondary-text-color); margin-left:4px; }
+        .hero .side { margin-left:auto; text-align:right; }
+        .hero .side .num { font-size:24px; }
+        .hero .side .u2 { font-size:11px; color: var(--secondary-text-color); }
+        .carwrap { margin:8px auto 0; max-width:330px; }
+        .actions { display:grid; grid-template-columns:repeat(4, 1fr); margin-top:10px; }
+        </style>
+        <div class="shell">
+          <div class="head">
+            <div>
+              <div class="title">
+                <i class="dot ${online && online.state === "off" ? "off" : ""}"></i>
+                ${esc(this._title())}
+              </div>
+              <div class="status ${s.charging ? "charging" : ""}">${esc(statusLine)}</div>
+            </div>
+            <span class="micro">${batt}%</span>
+          </div>
+
+          <div class="hero">
+            <div>
+              <div class="num n ${OK(s.range) ? "" : "unavail"}">${range}<span class="u">km</span></div>
+              <div class="micro" style="margin-top:5px">Range</div>
+            </div>
+            <div class="side">
+              ${OK(interior) ? `<div class="num">${Math.round(NUM(interior))}°</div>
+                <div class="u2">inside${OK(exterior) ? ` · ${Math.round(NUM(exterior))}° out` : ""}</div>` : ""}
+            </div>
+          </div>
+          <div class="bar ${low ? "low" : ""} ${s.charging ? "charging" : ""}">
+            <i style="width:${batt === "—" ? 0 : batt}%"></i>
+          </div>
+
+          <div class="carwrap">${CAR_TOP_SVG(s.charging ? "charging" : "", d)}${GEELY_LOGO}</div>
+
+          <div class="actions">
+            ${this._actBtn("lock", "Lock", "lock", { on: s.locked && s.locked.state === "locked" })}
+            ${this._actBtn("unlock", "Unlock", "unlock")}
+            ${this._actBtn("climate", "Climate", "climate", { on: climateOn })}
+            ${this._actBtn("defrost", "Defrost", "defrost", { on: defrost && defrost.state === "on" })}
+            ${this._actBtn("vent", "Vent", "vent", { on: vent && vent.state === "on" })}
+            ${this._actBtn("trunk", "Trunk", "trunk")}
+            ${this._actBtn("find", "Find", "find")}
+            ${this._actBtn("refresh", "Sync", "refresh")}
+          </div>
+        </div>`;
+      this._wire();
+    }
+  }
+
   const registerElements = () => {
     defineOnce("geely-card-compact", GeelyCardCompact);
+    defineOnce("geely-card-top", GeelyCardTop);
+    defineOnce("geely-card-mini", GeelyCardMini);
     defineOnce("geely-card", GeelyCard);
   };
   registerElements();
@@ -872,7 +1235,9 @@
     const swapped = window.customElements !== knownRegistry ||
       window.customElements.define !== knownDefine;
     const lost = !window.customElements.get("geely-card") ||
-      !window.customElements.get("geely-card-compact");
+      !window.customElements.get("geely-card-compact") ||
+      !window.customElements.get("geely-card-top") ||
+      !window.customElements.get("geely-card-mini");
     if (swapped || lost) {
       if (lost) {
         STATUS.losses += 1;
@@ -946,7 +1311,7 @@
    * a newer one - which is how a fixed card keeps behaving like the broken
    * one. Whoever is newer wins: drop the other copy's picker entries instead
    * of skipping ours. */
-  const OURS = ["geely-card", "geely-card-compact", "geely-card-status"];
+  const OURS = ["geely-card", "geely-card-compact", "geely-card-top", "geely-card-mini", "geely-card-status"];
   const rank = (v) => String(v || "0").split(".").reduce(
     (acc, part) => acc * 1000 + (parseInt(part, 10) || 0), 0);
   const previous = window.__geelyCardVersion;
@@ -975,6 +1340,18 @@
         type: "geely-card-compact",
         name: "Geely Card (compact)",
         description: "Battery, range and the controls that matter - lock, climate, defrost, trunk.",
+        preview: true,
+      },
+      {
+        type: "geely-card-top",
+        name: "Geely Card (top view)",
+        description: "The car from above: tire pressures at each wheel, and live status on every door, the hood, the sunroof and the trunk.",
+        preview: true,
+      },
+      {
+        type: "geely-card-mini",
+        name: "Geely Card (mini)",
+        description: "A small square: range, cabin temperature, status, and lock / unlock / climate.",
         preview: true,
       },
       {

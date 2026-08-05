@@ -39,8 +39,7 @@ polished setup on top.
 - 🚙 **Two custom cards included** - `custom:geely-card` (the full cockpit) and
   `custom:geely-card-compact` appear in the card picker automatically the
   moment the integration is set up. Zero config, zero extra installs.
-- 🖥️ **Ready-made cards, widgets, a four-view dashboard and Blueprints**, all
-  built-in Lovelace cards - no extra HACS frontend packages.
+- 🖥️ **Four built-in dashboard cards** - a full cockpit, a top-down status view, a compact tile and a mini square - registered automatically, plus ready-made automations and Blueprints
 - 📈 **Long-term statistics** on every numeric entity, so history survives the
   recorder's purge window.
 
@@ -409,23 +408,27 @@ everything else.
 
 ### 🚙 The built-in cards - zero setup
 
-The integration ships two custom cards and registers them by itself - no HACS
-frontend package, no resource to add, nothing to copy. Open any dashboard,
-**Add card**, and search "Geely":
+The integration ships **four custom cards** and registers them by itself - no
+HACS frontend package, no resource to add, nothing to copy. Open any
+dashboard, **Add card**, and search "Geely":
 
 | Card | What it is |
 |---|---|
-| **Geely Card** (`custom:geely-card`) | The full cockpit: range and battery up top, a live car silhouette that glows while charging, one-tap Lock / Unlock / Climate / Defrost / Vent / Trunk / Find / Sync, then charging, tires, trip and service health - each row hides itself when the car doesn't report it (a BEV shows no fuel section) |
+| **Geely Card** (`custom:geely-card`) | The full cockpit: range and battery up top, the EX5 silhouette that glows while charging and flags every opening, one-tap Lock / Unlock / Climate / Defrost / Vent / Trunk / Find / Sync, then charging, tires, trip and service health - each row hides itself when the car doesn't report it |
+| **Geely Card (top view)** (`custom:geely-card-top`) | The car from above: tire pressure beside each wheel, live status on every door, the hood, the sunroof and the trunk, with the same header and controls |
 | **Geely Card (compact)** (`custom:geely-card-compact`) | The essentials in one tile: battery, range, status chips, and the five controls that matter |
+| **Geely Card (mini)** (`custom:geely-card-mini`) | A small square: range, cabin temperature, status, and lock / unlock / climate |
 
-> ℹ️ **Known issue:** on some installations the cards don't yet appear in the
-> card picker - this is [being actively worked on](https://github.com/YossiKon/geely-connect/issues/8),
-> and updates land quickly. Everything else about the integration is
-> unaffected. Thank you for the patience - and if you'd like to help, a note
-> on the issue with what you see is always welcome.
+| Full | Top view |
+|---|---|
+| ![Geely Card](docs/images/card-full.png) | ![Geely Card top view](docs/images/card-top.png) |
 
-With one Geely on the account the cards find their entities on their own.
-With several, point each card at a car:
+| Compact | Mini |
+|---|---|
+| ![Geely Card compact](docs/images/card-compact.png) | ![Geely Card mini](docs/images/card-mini.png) |
+
+With one Geely on the account the cards find their entities on their own -
+even after you rename them. With several cars, point each card at one:
 
 ```yaml
 type: custom:geely-card
@@ -437,58 +440,17 @@ on the second** (a stray touch on a wall tablet can't open the car), and the
 accent colour follows the state - teal while charging, amber when something
 needs a look. `--geely-accent` / `--geely-warn` theme variables override both.
 
-### 📐 The YAML collection
+> The YAML card and view files that used to live in `cards/` and `views/`
+> are gone - the built-in cards replace them and stay current on their own.
 
-First, find your **entity suffix**: Settings → Devices & Services → Geely Connect
-→ your car → click any entity. Your ids will look like
-`sensor.geely_ex5_4143_battery` - the device name always ends in the last four
-VIN characters - so there the suffix is `geely_ex5_4143`.
+### 📐 Finding your entity suffix
 
-`my_geely_ex5` in every file below is a **placeholder**, not a real id.
-Search-replace it with your own suffix before saving anything.
-
-There are two kinds of file - **use the matching paste location**, or you'll get
-a `Cannot read properties of undefined (reading 'startsWith')` error:
-
-### 🃏 Single cards - [`cards/`](cards/)
-A **card** starts with `type:` and is added via
-**Edit dashboard → Add card → ⤵ Manual → paste → Save** (into any existing view).
-
-- **`cards/card-overview.yaml`** - ⭐ start here. Battery, range, interior temp
-  and charger status, plus working lock and climate controls, quick actions, and
-  a charging panel that appears only while charging. No HACS needed.
-- **`cards/card-builtin.yaml`** - one self-contained card (vertical-stack of
-  built-in tiles). **No HACS needed.** Best for dropping into an existing tab.
-- **`cards/card-premium-hebrew.yaml`** - styled dark card (Hebrew). Requires the
-  HACS frontend cards `button-card`, `stack-in-card`, `card-mod`.
-
-**Widgets** - narrow, single-purpose cards for a sidebar or phone column, all
-built-in only:
-
-- **`cards/widget-battery.yaml`** - battery gauge with colour bands, range,
-  charging switch, time-to-full and charge rate while charging.
-- **`cards/widget-climate.yaml`** - thermostat, temperatures, defrost, G-Clean
-  and the seat heat/vent selects.
-- **`cards/widget-security.yaml`** - lock, every door/trunk/hood at a glance, and
-  a red warning block when something is open.
-- **`cards/widget-tires.yaml`** - the four pressures laid out like the car, with
-  a history graph to spot a slow leak.
-
-- **`cards/widget-range.yaml`** - range now, range at full charge and
-  efficiency, with a 30-day graph so pack degradation or seasonal loss shows up.
-- **`cards/widget-control.yaml`** - ⭐ the four things you reach for most: lock
-  and unlock, rapid warming or cooling in one tap, battery percentage, and
-  whether the car is shut, plugged in and reachable.
-- **`cards/widget-status.yaml`** - the whole state in four sentences: lock,
-  charge and range; what charging is doing and when it finishes; which openings
-  are open by name; and how old the data is.
-- **`cards/widget-attention.yaml`** - silent until something needs you, then
-  lists only that: left open, unlocked, low battery, a soft tire, weak 12V,
-  service due, or no contact with the car.
-- **`cards/widget-template.yaml`** - a starter to copy when building your own.
-  A working card that walks through each pattern - heading, tile grid,
-  interactive tiles, gauge bands, conditional, glance, history graph and a
-  templated markdown card - with a comment over each saying which line to change.
+For automations below, find your **entity suffix**: Settings → Devices &
+Services → Geely Connect → your car → click any entity. Your ids will look
+like `sensor.geely_ex5_4143_battery` - the device name always ends in the
+last four VIN characters - so there the suffix is `geely_ex5_4143`.
+`my_geely_ex5` in every file below is a **placeholder** - search-replace it
+with your own suffix.
 
 ### 📱 Home-screen widgets - [`android-widgets/`](android-widgets/)
 Not dashboard cards. These are **Jinja templates** for the companion app's
@@ -496,20 +458,6 @@ Not dashboard cards. These are **Jinja templates** for the companion app's
 Pasting card YAML into that field shows you the YAML as text - different thing
 entirely. Start with **`all-in-one.jinja`**: lock, charge bar, charging and its
 finish time, what's open, any warning, and data age, all in one widget.
-
-### 📑 Single views - [`views/`](views/)
-A **view** is one tab of a dashboard. Each file is a YAML list item starting
-with `- title:`, pasted under the `views:` key via **Edit dashboard → ⋮ → Raw
-configuration editor** - not via "Add card". Line the `- title:` up with the
-views already there.
-
-- **`views/view-car.yaml`** - the car at a glance: key numbers, lock and climate
-  controls, every opening, quick actions, and a map.
-- **`views/view-charging.yaml`** - battery gauge, the live charge rate with its
-  volts and amps, charge complete, range at full charge, scheduled charging,
-  and a week of battery history.
-- **`views/view-mobile.yaml`** - single column with big touch targets, for a
-  phone.
 
 ### 🤖 Automations - [`automations/`](automations/)
 Ready-to-paste automations. Append a file to your `automations.yaml`, or copy
@@ -535,7 +483,8 @@ A **dashboard** starts with `title:` / `views:` and is pasted via
 ⋮ Edit → ⋮ Raw configuration editor → paste → Save** (NOT "Add card").
 
 - **`dashboards/dashboard-premium.yaml`** - ⭐ four views (Overview with a map,
-  Charging, Climate, Trip & Health). Built-in cards only.
+  Charging, Climate, Trip & Health). Built-in HA cards only - and the Geely
+  cards above drop straight into any of them.
 - **`dashboards/dashboard-builtin.yaml`** - a complete multi-section dashboard
   using only built-in cards. No HACS needed.
 
@@ -726,13 +675,13 @@ re-authenticate. Tip: run the first setup on a network you trust.
 custom_components/geely_connect/   the integration itself (what HACS installs)
 ├── brand/                         icon.png / logo.png shown in the HA UI
 ├── translations/                  UI translations (en, he, ar, fr, ru)
+├── geely-card.js                  the four built-in dashboard cards
 ├── manifest.json                  integration metadata
 └── *.py                           platforms, API client, config flow, …
 automations/                       ready-to-paste automations
 blueprints/automation/             the same ideas as importable blueprints
-cards/                             single cards and widgets (paste as "Manual card")
-views/                             single dashboard tabs (paste under "views:")
 dashboards/                        full dashboards (paste in Raw config editor)
+docs/images/                       the card screenshots in this README
 hacs.json                          HACS metadata
 ```
 
