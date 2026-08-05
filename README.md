@@ -414,8 +414,8 @@ dashboard, **Add card**, and search "Geely":
 
 | Card | What it is |
 |---|---|
-| **Geely Card** (`custom:geely-card`) | The full cockpit: range and battery up top, the EX5 silhouette that glows while charging and flags every opening, one-tap Lock / Unlock / Climate / Defrost / Vent / Trunk / Find / Sync, then charging, tires, trip and service health - each row hides itself when the car doesn't report it |
-| **Geely Card (top view)** (`custom:geely-card-top`) | The car from above: tire pressure beside each wheel, live status on every door, the hood, the sunroof and the trunk, with the same header and controls |
+| **Geely Card** (`custom:geely-card`) | The full cockpit: range and battery up top, the EX5 silhouette that glows while charging and flags every opening, one-tap Lock / Unlock / Climate / Defrost / Vent / Trunk / Find / Sync, a full climate panel (temperature, rapid heat / cool, seat heating and cooling, fresh air, sunroof and shade), then charging, tires, trip and service health - each block hides itself when the car doesn't report it |
+| **Geely Card (top view)** (`custom:geely-card-top`) | The car from above: tire pressure beside each wheel, bold live status on every door, the hood, the sunroof and the trunk - with the same header, actions and climate panel |
 | **Geely Card (compact)** (`custom:geely-card-compact`) | The essentials in one tile: battery, range, status chips, and the five controls that matter |
 | **Geely Card (mini)** (`custom:geely-card-mini`) | A small square: range, cabin temperature, status, a lock button that follows the car (locked offers Unlock, unlocked offers Lock), and one-tap quick heat / quick cool |
 | **Geely Card (strip)** (`custom:geely-card-strip`) | One row: range, battery and lock state, with lock, climate, trunk and find as icon buttons - for the top of a dashboard or a narrow column |

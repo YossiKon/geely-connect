@@ -33,6 +33,8 @@
     "distance_to_service", "days_to_service", "last_updated",
     "scheduled_charging", "charger_connection", "tire_front_right",
     "tire_front_left", "tire_rear_right", "door_rear_right", "charging_power",
+    "seat_heat_passenger", "seat_vent_passenger", "seat_heat_driver",
+    "seat_vent_driver", "sunshade", "g_clean",
     "tire_rear_left", "door_rear_left", "combined_range", "charge_complete",
     "charge_voltage", "electric_range", "charge_current", "door_passenger",
     "charger_plug", "total_mileage", "refresh_data", "unlock_trunk",
@@ -250,14 +252,14 @@
       <circle class="ind ${d.doors.fr ? "on" : ""}" cx="316" cy="306" r="6"/>
       <circle class="ind ${d.doors.rr ? "on" : ""}" cx="316" cy="400" r="6"/>
 
-      <text class="tv-val" x="26" y="146" text-anchor="middle">${d.tires.fl}</text>
-      <text class="tv-lab" x="26" y="163" text-anchor="middle">FL</text>
-      <text class="tv-val" x="374" y="146" text-anchor="middle">${d.tires.fr}</text>
-      <text class="tv-lab" x="374" y="163" text-anchor="middle">FR</text>
-      <text class="tv-val" x="26" y="527" text-anchor="middle">${d.tires.rl}</text>
-      <text class="tv-lab" x="26" y="544" text-anchor="middle">RL</text>
-      <text class="tv-val" x="374" y="527" text-anchor="middle">${d.tires.rr}</text>
-      <text class="tv-lab" x="374" y="544" text-anchor="middle">RR</text>
+      <text class="tv-val" x="42" y="84" text-anchor="middle">${d.tires.fl.split(" ")[0]}</text>
+      <text class="tv-lab" x="42" y="100" text-anchor="middle">${esc((d.tires.fl.split(" ")[1] || "").toUpperCase())} FL</text>
+      <text class="tv-val" x="358" y="84" text-anchor="middle">${d.tires.fr.split(" ")[0]}</text>
+      <text class="tv-lab" x="358" y="100" text-anchor="middle">${esc((d.tires.fr.split(" ")[1] || "").toUpperCase())} FR</text>
+      <text class="tv-val" x="42" y="612" text-anchor="middle">${d.tires.rl.split(" ")[0]}</text>
+      <text class="tv-lab" x="42" y="628" text-anchor="middle">${esc((d.tires.rl.split(" ")[1] || "").toUpperCase())} RL</text>
+      <text class="tv-val" x="358" y="612" text-anchor="middle">${d.tires.rr.split(" ")[0]}</text>
+      <text class="tv-lab" x="358" y="628" text-anchor="middle">${esc((d.tires.rr.split(" ")[1] || "").toUpperCase())} RR</text>
 
       <text class="${cl(d.doors.fl)}" x="58" y="311" text-anchor="end">${stat(d.doors.fl)}</text>
       <text class="${cl(d.doors.rl)}" x="58" y="405" text-anchor="end">${stat(d.doors.rl)}</text>
@@ -302,6 +304,21 @@
            <path d="M12 4v2.6M12 17.4V20M4 12h2.6M17.4 12H20"/>`,
     heat: `<path d="M12 4c2 3.2 5 5 5 8.6a5 5 0 0 1-10 0C7 9 10 7.2 12 4z"/>
            <path d="M12 20.5v-3"/>`,
+    seatheat: `<path d="M6.5 4.5v7.5a2.5 2.5 0 0 0 2.5 2.5h6"/>
+               <path d="M6.5 12h6a3 3 0 0 1 3 3v4.5"/>
+               <path d="M13 5c-.8 1.2-.8 2 0 3.2M16.5 5c-.8 1.2-.8 2 0 3.2"/>`,
+    seatvent: `<path d="M6.5 4.5v7.5a2.5 2.5 0 0 0 2.5 2.5h6"/>
+               <path d="M6.5 12h6a3 3 0 0 1 3 3v4.5"/>
+               <path d="M13.5 5l2.5 2.5M16 5l-2.5 2.5"/>`,
+    roof: `<path d="M4 14.5c0-5 3.6-8.5 8-8.5s8 3.5 8 8.5"/>
+           <path d="M8 10.5h8M9.5 6.9v3.6M14.5 6.9v3.6"/>`,
+    shade: `<path d="M4 14.5c0-5 3.6-8.5 8-8.5s8 3.5 8 8.5"/>
+            <path d="M6 12h12M8.5 12c0 2.5 1.5 4 3.5 4s3.5-1.5 3.5-4"/>`,
+    fresh: `<path d="M5 9.5c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2"/>
+            <path d="M5 14c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2"/>
+            <path d="M5 18.5c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2"/>`,
+    minus: `<path d="M6 12h12"/>`,
+    plus: `<path d="M12 6v12M6 12h12"/>`,
     cool: `<path d="M12 3.5v17M4.6 7.75l14.8 8.5M19.4 7.75 4.6 16.25"/>`,
     trip: `<path d="M5 19c6 0 3-7 9-7 4.5 0 3.5-5.5 5-7"/>
            <circle cx="5" cy="19" r="1.6"/><circle cx="19" cy="5" r="1.6"/>`,
@@ -409,6 +426,45 @@
     }
     @keyframes geely-shimmer { from { transform: translateX(-100%);} to { transform: translateX(100%);} }
     .unavail { opacity: .5; }
+    .crow { display:flex; gap:8px; align-items:stretch; margin-top:8px; }
+    .crow.wrap { flex-wrap: wrap; }
+    .temp { display:flex; align-items:center; gap:2px; flex:none;
+            border:1px solid var(--divider-color, rgba(120,130,140,.25));
+            border-radius:14px; padding:2px; }
+    .temp.on { border-color: color-mix(in srgb, ${ACCENT} 45%, transparent); }
+    .temp .tval { min-width:52px; text-align:center; font-size:16px; font-weight:600;
+                  font-variant-numeric: tabular-nums; }
+    .csub { margin-top:10px; }
+    .cstep { border:none; background:none; color:var(--primary-text-color);
+             width:40px; height:40px; border-radius:12px; cursor:pointer;
+             display:flex; align-items:center; justify-content:center;
+             -webkit-tap-highlight-color: transparent; }
+    .cstep:active { transform: scale(.92); }
+    .cstep svg { width:16px; height:16px; }
+    .cbtn { display:flex; align-items:center; gap:6px; padding:10px 12px;
+            border:1px solid var(--divider-color, rgba(120,130,140,.25));
+            border-radius:14px; background:none; cursor:pointer;
+            color: var(--primary-text-color); font: inherit; font-size:12px;
+            min-height:40px; -webkit-tap-highlight-color: transparent;
+            transition: transform .1s ease; }
+    .cbtn:active { transform: scale(.95); }
+    .cbtn svg { width:17px; height:17px; }
+    .cbtn b { font-weight:600; font-size:11px; color: var(--secondary-text-color); }
+    .cbtn.on { color:${ACCENT}; border-color: color-mix(in srgb, ${ACCENT} 45%, transparent); }
+    .cbtn.on b { color: var(--primary-text-color); }
+    @media (hover: hover) {
+      .cstep:hover, .cmini:hover { background: rgba(120,130,140,.15); }
+    }
+    .cpair { display:flex; align-items:center; gap:6px; padding:4px 6px 4px 12px;
+             border:1px solid var(--divider-color, rgba(120,130,140,.25));
+             border-radius:14px; font-size:12px; }
+    .cpair svg { width:17px; height:17px; }
+    .cpair.on { color:${ACCENT}; border-color: color-mix(in srgb, ${ACCENT} 45%, transparent); }
+    .cmini { border:1px solid var(--divider-color, rgba(120,130,140,.3));
+             background:none; color:var(--primary-text-color); font:inherit;
+             font-size:11.5px; padding:8px 11px; min-height:34px; border-radius:10px;
+             cursor:pointer; -webkit-tap-highlight-color: transparent; }
+    .cmini:active { transform: scale(.95); }
     .cartop { display: block; width: 100%; }
     .cartop .paint { fill: var(--geely-car-paint, url(#tp)); stroke: rgba(0,0,0,.18); stroke-width: 1.5; }
     .cartop .glass { fill: url(#tg); }
@@ -427,10 +483,10 @@
     .cartop .sunline { fill: rgba(255,255,255,.22); }
     .cartop .sunline.open { fill: ${AMBER}; }
     .cartop text { font-family: inherit; }
-    .tv-val { font-size: 17px; font-weight: 500; fill: var(--primary-text-color);
+    .tv-val { font-size: 21px; font-weight: 600; fill: var(--primary-text-color);
               font-variant-numeric: tabular-nums; }
-    .tv-lab { font-size: 10.5px; letter-spacing: .12em; fill: var(--secondary-text-color); }
-    .tv-stat { font-size: 15.5px; font-weight: 600; fill: var(--primary-text-color); }
+    .tv-lab { font-size: 12.5px; letter-spacing: .1em; fill: var(--secondary-text-color); }
+    .tv-stat { font-size: 17px; font-weight: 700; fill: var(--primary-text-color); }
     .tv-lab.onbody { fill: #6b7280; }
     .tv-stat.onbody { fill: #3a4149; }
     .tv-stat.open.onbody { fill: #b97a14; }
@@ -568,7 +624,18 @@
     _signature(hass) {
       if (!this._prefix) return "no-prefix";
       return this._watched()
-        .map((e) => { const st = this._st(e); return st ? st.state : "-"; })
+        .map((e) => {
+          const st = this._st(e);
+          if (!st) return "-";
+          // The climate panel renders two ATTRIBUTES - target temperature
+          // and preset - and the entity's state alone never changes when
+          // they do, which froze the stepper until something else moved.
+          if (e.startsWith("climate.")) {
+            const a = st.attributes || {};
+            return `${st.state}~${a.temperature}~${a.preset_mode}`;
+          }
+          return st.state;
+        })
         .join("|") + `|${this._armed || ""}`;
     }
 
@@ -623,6 +690,40 @@
           }
           break;
         }
+        case "tempdown": case "tempup": {
+          const c = this._st("climate.climate");
+          if (!c || !c.attributes) break;
+          const a = c.attributes;
+          const step = Number(a.target_temp_step) || 0.5;
+          const cur = Number(a.temperature);
+          if (!isFinite(cur)) break;
+          const next = Math.min(Number(a.max_temp) || 30,
+            Math.max(Number(a.min_temp) || 16,
+              cur + (key === "tempup" ? step : -step)));
+          this._call("climate", "set_temperature", "climate", { temperature: next });
+          break;
+        }
+        case "rapidheat":
+          this._call("climate", "set_preset_mode", "climate", { preset_mode: "Rapid Warming" });
+          break;
+        case "rapidcool":
+          this._call("climate", "set_preset_mode", "climate", { preset_mode: "Rapid Cooling" });
+          break;
+        case "seat_heat_driver": case "seat_heat_passenger":
+        case "seat_vent_driver": case "seat_vent_passenger": {
+          // Tap cycles Off -> Low -> Medium -> High -> Off.
+          const st = this._st(`select.${key}`);
+          if (!st || !st.attributes || !Array.isArray(st.attributes.options)) break;
+          const opts = st.attributes.options;
+          const next = opts[(opts.indexOf(st.state) + 1) % opts.length];
+          this._call("select", "select_option", key, { option: next });
+          break;
+        }
+        case "sunroof_open": this._call("cover", "open_cover", "sunroof"); break;
+        case "sunroof_close": this._call("cover", "close_cover", "sunroof"); break;
+        case "shade_open": this._call("cover", "open_cover", "sunshade"); break;
+        case "shade_close": this._call("cover", "close_cover", "sunshade"); break;
+        case "gclean": this._call("switch", "toggle", "g_clean"); break;
         case "defrost": this._call("switch", "toggle", "defrost"); break;
         case "vent": this._call("switch", "toggle", "window_ventilation"); break;
         case "find": this._call("button", "press", "find_car"); break;
@@ -633,6 +734,67 @@
     _wire() {
       this.shadowRoot.querySelectorAll("[data-act]").forEach((el) =>
         el.addEventListener("click", () => this._onAction(el.dataset.act)));
+    }
+
+    /* The full climate panel: temperature stepper, the car's own rapid
+     * presets, seat heat/vent cycling, cabin air, and the roof. Every block
+     * hides itself when its entity does not exist on this trim - the API has
+     * no fan-speed control at all, so none is offered. */
+    _climatePanel() {
+      const c = this._st("climate.climate");
+      if (!c) return "";
+      const a = c.attributes || {};
+      const on = c.state !== "off";
+      const target = Number(a.temperature);
+      const preset = a.preset_mode;
+      const seat = (key, label, ic, mode) => {
+        const st = this._st(`select.${key}`);
+        if (!st) return "";
+        const opts = (st.attributes && st.attributes.options) || [];
+        // "unavailable"/"unknown" must read as Off, not as an active level.
+        const lvl = opts.includes(st.state) ? st.state : "Off";
+        return `<button class="cbtn ${lvl !== "Off" ? "on" : ""}" data-act="${key}"
+            title="${esc(mode)} - ${esc(label)}: ${esc(lvl)}">${icon(ic)}<span>${esc(label)}</span>
+            <b>${esc(lvl)}</b></button>`;
+      };
+      const cover = (suffix, openKey, closeKey, label, ic) => {
+        const st = this._st(`cover.${suffix}`);
+        if (!st) return "";
+        const isOpen = st.state === "open" || st.state === "opening";
+        return `<div class="cpair ${isOpen ? "on" : ""}">
+            ${icon(ic)}<span>${esc(label)}</span>
+            <button class="cmini" data-act="${openKey}" title="Open ${esc(label)}">Open</button>
+            <button class="cmini" data-act="${closeKey}" title="Close ${esc(label)}">Close</button>
+          </div>`;
+      };
+      const gclean = this._st("switch.g_clean");
+      const heatRow = seat("seat_heat_driver", "Driver", "seatheat", "Seat heat") +
+        seat("seat_heat_passenger", "Passenger", "seatheat", "Seat heat");
+      const ventRow = seat("seat_vent_driver", "Driver", "seatvent", "Seat cooling") +
+        seat("seat_vent_passenger", "Passenger", "seatvent", "Seat cooling");
+      const airRow = (gclean ? `<button class="cbtn ${gclean.state === "on" ? "on" : ""}"
+            data-act="gclean" title="Fresh air (G-Clean)">${icon("fresh")}<span>Fresh air</span></button>` : "") +
+        cover("sunroof", "sunroof_open", "sunroof_close", "Sunroof", "roof") +
+        cover("sunshade", "shade_open", "shade_close", "Shade", "shade");
+      return `
+        <hr class="hairline">
+        <p class="micro">${icon("climate")} Climate</p>
+        <div class="crow wrap">
+          <div class="temp ${on ? "on" : ""}">
+            <button class="cstep" data-act="tempdown" title="Cooler">${icon("minus")}</button>
+            <span class="tval">${isFinite(target) ? String(target).replace(/\.0$/, "") : "—"}°</span>
+            <button class="cstep" data-act="tempup" title="Warmer">${icon("plus")}</button>
+          </div>
+          <button class="cbtn ${preset === "Rapid Warming" ? "on" : ""}" data-act="rapidheat"
+            title="Rapid warming">${icon("heat")}<span>Heat</span></button>
+          <button class="cbtn ${preset === "Rapid Cooling" ? "on" : ""}" data-act="rapidcool"
+            title="Rapid cooling">${icon("cool")}<span>Cool</span></button>
+        </div>
+        ${heatRow ? `<p class="micro csub">${icon("seatheat")} Seat heating</p>
+        <div class="crow wrap">${heatRow}</div>` : ""}
+        ${ventRow ? `<p class="micro csub">${icon("seatvent")} Seat cooling</p>
+        <div class="crow wrap">${ventRow}</div>` : ""}
+        ${airRow ? `<div class="crow wrap" style="margin-top:10px">${airRow}</div>` : ""}`;
     }
 
     _row(label, st, opts = {}) {
@@ -792,6 +954,9 @@
         "sensor.pack_power",
         "lock.doors", "climate.climate", "switch.defrost", "switch.charging",
         "switch.window_ventilation", "switch.scheduled_charging",
+        "select.seat_heat_driver", "select.seat_heat_passenger",
+        "select.seat_vent_driver", "select.seat_vent_passenger",
+        "cover.sunroof", "cover.sunshade", "switch.g_clean",
         "time.scheduled_charging_start", "time.scheduled_charging_end",
         "binary_sensor.door_driver", "binary_sensor.door_passenger",
         "binary_sensor.door_rear_left", "binary_sensor.door_rear_right",
@@ -908,6 +1073,7 @@
             ${this._actBtn("find", "Find", "find")}
             ${this._actBtn("refresh", "Sync", "refresh")}
           </div>
+          ${this._climatePanel()}
 
           <hr class="hairline">
           <p class="micro">${icon("charge")} Charging</p>
@@ -1191,8 +1357,10 @@
         "sensor.fuel_level", "sensor.fuel_range", "sensor.combined_range",
         "sensor.pack_power", "lock.doors", "climate.climate", "switch.defrost",
         "switch.window_ventilation", "switch.scheduled_charging",
+        "select.seat_heat_driver", "select.seat_heat_passenger",
+        "select.seat_vent_driver", "select.seat_vent_passenger",
         "time.scheduled_charging_start", "time.scheduled_charging_end",
-        "cover.sunroof",
+        "cover.sunroof", "cover.sunshade", "switch.g_clean",
         "binary_sensor.door_driver", "binary_sensor.door_passenger",
         "binary_sensor.door_rear_left", "binary_sensor.door_rear_right",
         "binary_sensor.trunk", "binary_sensor.hood", "binary_sensor.connected"];
@@ -1316,6 +1484,7 @@
           </div>
 
           <div class="carwrap">${CAR_TOP_SVG(s.charging ? "charging" : "", d)}</div>
+          ${this._climatePanel()}
 
           <hr class="hairline">
           <p class="micro">${icon("charge")} Charging</p>
