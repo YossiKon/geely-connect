@@ -39,7 +39,7 @@ polished setup on top.
 - 🚙 **Two custom cards included** - `custom:geely-card` (the full cockpit) and
   `custom:geely-card-compact` appear in the card picker automatically the
   moment the integration is set up. Zero config, zero extra installs.
-- 🖥️ **Four built-in dashboard cards** - a full cockpit, a top-down status view, a compact tile and a mini square - registered automatically, plus ready-made automations and Blueprints
+- 🖥️ **Five built-in dashboard cards** - a full cockpit with a complete climate panel, a top-down status view, a compact tile, a mini square and a one-row strip - registered automatically, plus ready-made automations and Blueprints
 - 📈 **Long-term statistics** on every numeric entity, so history survives the
   recorder's purge window.
 
@@ -438,10 +438,36 @@ type: custom:geely-card
 prefix: my_geely_ex5      # the slug in sensor.my_geely_ex5_battery
 ```
 
+#### The climate panel
+
+The full and top-view cards carry a complete **Climate** section:
+
+- **Temperature stepper** - bound to the climate entity's own min / max / step
+  (15.5-28.5 °C in 0.5° steps on the EX5), so it can never send a value the
+  car refuses.
+- **Heat / Cool** - the car's real *Rapid Warming* / *Rapid Cooling* presets,
+  which also run the seats and ventilation, exactly as the official app does.
+- **Seat heating / Seat cooling** per front seat - each tap steps
+  Off → Low → Medium → High → Off.
+- **Fresh air** (G-Clean), and **Open / Close** for the sunroof and the
+  sunshade.
+- Every block hides itself on a trim that lacks the entity - and there is no
+  fan-speed control because the car's cloud API simply has none.
+
 Two touches worth knowing: **Unlock and Trunk arm on the first tap and fire
 on the second** (a stray touch on a wall tablet can't open the car), and the
 accent colour follows the state - teal while charging, amber when something
 needs a look. `--geely-accent` / `--geely-warn` theme variables override both.
+
+#### If a card ever misbehaves
+
+The picker holds one more entry, **Geely Card (status vX.Y.Z)** - a plain
+text tile that always renders, shows which version of the card script is
+actually running in *your* browser, and reports the registration timeline.
+If a card sticks on a spinner or looks outdated after an update, a
+screenshot of that tile is the whole bug report. (Old cards after an update
+usually mean a cached copy: update, **restart Home Assistant**, then hard
+refresh - or *Reset frontend cache* in the companion app.)
 
 > The YAML card and view files that used to live in `cards/` and `views/`
 > are gone - the built-in cards replace them and stay current on their own.
@@ -678,7 +704,7 @@ re-authenticate. Tip: run the first setup on a network you trust.
 custom_components/geely_connect/   the integration itself (what HACS installs)
 ├── brand/                         icon.png / logo.png shown in the HA UI
 ├── translations/                  UI translations (en, he, ar, fr, ru)
-├── geely-card.js                  the four built-in dashboard cards
+├── geely-card.js                  the five built-in dashboard cards
 ├── manifest.json                  integration metadata
 └── *.py                           platforms, API client, config flow, …
 automations/                       ready-to-paste automations
