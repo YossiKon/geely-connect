@@ -43,6 +43,16 @@
     "charging", "climate", "battery", "trunk", "doors", "speed", "hood",
   ].sort((a, b) => b.length - a.length);
 
+  /* Markets that drive on the left put the driver's door on the RIGHT of a
+   * top-down drawing. The car's own door sensors are role-named (driver /
+   * passenger), so the top view must know which side the role sits on. */
+  const RHD_COUNTRIES = new Set([
+    "AU", "BD", "BN", "BT", "BW", "CY", "FJ", "GB", "GY", "HK", "ID", "IE",
+    "IN", "JM", "JP", "KE", "LK", "LS", "MO", "MT", "MU", "MV", "MW", "MY",
+    "MZ", "NA", "NP", "NZ", "PG", "PK", "SG", "SR", "SZ", "TH", "TT", "TZ",
+    "UG", "ZA", "ZM", "ZW",
+  ]);
+
   const ACCENT = "var(--geely-accent, #2fd6a4)";
   const AMBER = "var(--geely-warn, #e8a13a)";
 
@@ -729,6 +739,14 @@
         case "find": this._call("button", "press", "find_car"); break;
         case "refresh": this._call("button", "press", "refresh_data"); break;
       }
+    }
+
+    /* Right-hand-drive? `rhd: true/false` in the card config overrides;
+     * otherwise Home Assistant's own country setting decides. */
+    _isRHD() {
+      if (typeof this._config.rhd === "boolean") return this._config.rhd;
+      const c = this._hass && this._hass.config && this._hass.config.country;
+      return !!c && RHD_COUNTRIES.has(String(c).toUpperCase());
     }
 
     _wire() {
@@ -1443,11 +1461,14 @@
         ? `${schedA.state.slice(0, 5)}–${schedB.state.slice(0, 5)}${schedOn && schedOn.state === "on" ? "" : " (off)"}`
         : null;
 
+      // The driver sits left in LHD markets and right in RHD ones; the rear
+      // door sensors are side-named already and never swap.
+      const rhd = this._isRHD();
       const d = {
         tires: { fl: tire("front_left"), fr: tire("front_right"),
                  rl: tire("rear_left"), rr: tire("rear_right") },
-        // Left-hand drive: the driver's door is the front-left one.
-        doors: { fl: isOpen("door_driver"), fr: isOpen("door_passenger"),
+        doors: { fl: isOpen(rhd ? "door_passenger" : "door_driver"),
+                 fr: isOpen(rhd ? "door_driver" : "door_passenger"),
                  rl: isOpen("door_rear_left"), rr: isOpen("door_rear_right") },
         hood: isOpen("hood"),
         trunk: isOpen("trunk"),
