@@ -379,3 +379,11 @@ def test_the_real_17_payload_reads_the_wallbox_not_the_nonsense():
     assert _power(data) == 6.72
     assert _make("GeelyChargeVoltageSensor", data).native_value == 236.7
     assert _make("GeelyChargeCurrentSensor", data).native_value == 28.4
+
+
+def test_a_closed_contactor_with_a_dead_dc_pair_falls_back_to_ac():
+    """Contactor says DC but the DC pair reads nothing usable - a plausible
+    AC pair is better than inventing zeros from a dead leg."""
+    data = _charging(dcDcConnectStatus="3", dcChargeUAct="0.0",
+                     dcChargeIAct="0.0", chargeUAct="240.0", chargeIAct="30.0")
+    assert _power(data) == 7.2
