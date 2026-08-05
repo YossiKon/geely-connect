@@ -179,21 +179,6 @@
       <circle class="rimring" r="42"/>
       <circle class="hubcap" r="8"/>`;
 
-  /* The Geely emblem, redrawn from the repository's brand/logo.png - six
-   * rounded tiles over the wordmark. Inline vector: no extra request, no
-   * cache to fight, and it inherits the card's crispness at any size. */
-  const GEELY_LOGO = `
-    <svg class="brandmark" viewBox="0 0 120 64" fill="none" aria-hidden="true">
-      <rect x="12" y="4" width="28" height="19" rx="4" fill="#aec2cc"/>
-      <rect x="46" y="4" width="28" height="19" rx="4" fill="#9db4c0"/>
-      <rect x="80" y="4" width="28" height="19" rx="4" fill="#64808f"/>
-      <rect x="12" y="27" width="28" height="19" rx="4" fill="#8fa8b5"/>
-      <rect x="46" y="27" width="28" height="19" rx="4" fill="#64808f"/>
-      <rect x="80" y="27" width="28" height="19" rx="4" fill="#aec2cc"/>
-      <text x="60" y="60" text-anchor="middle" fill="#9aa2ab"
-        font-family="inherit" font-size="15" font-weight="600"
-        letter-spacing="7">GEELY</text>
-    </svg>`;
 
   /* Top view for the cockpit card - the same EX5 proportions (4615 x 1901
    * mm), front pointing up. Every openable part carries its status right
@@ -315,6 +300,9 @@
              <path d="M12.7 11.5 10.4 15h3.2l-2.3 3.5"/>`,
     tire: `<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.2"/>
            <path d="M12 4v2.6M12 17.4V20M4 12h2.6M17.4 12H20"/>`,
+    heat: `<path d="M12 4c2 3.2 5 5 5 8.6a5 5 0 0 1-10 0C7 9 10 7.2 12 4z"/>
+           <path d="M12 20.5v-3"/>`,
+    cool: `<path d="M12 3.5v17M4.6 7.75l14.8 8.5M19.4 7.75 4.6 16.25"/>`,
     trip: `<path d="M5 19c6 0 3-7 9-7 4.5 0 3.5-5.5 5-7"/>
            <circle cx="5" cy="19" r="1.6"/><circle cx="19" cy="5" r="1.6"/>`,
     fuel: `<path d="M5.5 20V6a2 2 0 0 1 2-2h5a2 2 0 0 1 2 2v14"/><path d="M4 20h10.5"/>
@@ -421,7 +409,6 @@
     }
     @keyframes geely-shimmer { from { transform: translateX(-100%);} to { transform: translateX(100%);} }
     .unavail { opacity: .5; }
-    .brandmark { display: block; width: 58px; margin: 8px auto 0; opacity: .8; }
     .cartop { display: block; width: 100%; }
     .cartop .paint { fill: var(--geely-car-paint, url(#tp)); stroke: rgba(0,0,0,.18); stroke-width: 1.5; }
     .cartop .glass { fill: url(#tg); }
@@ -443,9 +430,9 @@
     .tv-val { font-size: 17px; font-weight: 500; fill: var(--primary-text-color);
               font-variant-numeric: tabular-nums; }
     .tv-lab { font-size: 10.5px; letter-spacing: .12em; fill: var(--secondary-text-color); }
-    .tv-stat { font-size: 14.5px; fill: var(--secondary-text-color); }
+    .tv-stat { font-size: 15.5px; font-weight: 600; fill: var(--primary-text-color); }
     .tv-lab.onbody { fill: #6b7280; }
-    .tv-stat.onbody { fill: #454c55; }
+    .tv-stat.onbody { fill: #3a4149; }
     .tv-stat.open.onbody { fill: #b97a14; }
     .tv-stat.open { fill: ${AMBER}; font-weight: 600; animation: geely-blink 1.4s ease infinite; }
     .tv-lab.onglass { fill: rgba(255,255,255,.55); }
@@ -620,6 +607,22 @@
           this._call("climate", on ? "turn_off" : "turn_on", "climate");
           break;
         }
+        case "heat": case "cool": {
+          const c = this._st("climate.climate");
+          const on = c && c.state !== "off";
+          const target = c && c.attributes ? NUM({ state: c.attributes.temperature }) : null;
+          const heating = key === "heat";
+          // Tapping the active preset turns the climate off; anything else
+          // sets a decisive target and switches on.
+          if (on && target != null && (heating ? target >= 25 : target <= 20)) {
+            this._call("climate", "turn_off", "climate");
+          } else {
+            this._call("climate", "set_temperature", "climate",
+              { temperature: heating ? 28 : 18 });
+            this._call("climate", "set_hvac_mode", "climate", { hvac_mode: "heat_cool" });
+          }
+          break;
+        }
         case "defrost": this._call("switch", "toggle", "defrost"); break;
         case "vent": this._call("switch", "toggle", "window_ventilation"); break;
         case "find": this._call("button", "press", "find_car"); break;
@@ -630,6 +633,14 @@
     _wire() {
       this.shadowRoot.querySelectorAll("[data-act]").forEach((el) =>
         el.addEventListener("click", () => this._onAction(el.dataset.act)));
+    }
+
+    _row(label, st, opts = {}) {
+      if (!st && !opts.value) return "";
+      const value = opts.value != null ? opts.value
+        : OK(st) ? `${st.state}${UNIT(st) ? " " + UNIT(st) : ""}` : "—";
+      return `<div class="row ${opts.accent ? "accent" : ""} ${opts.warn ? "warn" : ""}">
+          <span>${esc(label)}</span><b>${esc(value)}</b></div>`;
     }
 
     _actBtn(key, label, ic, opts = {}) {
@@ -742,7 +753,7 @@
               <div class="num n ${OK(s.range) ? "" : "unavail"}">${range}<span class="u">km</span></div>
               <div class="micro sub">Range</div>
             </div>
-            <div class="carwrap">${CAR_SVG(s.charging ? "charging" : "", this._openMap())}${GEELY_LOGO}</div>
+            <div class="carwrap">${CAR_SVG(s.charging ? "charging" : "", this._openMap())}</div>
           </div>
           <div class="bar ${low ? "low" : ""} ${s.charging ? "charging" : ""}" style="margin:2px 0 10px">
             <i style="width:${batt === "—" ? 0 : batt}%"></i>
@@ -785,14 +796,6 @@
     }
 
     getCardSize() { return 9; }
-
-    _row(label, st, opts = {}) {
-      if (!st && !opts.value) return "";
-      const value = opts.value != null ? opts.value
-        : OK(st) ? `${st.state}${UNIT(st) ? " " + UNIT(st) : ""}` : "—";
-      return `<div class="row ${opts.accent ? "accent" : ""} ${opts.warn ? "warn" : ""}">
-          <span>${esc(label)}</span><b>${esc(value)}</b></div>`;
-    }
 
     _render() {
       if (!this._prefix) return this._missing();
@@ -889,7 +892,7 @@
             <i style="width:${batt === "—" ? 0 : batt}%"></i>
           </div>
 
-          <div class="carwrap">${CAR_SVG(s.charging ? "charging" : "", this._openMap())}${GEELY_LOGO}</div>
+          <div class="carwrap">${CAR_SVG(s.charging ? "charging" : "", this._openMap())}</div>
 
           <div class="actions" style="margin-top:8px">
             ${this._actBtn("lock", "Lock", "lock", { on: s.locked && s.locked.state === "locked" })}
@@ -1033,6 +1036,10 @@
       const power = NUM(this._st("sensor.charging_power"));
       const locked = s.locked && s.locked.state === "locked";
       const climateOn = s.climate && s.climate.state !== "off";
+      const target = s.climate && s.climate.attributes
+        ? NUM({ state: s.climate.attributes.temperature }) : null;
+      const heatOn = climateOn && target != null && target >= 25;
+      const coolOn = climateOn && target != null && target <= 20;
       const online = this._st("binary_sensor.connected");
       const statusLine = s.charging
         ? `Charging${power != null ? " · " + power.toFixed(1) + " kW" : ""}`
@@ -1070,12 +1077,14 @@
           </div>
           <div class="mid">
             <span class="num n ${OK(s.range) ? "" : "unavail"}">${range}</span><span class="u">km</span>
-            <div class="status ${s.charging ? "charging" : ""} ${s.doorsOpen.length ? "warn" : ""}">${esc(statusLine)}</div>
+            <div class="status ${s.charging ? "charging" : s.doorsOpen.length ? "warn" : ""}">${esc(statusLine)}</div>
           </div>
           <div class="actions">
-            ${this._actBtn("lock", "Lock", "lock", { on: locked })}
-            ${this._actBtn("unlock", "Unlock", "unlock")}
-            ${this._actBtn("climate", "Climate", "climate", { on: climateOn })}
+            ${locked
+              ? this._actBtn("unlock", "Unlock", "unlock")
+              : this._actBtn("lock", "Lock", "lock")}
+            ${this._actBtn("heat", "Heat", "heat", { on: heatOn })}
+            ${this._actBtn("cool", "Cool", "cool", { on: coolOn })}
           </div>
         </div>`;
       this._wire();
@@ -1086,18 +1095,25 @@
 
   class GeelyCardTop extends GeelyCardBase {
     _watched() {
-      return ["sensor.battery", "sensor.electric_range", "sensor.charging_power",
-        "sensor.interior_temperature", "sensor.exterior_temperature",
-        "sensor.tire_front_left", "sensor.tire_front_right",
-        "sensor.tire_rear_left", "sensor.tire_rear_right",
-        "lock.doors", "climate.climate", "switch.defrost",
-        "switch.window_ventilation", "cover.sunroof",
+      return ["sensor.battery", "sensor.electric_range", "sensor.charger_connection",
+        "sensor.charging_power", "sensor.time_to_full_charge", "sensor.charge_complete",
+        "sensor.range_at_full_charge", "sensor.interior_temperature",
+        "sensor.exterior_temperature", "sensor.tire_front_left",
+        "sensor.tire_front_right", "sensor.tire_rear_left", "sensor.tire_rear_right",
+        "sensor.total_mileage", "sensor.trip_meter", "sensor.average_consumption",
+        "sensor.efficiency", "sensor.12v_battery", "sensor.days_to_service",
+        "sensor.distance_to_service", "sensor.last_updated", "sensor.speed",
+        "sensor.fuel_level", "sensor.fuel_range", "sensor.combined_range",
+        "sensor.pack_power", "lock.doors", "climate.climate", "switch.defrost",
+        "switch.window_ventilation", "switch.scheduled_charging",
+        "time.scheduled_charging_start", "time.scheduled_charging_end",
+        "cover.sunroof",
         "binary_sensor.door_driver", "binary_sensor.door_passenger",
         "binary_sensor.door_rear_left", "binary_sensor.door_rear_right",
         "binary_sensor.trunk", "binary_sensor.hood", "binary_sensor.connected"];
     }
 
-    getCardSize() { return 8; }
+    getCardSize() { return 10; }
 
     _render() {
       if (!this._prefix) return this._missing();
@@ -1110,8 +1126,15 @@
       const vent = this._st("switch.window_ventilation");
       const online = this._st("binary_sensor.connected");
       const power = this._st("sensor.charging_power");
+      const days = this._st("sensor.days_to_service");
       const interior = this._st("sensor.interior_temperature");
       const exterior = this._st("sensor.exterior_temperature");
+      const schedOn = this._st("switch.scheduled_charging");
+      const schedA = this._st("time.scheduled_charging_start");
+      const schedB = this._st("time.scheduled_charging_end");
+      const fuelRange = this._st("sensor.fuel_range");
+      const combined = this._st("sensor.combined_range");
+      const hybrid = !!this._st("sensor.fuel_level");
       const speed = NUM(this._st("sensor.speed"));
 
       const isOpen = (suffix) => {
@@ -1128,6 +1151,9 @@
         : speed != null && speed > 0 ? `Driving · ${Math.round(speed)} km/h`
         : s.doorsOpen.length ? `${s.doorsOpen.length} opening${s.doorsOpen.length > 1 ? "s" : ""} open`
         : s.locked && s.locked.state === "locked" ? "Parked · Locked" : "Parked";
+      const sched = schedA && schedB && OK(schedA) && OK(schedB)
+        ? `${schedA.state.slice(0, 5)}–${schedB.state.slice(0, 5)}${schedOn && schedOn.state === "on" ? "" : " (off)"}`
+        : null;
 
       const d = {
         tires: { fl: tire("front_left"), fr: tire("front_right"),
@@ -1153,8 +1179,19 @@
         .hero .side { margin-left:auto; text-align:right; }
         .hero .side .num { font-size:24px; }
         .hero .side .u2 { font-size:11px; color: var(--secondary-text-color); }
-        .carwrap { margin:8px auto 0; max-width:330px; }
+        .carwrap { margin:12px auto 0; max-width:250px; }
         .actions { display:grid; grid-template-columns:repeat(4, 1fr); margin-top:10px; }
+        .grid { display:grid; grid-template-columns:1fr 1fr; gap:2px 26px; }
+        .row { display:flex; justify-content:space-between; align-items:baseline; gap:8px;
+               font-size:12.5px; padding:5px 0; color: var(--secondary-text-color); }
+        .row span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .row b { font-weight:500; color: var(--primary-text-color);
+                 font-variant-numeric: tabular-nums; white-space:nowrap; }
+        .row.accent b { color:${ACCENT}; }
+        .row.warn b { color:${AMBER}; }
+        .sec { margin-top:2px; }
+        .footer { display:flex; justify-content:space-between; margin-top:10px; }
+        .footer .micro { letter-spacing:.1em; }
         </style>
         <div class="shell">
           <div class="head">
@@ -1171,7 +1208,7 @@
           <div class="hero">
             <div>
               <div class="num n ${OK(s.range) ? "" : "unavail"}">${range}<span class="u">km</span></div>
-              <div class="micro" style="margin-top:5px">Range</div>
+              <div class="micro" style="margin-top:5px">${hybrid ? "Electric range" : "Range"}</div>
             </div>
             <div class="side">
               ${OK(interior) ? `<div class="num">${Math.round(NUM(interior))}°</div>
@@ -1182,8 +1219,6 @@
             <i style="width:${batt === "—" ? 0 : batt}%"></i>
           </div>
 
-          <div class="carwrap">${CAR_TOP_SVG(s.charging ? "charging" : "", d)}${GEELY_LOGO}</div>
-
           <div class="actions">
             ${this._actBtn("lock", "Lock", "lock", { on: s.locked && s.locked.state === "locked" })}
             ${this._actBtn("unlock", "Unlock", "unlock")}
@@ -1193,6 +1228,57 @@
             ${this._actBtn("trunk", "Trunk", "trunk")}
             ${this._actBtn("find", "Find", "find")}
             ${this._actBtn("refresh", "Sync", "refresh")}
+          </div>
+
+          <div class="carwrap">${CAR_TOP_SVG(s.charging ? "charging" : "", d)}</div>
+
+          <hr class="hairline">
+          <p class="micro">${icon("charge")} Charging</p>
+          <div class="grid sec">
+            ${this._row("Charger", s.conn)}
+            ${this._row("Power", power, { accent: s.charging })}
+            ${this._row("Time to full", this._st("sensor.time_to_full_charge"))}
+            ${this._row("Complete at", this._st("sensor.charge_complete"), {
+              value: (() => { const st = this._st("sensor.charge_complete");
+                if (!OK(st)) return "—";
+                const dte = new Date(st.state);
+                return isNaN(dte) ? st.state : dte.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+              })() })}
+            ${this._row("Range at 100%", this._st("sensor.range_at_full_charge"))}
+            ${sched ? this._row("Schedule", null, { value: sched }) : ""}
+            ${this._row("Pack power", this._st("sensor.pack_power"))}
+          </div>
+
+          ${hybrid ? `
+          <hr class="hairline">
+          <p class="micro">${icon("fuel")} Fuel</p>
+          <div class="grid sec">
+            ${this._row("Fuel level", this._st("sensor.fuel_level"))}
+            ${this._row("Fuel range", fuelRange)}
+            ${this._row("Combined range", combined, { accent: true })}
+          </div>` : ""}
+
+          <hr class="hairline">
+          <p class="micro">${icon("trip")} Trip &amp; health</p>
+          <div class="grid sec">
+            ${this._row("Odometer", this._st("sensor.total_mileage"))}
+            ${this._row("Trip meter", this._st("sensor.trip_meter"))}
+            ${this._row("Consumption", this._st("sensor.average_consumption"))}
+            ${this._row("Efficiency", this._st("sensor.efficiency"))}
+            ${this._row("12 V battery", this._st("sensor.12v_battery"))}
+            ${this._row("Service in", days, {
+              warn: OK(days) && NUM(days) != null && NUM(days) <= 30,
+              value: OK(days) ? `${days.state} d / ${OK(this._st("sensor.distance_to_service"))
+                ? this._st("sensor.distance_to_service").state + " km" : "—"}` : "—" })}
+          </div>
+
+          <div class="footer">
+            <span class="micro">Geely Connect</span>
+            <span class="micro">${(() => { const st = this._st("sensor.last_updated");
+              if (!OK(st)) return "";
+              const dte = new Date(st.state);
+              return isNaN(dte) ? "" : "Synced " + dte.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+            })()}</span>
           </div>
         </div>`;
       this._wire();
@@ -1351,7 +1437,7 @@
       {
         type: "geely-card-mini",
         name: "Geely Card (mini)",
-        description: "A small square: range, cabin temperature, status, and lock / unlock / climate.",
+        description: "A small square: range, cabin temperature, status, a lock button that follows the car, and quick heat / cool.",
         preview: true,
       },
       {
