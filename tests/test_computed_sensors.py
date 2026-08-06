@@ -215,22 +215,24 @@ def test_trip_in_progress_reads_zero_when_parked():
     assert s.native_value in (0, 0.0, None)
 
 
-# ------------------------------------------------- the Starray +10 offset ---
+# ------------------------------------------- the retracted P145 "offset" ---
+# A per-series exterior-temperature correction shipped in v1.21.4 and was
+# retracted in v1.21.5: one P145 car reported the field a steady +10 above
+# its cluster across three synchronized captures, but a second P145 read it
+# 10 LOW while parked and 10 HIGH after a drive (#11). No constant can fix
+# a field that behaves like that, so the value passes through untouched and
+# only the generic offset plumbing remains.
 
-def test_the_starray_exterior_temp_offset_is_gated_by_series():
-    """#11: three synchronized cluster-photo/diagnostics pairs show the P145
-    platform reporting exteriorTemp exactly +10.0 high (15->25.0 twice,
-    24->34.0). The correction applies to P145 only."""
+def test_no_series_temperature_correction_is_applied():
     if not have_homeassistant():
         skip("homeassistant not installed")
     sensor = load("sensor")
-    assert sensor._exterior_temp_offset("P145-J1") == -10.0
-    assert sensor._exterior_temp_offset("p145-x") == -10.0
-    assert sensor._exterior_temp_offset("E245-J1") == 0.0
-    assert sensor._exterior_temp_offset(None) == 0.0
+    assert not hasattr(sensor, "_exterior_temp_offset")
 
 
-def test_the_offset_landss_on_the_reading_itself():
+def test_the_offset_plumbing_still_works_for_a_future_calibration():
+    """Kept deliberately: the next calibration question will want it, and an
+    untested spare part is worse than none."""
     if not have_homeassistant():
         skip("homeassistant not installed")
     sensor = load("sensor")
@@ -239,13 +241,12 @@ def test_the_offset_landss_on_the_reading_itself():
     class _C:
         def __init__(self): self.data = data; self.last_update_success = True
         def async_add_listener(self, cb, *a, **k): return lambda: None
-    s = sensor.GeelySensor(_C(), "VIN000", "Geely (0000)",
-        "exterior_temp", "Exterior Temperature",
-        ("vehicleStatus", "additionalVehicleStatus", "climateStatus", "exteriorTemp"),
-        "°C", None, "float", None, value_offset=-10.0)
-    assert s.native_value == 24.0
-    s2 = sensor.GeelySensor(_C(), "VIN000", "Geely (0000)",
-        "exterior_temp", "Exterior Temperature",
-        ("vehicleStatus", "additionalVehicleStatus", "climateStatus", "exteriorTemp"),
-        "°C", None, "float", None)
-    assert s2.native_value == 34.0
+    path = ("vehicleStatus", "additionalVehicleStatus", "climateStatus",
+            "exteriorTemp")
+    plain = sensor.GeelySensor(_C(), "VIN000", "Geely (0000)", "exterior_temp",
+                               "Exterior Temperature", path, "°C", None, "float", None)
+    assert plain.native_value == 34.0
+    shifted = sensor.GeelySensor(_C(), "VIN000", "Geely (0000)", "exterior_temp",
+                                 "Exterior Temperature", path, "°C", None, "float",
+                                 None, value_offset=-10.0)
+    assert shifted.native_value == 24.0

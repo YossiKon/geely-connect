@@ -422,3 +422,92 @@ def test_temperatures_are_formatted_the_way_the_gateway_expects():
     c = load("climate")
     assert c._fmt_temp(22) == "22.0"
     assert c._fmt_temp(15.5) == "15.5"
+
+
+# ------------------------------ rapid presets and the seats that ignore them ---
+# A 2025 EX5 Inspire runs the AC on Rapid Warming and ignores the compound
+# bundle's seat block entirely, while its individual seat entities work
+# (#19). So the presets follow up on RCE_2 - the channel that car proves
+# works - for the front positions the car advertises.
+
+def test_rapid_warming_follows_up_with_seat_heat_on_the_verified_channel():
+    _ha()
+    c = load("climate")
+    e, api, _ = _entity(_status())
+    with _quiet_refresh(c):
+        asyncio.run(e.async_set_preset_mode(c.PRESET_RAPID_WARMING))
+    assert api.calls[0][0] == "rapid", "the compound bundle still fires first"
+    seat_calls = [x for x in api.calls if x[0] == c.SERVICE_CLIMATE]
+    assert len(seat_calls) == 2, api.calls
+    for _sid, params, command, _dur in seat_calls:
+        flat = {p["key"]: p["value"] for p in params}
+        assert flat[c.RCE_KEY_LEVEL] == "3"
+        assert c.RCE_KEY_HEAT in flat and c.RCE_KEY_VENT not in flat
+        assert command == "start"
+    seats = {
+        p["value"] for _s, params, _c, _d in seat_calls for p in params
+        if p["key"] == c.RCE_KEY_HEAT
+    }
+    assert seats == {c.SEAT_FRONT_LEFT, c.SEAT_FRONT_RIGHT}
+
+
+def test_rapid_cooling_follows_up_with_seat_ventilation():
+    _ha()
+    c = load("climate")
+    e, api, _ = _entity(_status())
+    with _quiet_refresh(c):
+        asyncio.run(e.async_set_preset_mode(c.PRESET_RAPID_COOLING))
+    seat_calls = [x for x in api.calls if x[0] == c.SERVICE_CLIMATE]
+    assert len(seat_calls) == 2
+    for _sid, params, _cmd, _dur in seat_calls:
+        flat = {p["key"]: p["value"] for p in params}
+        assert c.RCE_KEY_VENT in flat and c.RCE_KEY_HEAT not in flat
+
+
+def test_a_car_without_heated_seats_gets_no_seat_follow_up():
+    _ha()
+    c = load("climate")
+    e, api, _ = _entity(_status(), caps={"seat.heat.enabled": False})
+    with _quiet_refresh(c):
+        asyncio.run(e.async_set_preset_mode(c.PRESET_RAPID_WARMING))
+    assert [x for x in api.calls if x[0] == c.SERVICE_CLIMATE] == []
+
+
+def test_only_the_advertised_front_positions_are_driven():
+    """A car advertising rear seats keeps them out of a rapid preset - the
+    presets are about the two front seats, as in the official app."""
+    _ha()
+    c = load("climate")
+    e, api, _ = _entity(_status(), caps={
+        "seat.heat.positions": [c.SEAT_FRONT_LEFT, "rear-left", "rear-right"]})
+    with _quiet_refresh(c):
+        asyncio.run(e.async_set_preset_mode(c.PRESET_RAPID_WARMING))
+    seat_calls = [x for x in api.calls if x[0] == c.SERVICE_CLIMATE]
+    assert len(seat_calls) == 1
+    flat = {p["key"]: p["value"] for p in seat_calls[0][1]}
+    assert flat[c.RCE_KEY_HEAT] == c.SEAT_FRONT_LEFT
+
+
+def test_a_refused_seat_does_not_fail_a_rapid_that_already_worked():
+    """The cabin is warming; a car that rejects the seat command must not
+    turn that success into an error toast."""
+    _ha()
+    c = load("climate")
+    calls = []
+
+    class _PartialApi(_Api):
+        def control(self, *a, **k):
+            calls.append(a)
+            raise RuntimeError("seat says no")
+
+    hass = _Hass()
+    api = _PartialApi()
+    e = c.GeelyClimate(hass, {
+        "coordinator": _Coord(_status()), "api": api, "vin": FAKE_VIN,
+        "capabilities": {}, "device_name": "Geely EX5 (0000)"})
+    e.hass = hass
+    e.async_write_ha_state = lambda: None
+    with _quiet_refresh(c):
+        asyncio.run(e.async_set_preset_mode(c.PRESET_RAPID_WARMING))
+    assert len(calls) == 2, "both seats were attempted"
+    assert e.preset_mode == c.PRESET_RAPID_WARMING, "the rapid action stands"

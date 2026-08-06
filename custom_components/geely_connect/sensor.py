@@ -426,7 +426,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
     coordinator = bundle["coordinator"]
     vin = bundle["vin"]
     device_name = bundle.get("device_name") or f"Geely ({vin})"
-    ext_offset = _exterior_temp_offset(bundle.get("series"))
     pressure_unit = (entry.options.get(CONF_PRESSURE_UNIT)
                      or entry.data.get(CONF_PRESSURE_UNIT, DEFAULT_PRESSURE_UNIT))
 
@@ -441,8 +440,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
     #    hybrid or a petrol car - skips the charging rows rather than carrying
     #    tiles that can only ever read unavailable.
     add_entities(GeelySensor(coordinator, vin, device_name, *spec,
-                             pressure_unit=pressure_unit,
-                             value_offset=ext_offset if spec[0] == "exterior_temp" else 0.0)
+                             pressure_unit=pressure_unit)
                  for spec in SENSOR_SPECS
                  if charges or spec[0] not in _PLUG_ONLY_KEYS)
 
@@ -577,6 +575,10 @@ class GeelySensor(CoordinatorEntity, _AutoPrecision):
         # Tire pressure stays in its native kPa here; Home Assistant converts
         # it to the unit chosen at setup. Converting it ourselves as well
         # would apply the factor twice.
+        # Kept for a future per-series calibration, currently unused: the
+        # P145 exterior-temperature offset it was built for turned out not
+        # to be a constant (#11) - one car read 10 low parked and 10 high
+        # after a drive, so no single number can fix that field.
         if self._value_offset and isinstance(val, (int, float)):
             val = round(val + self._value_offset, 1)
         if self._key == "charger_connected" and val == "Plugged in"                 and _is_charging(self.coordinator.data or {}):
@@ -777,29 +779,6 @@ class GeelyFullRangeSensor(CoordinatorEntity, _AutoPrecision):
         if charge < 10 or rng <= 0:
             return None
         return round(rng * 100.0 / charge)
-
-
-def _exterior_temp_offset(series: str | None) -> float:
-    """Per-series calibration for climateStatus.exteriorTemp.
-
-    The Starray (P145 platform) reports the field exactly 10.0 degrees C
-    above what its own cluster shows. Three synchronized pairs prove it -
-    cluster photo and diagnostics captured in the same minute (#11):
-
-        cluster 15 C -> exteriorTemp 25.0
-        cluster 15 C -> exteriorTemp 25.0   (different day)
-        cluster 24 C -> exteriorTemp 34.0
-
-    Different absolute temperatures, identical +10.0 - a fixed calibration
-    offset in the cloud reporting, not sensor noise (tire temperatures in
-    the same payloads side with the cluster every time). Notably the
-    official app does not display outside temperature on this model at all.
-    The EX5 (E245) reads plausibly through the same field, so the
-    correction is gated to the platform that needs it.
-    """
-    if series and str(series).upper().startswith("P145"):
-        return -10.0
-    return 0.0
 
 
 def _fuel_range_km(data: dict) -> float | None:
