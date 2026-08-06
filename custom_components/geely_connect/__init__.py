@@ -241,6 +241,18 @@ def _refresh_device_name(hass: HomeAssistant, entry: ConfigEntry) -> None:
 _QUIET_HOURS = range(0, 6)       # local 00:00-05:59 → back off to the cap
 
 
+# What the car calls a running drive system. Mirrors sensor._ENGINE_STATE_MAP's
+# "Running" side, including the plain numeric form some trims send.
+_ENGINE_RUNNING = frozenset({"engine_running", "running", "on", "1", "true"})
+
+# A car that reports itself running forever - a stuck flag, a driver sitting
+# in the car with the ignition on for an hour - must not pin the poll to its
+# fastest interval indefinitely, because every poll signs the owner's phone
+# app out. After this many consecutive polls with nothing at all changing,
+# the data wins over the flag and the normal back-off resumes.
+_STUCK_POLLS = 10
+
+
 def _poll_flags(d: dict) -> tuple[bool, bool]:
     """(charging, driving) from a status dict, tolerant of missing fields."""
     if not isinstance(d, dict):
@@ -255,10 +267,18 @@ def _poll_flags(d: dict) -> tuple[bool, bool]:
     from .sensor import _is_charging
     charging = _is_charging(d)
     try:
-        driving = float(basic.get("speed")) > 0
+        moving = float(basic.get("speed")) > 0
     except (TypeError, ValueError):
-        driving = False
-    return charging, driving
+        moving = False
+    # Speed legitimately reads 0 while a trip is under way - every red light,
+    # every queue - and treating that as "parked" cost the fast interval at
+    # the exact moment live data matters most (#21). The ignition/ready state
+    # stays on through those stops, so a running car counts as driving even
+    # at a standstill. On a trim that never reports it this reduces to the
+    # old speed test.
+    engine = str(basic.get("engineStatus", "")).strip().lower()
+    running = engine in _ENGINE_RUNNING
+    return charging, (moving or running)
 
 
 def _poll_signature(d: dict) -> tuple:
@@ -268,10 +288,17 @@ def _poll_signature(d: dict) -> tuple:
     ev = add.get("electricVehicleStatus") or {}
     safe = add.get("drivingSafetyStatus") or {}
     basic = vs.get("basicVehicleStatus") or {}
+    maint = add.get("maintenanceStatus") or {}
     return (
         ev.get("chargeLevel"), ev.get("distanceToEmptyOnBatteryOnly"),
         ev.get("statusOfChargerConnection"), safe.get("centralLockingStatus"),
         basic.get("speed"),
+        # The odometer advances only when the car actually moved between two
+        # polls - the one signal a standstill sample cannot fake (#21). Its
+        # presence here means any real movement resets the idle streak, even
+        # on a trim that never reports an engine state. It lives under
+        # maintenanceStatus, not with the other driving fields.
+        maint.get("odometer"),
         # DC sessions move only these two (#10) - without them a fast charge
         # can look like an idle car and slow its own polling down.
         ev.get("dcDcConnectStatus"), ev.get("dcChargeIAct"),
@@ -288,7 +315,7 @@ def _adaptive_interval(data: dict, idle_streak: int, profile: dict) -> timedelta
       (and phone-app logouts) when the car just sits parked.
     """
     charging, driving = _poll_flags(data)
-    if charging or driving:
+    if charging or (driving and idle_streak < _STUCK_POLLS):
         return timedelta(seconds=profile["fast"])
     try:
         if dt_util.now().hour in _QUIET_HOURS:
@@ -472,7 +499,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Idle back-off tracking: if parked and nothing meaningful changed, grow
         # the idle streak so the interval stretches out (see _adaptive_interval).
         sig = _poll_signature(data)
-        if not charging and not driving and sig == poll_state["sig"]:
+        # Counts identical polls, whatever the flags claim - that is what makes
+        # the stuck-flag guard in _adaptive_interval possible. A real drive
+        # changes speed, range or the odometer every time, so the streak stays
+        # at zero throughout and the fast interval holds.
+        if not charging and sig == poll_state["sig"]:
             poll_state["idle"] += 1
         else:
             poll_state["idle"] = 0

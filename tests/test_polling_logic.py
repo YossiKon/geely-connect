@@ -38,13 +38,15 @@ def sys_modules():
     return sys.modules
 
 
-def _status(*, speed=None, charger=None, charge=None, locked=None):
+def _status(*, speed=None, charger=None, charge=None, locked=None,
+            engine=None, odo=None):
     return {"vehicleStatus": {
-        "basicVehicleStatus": {"speed": speed},
+        "basicVehicleStatus": {"speed": speed, "engineStatus": engine},
         "additionalVehicleStatus": {
             "electricVehicleStatus": {"statusOfChargerConnection": charger,
                                       "chargeLevel": charge},
             "drivingSafetyStatus": {"centralLockingStatus": locked},
+            "maintenanceStatus": {"odometer": odo},
         }}}
 
 
@@ -61,6 +63,58 @@ def test_driving_is_any_positive_speed():
     m = _coordinator_module()
     assert m._poll_flags(_status(speed="42"))[1] is True
     assert m._poll_flags(_status(speed="0"))[1] is False
+
+
+# ------------------------------------------- a trip that stops at a light ---
+# Speed reads 0 at every red light, and treating that as parked cost the fast
+# interval exactly when live data matters, then compounded into the 15-minute
+# cap mid-drive (#21).
+
+def test_a_running_car_at_a_standstill_still_counts_as_driving():
+    m = _coordinator_module()
+    for word in ("engine_running", "running", "ENGINE_RUNNING", "on", "1", 1):
+        assert m._poll_flags(_status(speed="0", engine=word))[1] is True, word
+
+
+def test_a_parked_car_is_still_parked():
+    m = _coordinator_module()
+    for word in ("engine_off", "off", "0", None, "", "gibberish"):
+        assert m._poll_flags(_status(speed="0", engine=word))[1] is False, word
+
+
+def test_the_fast_interval_holds_through_a_red_light():
+    """The regression in one assertion: stopped, engine running, and the
+    interval must still be the profile's fast value rather than base."""
+    m = _coordinator_module()
+    const = load("const")
+    prof = const.POLL_PROFILES["normal"]
+    stopped = _status(speed="0", engine="engine_running")
+    assert m._adaptive_interval(stopped, 0, prof).total_seconds() == prof["fast"]
+    assert m._adaptive_interval(stopped, 3, prof).total_seconds() == prof["fast"]
+
+
+def test_a_stuck_running_flag_eventually_backs_off_anyway():
+    """Every poll signs the owner's phone app out, so a car that claims to be
+    running forever with nothing changing must not hold the fastest interval
+    for ever either."""
+    m = _coordinator_module()
+    const = load("const")
+    prof = const.POLL_PROFILES["normal"]
+    stuck = _status(speed="0", engine="running")
+    fast = m._adaptive_interval(stuck, m._STUCK_POLLS - 1, prof).total_seconds()
+    slow = m._adaptive_interval(stuck, m._STUCK_POLLS, prof).total_seconds()
+    assert fast == prof["fast"]
+    assert slow > prof["fast"]
+
+
+def test_movement_alone_changes_the_signature():
+    """Two polls at the same red light look identical, but any real movement
+    between polls moves the odometer - which resets the idle streak even on a
+    trim that never reports an engine state."""
+    m = _coordinator_module()
+    a = _status(speed="0", odo="4646.0")
+    b = _status(speed="0", odo="4647.0")
+    assert m._poll_signature(a) != m._poll_signature(b)
 
 
 def test_a_garbled_speed_does_not_take_the_poll_down():
