@@ -526,6 +526,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "device_name":   _resolve_device_name(d),
         "capabilities":  capabilities,
         "propulsion":    verdict,
+        # The platform series code (E245 = EX5, P145 = Starray / EX5 EM-i):
+        # sensor.py keys a per-series calibration on it - see
+        # _exterior_temp_offset.
+        "series":        series_code,
     }
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     # Reload when the options flow changes the polling mode / pressure unit /

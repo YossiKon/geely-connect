@@ -213,3 +213,39 @@ def test_trip_in_progress_reads_zero_when_parked():
     s = _make("GeelyTripInProgressSensor", _status(basic={"engineStatus": "engine_off"}))
     s._start_km = None
     assert s.native_value in (0, 0.0, None)
+
+
+# ------------------------------------------------- the Starray +10 offset ---
+
+def test_the_starray_exterior_temp_offset_is_gated_by_series():
+    """#11: three synchronized cluster-photo/diagnostics pairs show the P145
+    platform reporting exteriorTemp exactly +10.0 high (15->25.0 twice,
+    24->34.0). The correction applies to P145 only."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    sensor = load("sensor")
+    assert sensor._exterior_temp_offset("P145-J1") == -10.0
+    assert sensor._exterior_temp_offset("p145-x") == -10.0
+    assert sensor._exterior_temp_offset("E245-J1") == 0.0
+    assert sensor._exterior_temp_offset(None) == 0.0
+
+
+def test_the_offset_landss_on_the_reading_itself():
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    sensor = load("sensor")
+    data = {"vehicleStatus": {"additionalVehicleStatus": {
+        "climateStatus": {"exteriorTemp": "34.0"}}}}
+    class _C:
+        def __init__(self): self.data = data; self.last_update_success = True
+        def async_add_listener(self, cb, *a, **k): return lambda: None
+    s = sensor.GeelySensor(_C(), "VIN000", "Geely (0000)",
+        "exterior_temp", "Exterior Temperature",
+        ("vehicleStatus", "additionalVehicleStatus", "climateStatus", "exteriorTemp"),
+        "°C", None, "float", None, value_offset=-10.0)
+    assert s.native_value == 24.0
+    s2 = sensor.GeelySensor(_C(), "VIN000", "Geely (0000)",
+        "exterior_temp", "Exterior Temperature",
+        ("vehicleStatus", "additionalVehicleStatus", "climateStatus", "exteriorTemp"),
+        "°C", None, "float", None)
+    assert s2.native_value == 34.0

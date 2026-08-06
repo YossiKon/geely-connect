@@ -426,6 +426,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
     coordinator = bundle["coordinator"]
     vin = bundle["vin"]
     device_name = bundle.get("device_name") or f"Geely ({vin})"
+    ext_offset = _exterior_temp_offset(bundle.get("series"))
     pressure_unit = (entry.options.get(CONF_PRESSURE_UNIT)
                      or entry.data.get(CONF_PRESSURE_UNIT, DEFAULT_PRESSURE_UNIT))
 
@@ -440,7 +441,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
     #    hybrid or a petrol car - skips the charging rows rather than carrying
     #    tiles that can only ever read unavailable.
     add_entities(GeelySensor(coordinator, vin, device_name, *spec,
-                             pressure_unit=pressure_unit)
+                             pressure_unit=pressure_unit,
+                             value_offset=ext_offset if spec[0] == "exterior_temp" else 0.0)
                  for spec in SENSOR_SPECS
                  if charges or spec[0] not in _PLUG_ONLY_KEYS)
 
@@ -527,13 +529,15 @@ class GeelySensor(CoordinatorEntity, _AutoPrecision):
                  key: str, friendly_name: str, path: tuple[str, ...],
                  unit: str | None, device_class: SensorDeviceClass | None,
                  kind: str, value_map: dict | None = None,
-                 pressure_unit: str = DEFAULT_PRESSURE_UNIT) -> None:
+                 pressure_unit: str = DEFAULT_PRESSURE_UNIT,
+                 value_offset: float = 0.0) -> None:
         super().__init__(coordinator)
         self._key = key
         self._path = path
         self._value_kind = kind
         self._value_map = value_map
         self._pressure_unit = pressure_unit
+        self._value_offset = value_offset
         self._attr_unique_id = f"geely_{vin}_{key}"
         self._attr_name = friendly_name
         # Tire pressures: report the raw kPa the car sends and let Home
@@ -573,6 +577,8 @@ class GeelySensor(CoordinatorEntity, _AutoPrecision):
         # Tire pressure stays in its native kPa here; Home Assistant converts
         # it to the unit chosen at setup. Converting it ourselves as well
         # would apply the factor twice.
+        if self._value_offset and isinstance(val, (int, float)):
+            val = round(val + self._value_offset, 1)
         if self._key == "charger_connected" and val == "Plugged in"                 and _is_charging(self.coordinator.data or {}):
             # DC fast charge holds the raw field at 1 for the whole session
             # (#10), and a label that says "Plugged in" during a 90 kW charge
@@ -771,6 +777,29 @@ class GeelyFullRangeSensor(CoordinatorEntity, _AutoPrecision):
         if charge < 10 or rng <= 0:
             return None
         return round(rng * 100.0 / charge)
+
+
+def _exterior_temp_offset(series: str | None) -> float:
+    """Per-series calibration for climateStatus.exteriorTemp.
+
+    The Starray (P145 platform) reports the field exactly 10.0 degrees C
+    above what its own cluster shows. Three synchronized pairs prove it -
+    cluster photo and diagnostics captured in the same minute (#11):
+
+        cluster 15 C -> exteriorTemp 25.0
+        cluster 15 C -> exteriorTemp 25.0   (different day)
+        cluster 24 C -> exteriorTemp 34.0
+
+    Different absolute temperatures, identical +10.0 - a fixed calibration
+    offset in the cloud reporting, not sensor noise (tire temperatures in
+    the same payloads side with the cluster every time). Notably the
+    official app does not display outside temperature on this model at all.
+    The EX5 (E245) reads plausibly through the same field, so the
+    correction is gated to the platform that needs it.
+    """
+    if series and str(series).upper().startswith("P145"):
+        return -10.0
+    return 0.0
 
 
 def _fuel_range_km(data: dict) -> float | None:
