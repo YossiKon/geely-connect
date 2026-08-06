@@ -235,9 +235,9 @@ All of these are created **enabled** - nothing to switch on by hand.
 |---|---|
 | Battery | State of charge (%) |
 | Electric Range | Remaining driving range (km) |
-| Charger Connection | Disconnected / Plugged in / Charging |
+| Charger Connection | Disconnected / Plugged in / Charging. Reads *Charging* whenever the car actually is, including DC fast charges - some cars leave the underlying field on "Plugged in" for the whole session |
 | Charger Plug | Binary - cable connected |
-| Time To Full Charge | Minutes remaining while charging |
+| Time To Full Charge | Minutes remaining while charging (the car's own countdown, blank when it has no estimate) |
 | Average Consumption | Energy use (kWh / 100 km), lifetime |
 | Trip Consumption | kWh/100 km for the current trip, next to the lifetime figure |
 
@@ -254,7 +254,7 @@ All of these are created **enabled** - nothing to switch on by hand.
 | Entity | Description |
 |---|---|
 | Interior Temperature | Cabin temp (°C) |
-| Exterior Temperature | Outside temp (°C) |
+| Exterior Temperature | Outside temp (°C). Reliable on the EX5; **not trustworthy on Starray / EX5 EM-i** - see [Known limitations](#%EF%B8%8F-known-limitations) |
 
 ### Tires
 Two sets of four, one reading each corner:
@@ -301,8 +301,8 @@ Location (device tracker) - GPS position on the map, with altitude.
 |---|---|
 | **Efficiency** | km per kWh, derived from average consumption |
 | **Charge Complete** | When charging finishes, as a time rather than a minute count - so a notification can fire on it |
-| **Charging Power** | How fast the car is charging, in kW. The car reports volts and amps but never their product, so this is the only place the charge rate exists. A real `power` entity, so it records long-term statistics and can be graphed alongside your house load. Reads 0 kW unless the car says it is charging - the DC pair is the pack, so it carries traction current while you drive, and a rule based on the readings alone reports that as a 17 kW charge |
-| **Charge Voltage** / **Charge Current** | The two halves behind that number (diagnostic). Worth a look when a charge is slower than expected - a derated circuit shows up as low current, not low voltage. The car sends an AC and a DC pair and never says which is live, so among the live legs the larger volts × amps wins: that is what separates a DC fast charge from the small sense current the AC leg shows while plugged in and idle |
+| **Charging Power** | How fast the car is charging, in kW. The car reports volts and amps but never their product, so this is the only place the charge rate exists. A real `power` entity, so it records long-term statistics and can be graphed alongside your house load. Reads 0 kW unless the car is genuinely charging: the connection field alone is not enough, because some cars never move it off "Plugged in" through an entire DC fast charge, so the DC contactor and the sign of the pack current count as well. Without that gate the pack pair - which carries traction current while you drive - publishes a 17 kW "charge" on the motorway |
+| **Charge Voltage** / **Charge Current** | The two halves behind that number (diagnostic). Worth a look when a charge is slower than expected - a derated circuit shows up as low current, not low voltage. The car sends an AC pair and a DC pair and never labels them, so the **DC contactor** decides which one is live: closed means a DC session, open means the AC leg. Comparing the two by apparent power used to do this job and was wrong - one car reports a nonsense 1586 V on the DC pair during AC charging, which won that comparison and published 25 kW on a 6 kW wallbox |
 | **Pack Power** | The battery's own power flow in kW, signed the way the car signs it: positive leaving the pack, negative going in. This is the figure the car's dashboard shows while driving - about 17 kW up a hill, and around −1.5 kW on a 1.8 kW wall charge, the difference being the onboard charger's losses and the 12 V systems |
 | **Range At Full Charge** | Remaining range extrapolated to 100% at the current efficiency, so it's comparable week to week. Blank below 10% charge, where the estimate is mostly noise |
 | **Last Trip** | How far the last completed journey went, worked out from the odometer between engine-on and engine-off |
@@ -326,7 +326,7 @@ instead, and the raw string is written to the log so it can be added.
 | Engine Speed | rpm - 0 whenever the engine is off, which on a PHEV is most of the time |
 | Engine Oil Health / Engine Hours To Service | Oil condition %, and engine hours until the next service |
 | Fuel Flap | Open / closed |
-| **Fuel Range** | Computed. The server sends no fuel-range field at all, so this is tank litres ÷ average consumption. Blank until the car has reported a consumption figure |
+| **Fuel Range** | The car's own figure where it reports one - some trims do, and it matches the cluster exactly. Where it doesn't (the EX5 sends no such field), it falls back to tank litres ÷ average consumption; on a plug-in hybrid that projection runs high, because the lifetime average is mostly-electric driving. Blank when neither is available |
 | **Combined Range** | Computed. Electric range + fuel range. Deliberately blank unless *both* halves are known - a "combined" range showing only the electric half would read far too low to a driver with a full tank |
 
 > Two of the odometers (`odometerOnFuelOnly`, `odometerOnBatteryOnly`) arrive
@@ -347,15 +347,15 @@ back off removes the generated entities again.
 | Control | Actions |
 |---|---|
 | **Lock** | Lock / unlock the doors |
-| **Trunk** | Unlock the trunk |
-| **Climate (remote pre-conditioning)** | Remote pre-heat/pre-cool: on/off, set temperature (15.5-28.5 °C), Rapid Warming, Rapid Cooling. Only reflects remote pre-climate cycles - the cloud does not report manual cabin HVAC |
+| **Trunk** | Releases the tailgate latch, then it is yours to lift - and it re-locks itself after about 45 seconds if you don't. This is what the official app's tailgate action does too on the cars checked so far; a *powered* open command has not been found in this API |
+| **Climate (remote pre-conditioning)** | Remote pre-heat/pre-cool: on/off, set temperature (15.5-28.5 °C), Rapid Warming, Rapid Cooling. The rapid presets also switch the front seats to high - heat when warming, ventilation when cooling - on the per-seat channel, because some cars ignore the seat half of the bundled command. Only reflects remote pre-climate cycles: the cloud does not report manual cabin HVAC |
 | **Seat heating** | Driver & passenger (rear if supported): Off/Low/Medium/High |
 | **Seat ventilation** | Driver & passenger (rear if supported) |
 | **Defrost** | Windscreen defrost on/off |
 | **Windows** | Open / close / ventilate |
 | **Sunroof / Sunshade** | Open / close |
 | **Charging** | Start / stop, plus scheduled charging (start & end time) |
-| **Parking Comfort** | On/off |
+| **Parking Comfort** | On/off. The switch reports *unknown* rather than a state: the field that looked like its on/off flag reads 1 on a car with the feature off, and no field in this API reports it truthfully |
 | **Cabin purge (G-Clean)** | On/off |
 | **Find Car** | Horn + lights |
 
@@ -655,14 +655,19 @@ config entry. Login, the email code and the vehicle list are not regional in
 practice; only certificate provisioning, the session exchange and control
 commands are.
 
+One rule turned out to hold everywhere: **the login code must be minted by
+the same regional backend that will exchange it.** A code from the wrong
+region is refused with an opaque `8500`, which is what stopped Brazilian
+accounts until the mint host was made to follow the region - NA accounts now
+mint on `m-lcmsam-us.geely.com`, APAC on `m-lcmsam-kr.geely.com`, everyone
+else on the EU host.
+
 APAC specifics: the session exchange runs on the **public** host
 `api.ecloudkr.com` at `/auth-center/account/session` (not on the mTLS control
 host), requires `receiverId` (the login email) in the body, an
 `Accept: application/json; charset=utf-8` header and **uppercase**
-`X-SIGNATURE`/`X-TIMESTAMP` signature headers, and the access code must be
-minted by the APAC regional host (`m-lcmsam-kr.geely.com`) - codes from the
-EU/global hosts make the APAC session service crash with `8500`. See
-`docs/APAC-SUPPORT.md` for the full write-up.
+`X-SIGNATURE`/`X-TIMESTAMP` signature headers. See `docs/APAC-SUPPORT.md` for
+the full write-up.
 
 A car in an area whose credentials are unknown stops the setup with a clear
 message naming the area, rather than being signed against the European backend
