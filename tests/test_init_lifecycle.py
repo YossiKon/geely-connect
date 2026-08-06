@@ -828,3 +828,33 @@ def test_a_failed_shred_warns_instead_of_blocking_the_removal():
         with _Patched(m, shutil=types.SimpleNamespace(rmtree=_boom)):
             asyncio.run(m.async_remove_entry(hass, entry))
         assert os.path.exists(vin_dir), "the failure path must not half-delete"
+
+
+def test_a_probe_polls_afterwards_so_its_effect_becomes_visible():
+    """The gateway answers "operation succeed" to any well-formed request,
+    including targets the car ignores - three candidate tailgate commands in
+    #20 returned byte-identical successes. Only a moved entity separates a
+    probe that worked from one that did nothing, so fire_control has to fetch
+    afterwards; without it a probe fired from the sofa is unreadable."""
+    m = _mod()
+    api = _FakeApi()
+    scheduled = []
+    bundles = {"e1": {"vin": FAKE_VIN, "api": api, "coordinator": object()}}
+    hass, run = _service(m, bundles, {"service_id": "RWS_2", "command": "start",
+                                      "params": [{"key": "target", "value": "tailgate"}]})
+    with _Patched(m, schedule_refresh=lambda h, c, *delays: scheduled.append(delays)):
+        run()
+    assert any(c[0] == "control" for c in api.calls), "the command still has to be sent"
+    assert scheduled == [(6, 12)], scheduled
+
+
+def test_a_probe_without_a_coordinator_still_sends_the_command():
+    """A bundle mid-setup has no coordinator yet; the probe must not crash."""
+    m = _mod()
+    api = _FakeApi()
+    bundles = {"e1": {"vin": FAKE_VIN, "api": api}}
+    _, run = _service(m, bundles, {"service_id": "RCT"})
+    with _Patched(m, schedule_refresh=lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("must not be called without a coordinator"))):
+        run()
+    assert any(c[0] == "control" for c in api.calls)

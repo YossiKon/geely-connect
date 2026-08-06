@@ -55,7 +55,7 @@ from .const import (
     SERIES_TO_FRIENDLY_NAME,
     region_config,
 )
-from .helpers import vehicle_metadata
+from .helpers import vehicle_metadata, schedule_refresh
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -585,9 +585,15 @@ async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> Non
 def _register_debug_service(hass: HomeAssistant) -> None:
     """Register `geely_connect.fire_control` once. Idempotent.
 
-    Lets you fire any serviceId+params from Developer Tools → Services
-    while iterating on un-mapped controls. Logs the response at WARNING
-    level so you can see what the server says without redeploying.
+    Lets you fire any serviceId+params from Developer Tools → Actions while
+    iterating on un-mapped controls. Logs the response at WARNING level so it
+    is visible without turning on debug logging, and schedules two polls
+    afterwards so any change the command caused lands in the entities.
+
+    Read the entities, not the response: the gateway returns
+    `code 1000 / operationResult 1 / "operation succeed"` for any well-formed
+    request, including targets the car does not implement. A success here
+    means "the server accepted the shape of your request", nothing more.
 
     Example service-data YAML:
         service_id: RCT
@@ -652,10 +658,20 @@ def _register_debug_service(hass: HomeAssistant) -> None:
             raise HomeAssistantError(f"Geely session expired: {e}") from e
         except Exception as e:
             raise HomeAssistantError(f"fire_control {sid} failed: {e}") from e
-        _LOGGER.debug(
+        _LOGGER.warning(
             "fire_control %s %s params=%s → response=%s",
             sid, cmd, redact(params), redact(resp),
         )
+        # Poll straight after, twice, and say so: the gateway answers
+        # "operation succeed" to any well-formed request, whether or not the
+        # target means anything to the car (three candidate tailgate commands
+        # in #20 returned byte-identical successes). What separates a probe
+        # that worked from one the car ignored is whether an entity moved, and
+        # that needs a fetch - so a probe fired from the sofa becomes readable
+        # in the entity history instead of requiring someone at the car.
+        coordinator = bundle.get("coordinator")
+        if coordinator is not None:
+            schedule_refresh(hass, coordinator, 6, 12)
 
     # Admin-only. The entities are the supported surface and stay available to
     # every Home Assistant user; this one forwards an arbitrary serviceId and
