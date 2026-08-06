@@ -50,7 +50,7 @@ polished setup on top.
 - [Polling modes](#-efficient-adaptive-polling)
 - [Automations, dashboards & widgets](#-automations-dashboards--widgets)
 - [Security](#-security) · [Supported regions](#-supported-regions)
-- [Changing settings later](#%EF%B8%8F-changing-settings-later) · [Known limitation](#%EF%B8%8F-known-limitation---one-session-per-account)
+- [Changing settings later](#%EF%B8%8F-changing-settings-later) · [Known limitations](#%EF%B8%8F-known-limitations)
 - [Repository structure](#-repository-structure) · [License & credits](#-license--credits)
 
 ---
@@ -703,10 +703,24 @@ the two service counters.
 
 ---
 
-## ⚠️ Known limitation - one session per account
+## ⚠️ Known limitations
+
+### One session per account
 When Home Assistant logs in, the phone app is signed out, and vice-versa. If it
 happens, HA shows a **Reconfigure** prompt - request a fresh code and
 re-authenticate. Tip: run the first setup on a network you trust.
+
+### Outside temperature on Starray / EX5 EM-i (P145 platform)
+On these cars the cloud's outside-temperature field cannot be trusted, and no
+correction fixes it. Measured on two cars against their own clusters: parked, it
+sits about ten degrees **below** the real air temperature and returns to the same
+value every time; after a drive it reads about ten degrees **above** it. The real
+temperature never moved in either case, so the field is reporting two different
+things rather than one thing with an offset (a shipped -10 correction was
+retracted in v1.21.5 for exactly this reason). The reading is passed through
+untouched; for automations that need real outside air, use one of Home
+Assistant's [weather integrations](https://www.home-assistant.io/integrations/#weather).
+The EX5 (E245 platform) reads plausibly and is unaffected.
 
 ---
 
