@@ -76,12 +76,6 @@ from .const import (
     RCE_VAL_AC,
     RCE_VAL_DEFROST,
     SERVICE_CLIMATE,
-    RCE_KEY_LEVEL,
-    RCE_KEY_HEAT,
-    RCE_KEY_VENT,
-    RCE_DURATION_SECONDS,
-    SEAT_FRONT_LEFT,
-    SEAT_FRONT_RIGHT,
 )
 from .helpers import walk as _walk, truthy as _truthy, schedule_refresh
 
@@ -384,37 +378,6 @@ class GeelyClimate(CoordinatorEntity, ClimateEntity, RestoreEntity):
         self._cached_target_temp = clamped
         self.async_write_ha_state()
 
-    async def _fire_rapid_seats(self, *, warming: bool) -> None:
-        """Set front seat heat (warming) or ventilation (cooling) to high.
-
-        Uses RCE_2 - the verified per-seat channel - rather than trusting the
-        compound bundle's seat block, which some cars ignore. Silent on
-        failure by design: this is an enhancement to an action that already
-        succeeded, and a car without heated seats should not report an error
-        for a rapid-warm that did warm the cabin.
-        """
-        feature = "seat.heat" if warming else "seat.vent"
-        if not self._caps.get(f"{feature}.enabled", True):
-            return
-        seats = self._caps.get(f"{feature}.positions") or [
-            SEAT_FRONT_LEFT, SEAT_FRONT_RIGHT]
-        key = RCE_KEY_HEAT if warming else RCE_KEY_VENT
-        for seat in seats:
-            if seat not in (SEAT_FRONT_LEFT, SEAT_FRONT_RIGHT):
-                continue        # rapid presets are about the front seats
-            params = [
-                {"key": RCE_KEY_LEVEL, "value": "3"},
-                {"key": key, "value": seat},
-            ]
-            try:
-                await self._hass.async_add_executor_job(
-                    self._api.control, SERVICE_CLIMATE, params, "start",
-                    RCE_DURATION_SECONDS,
-                )
-            except Exception as e:     # noqa: BLE001 - see docstring
-                _LOGGER.debug("rapid %s: seat %s (%s) not applied: %s",
-                              "warm" if warming else "cool", seat, key, e)
-
     async def async_set_preset_mode(self, preset_mode: str) -> None:
         if preset_mode == PRESET_RAPID_WARMING:
             await self._fire_rapid(warming=True)
@@ -434,6 +397,17 @@ class GeelyClimate(CoordinatorEntity, ClimateEntity, RestoreEntity):
         Fires the charge-server compound POST FIRST. Only on server-accept
         do we update cached temp + optimistic preset/mode/action so the UI
         never shows a state the server didn't accept.
+
+        One command, deliberately. v1.21.5 followed this with per-seat RCE_2
+        calls, on the theory that a car ignoring its warm seats had ignored
+        the bundle's seat block. A log on #19 disproved that and showed the
+        harm: the accepted request already carries `paa.heat.11: 3` and
+        `paa.heat.19: 3`, so the seats were always in it - and the follow-up
+        calls arrived while the car was still executing the bundle, were
+        rejected with "the last request has not yet been executed", and left
+        the climate itself not running. A car that ignores the seat half of
+        an accepted request needs a fix in the request, not a second request
+        racing the first.
         """
         target = self._attr_max_temp if warming else self._attr_min_temp
         try:
@@ -461,14 +435,6 @@ class GeelyClimate(CoordinatorEntity, ClimateEntity, RestoreEntity):
         else:
             self._optimistic_action = HVACAction.COOLING
         self._optimistic_action_until = time.time() + 60
-        # The compound bundle asks for the seats, but not every car obeys
-        # that half: a 2025 EX5 Inspire runs the AC and ignores the seat
-        # block entirely, while its individual seat entities work perfectly
-        # (#19). So follow up on the channel that car proves works - the
-        # same RCE_2 command the seat selects use - for the positions this
-        # car actually advertises. Best-effort: the rapid command already
-        # succeeded, and a seat that refuses must not fail the whole action.
-        await self._fire_rapid_seats(warming=warming)
         # Surface the chosen preset briefly, then auto-revert to "none".
         self._optimistic_preset = (
             PRESET_RAPID_WARMING if warming else PRESET_RAPID_COOLING

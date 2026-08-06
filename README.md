@@ -348,7 +348,7 @@ back off removes the generated entities again.
 |---|---|
 | **Lock** | Lock / unlock the doors |
 | **Trunk** | Releases the tailgate latch, then it is yours to lift - and it re-locks itself after about 45 seconds if you don't. This is what the official app's tailgate action does too on the cars checked so far; a *powered* open command has not been found in this API |
-| **Climate (remote pre-conditioning)** | Remote pre-heat/pre-cool: on/off, set temperature (15.5-28.5 °C), Rapid Warming, Rapid Cooling. The rapid presets also switch the front seats to high - heat when warming, ventilation when cooling - on the per-seat channel, because some cars ignore the seat half of the bundled command. Only reflects remote pre-climate cycles: the cloud does not report manual cabin HVAC |
+| **Climate (remote pre-conditioning)** | Remote pre-heat/pre-cool: on/off, set temperature (15.5-28.5 °C), Rapid Warming, Rapid Cooling. The rapid presets ask for the front seats too - heat when warming, ventilation when cooling - inside the same single request the car accepts, since a second command racing the first gets rejected while the car is still working. Only reflects remote pre-climate cycles: the cloud does not report manual cabin HVAC |
 | **Seat heating** | Driver & passenger (rear if supported): Off/Low/Medium/High |
 | **Seat ventilation** | Driver & passenger (rear if supported) |
 | **Defrost** | Windscreen defrost on/off |
