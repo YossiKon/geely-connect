@@ -317,6 +317,15 @@ def _adaptive_interval(data: dict, idle_streak: int, profile: dict) -> timedelta
     charging, driving = _poll_flags(data)
     if charging or (driving and idle_streak < _STUCK_POLLS):
         return timedelta(seconds=profile["fast"])
+    if driving:
+        # The stuck guard has tripped while the car still says it is running.
+        # Stop asking every few seconds - but do not retreat to the parked
+        # ladder either, which reaches a quarter of an hour and would put the
+        # coordinator back in the hole #21 reported: a frozen backend snapshot
+        # during a drive produces an identical signature every poll, so the
+        # streak climbs on a car that really is moving. Base interval, held
+        # flat, so a thaw is picked up within a minute or two.
+        return timedelta(seconds=profile["base"])
     try:
         if dt_util.now().hour in _QUIET_HOURS:
             return timedelta(seconds=profile["cap"])
@@ -470,7 +479,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if "_scheduled_charging" in prev:
             data["_scheduled_charging"] = prev["_scheduled_charging"]
 
-        if charging or was_charging or (cyc % _SECONDARY_EVERY == 1):
+        # A user pressing Refresh Data means "fetch everything now" - three
+        # presses in four otherwise re-fetched nothing but the main status,
+        # which made hunting an unmapped field in the _state block a matter
+        # of luck (#4).
+        forced = poll_state.pop("force_secondary", False)
+        if forced or charging or was_charging or (cyc % _SECONDARY_EVERY == 1):
             try:
                 state_resp = await _call_with_retry(api.vehicle_status_state)
                 if state_resp.get("code") in _SUCCESS_CODES and isinstance(state_resp.get("data"), dict):
@@ -557,10 +571,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "device_name":   _resolve_device_name(d),
         "capabilities":  capabilities,
         "propulsion":    verdict,
-        # The platform series code (E245 = EX5, P145 = Starray / EX5 EM-i):
-        # sensor.py keys a per-series calibration on it - see
-        # _exterior_temp_offset.
+        # The platform series code (E245 = EX5, P145 = Starray / EX5 EM-i).
+        # Nothing reads it today: it was added for a per-series temperature
+        # calibration that was retracted the same day, when a second car of
+        # the same platform disproved the constant (#11). Kept because the
+        # next question about a model-specific quirk will want it and it costs
+        # one dictionary key - but it is not load-bearing, so a reader hunting
+        # for its consumer should stop here.
         "series":        series_code,
+        # The Refresh Data button sets poll_state["force_secondary"] here so
+        # one press fetches the secondary endpoints too, whatever the cycle
+        # counter says.
+        "poll_state":    poll_state,
     }
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     # Reload when the options flow changes the polling mode / pressure unit /

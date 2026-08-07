@@ -226,3 +226,30 @@ def test_device_name_ends_with_the_last_four_vin_characters():
                                    "vehicle_model_code": "E245-J1"})
     assert name.endswith("(1234)"), name
     assert "L6T00000000001234" not in name, "full VIN in the device name"
+
+
+def test_a_frozen_backend_during_a_drive_never_reaches_the_parked_cap():
+    """The trap my own stuck-flag guard set (#21): a frozen backend snapshot
+    produces an identical signature every poll, so the streak climbs on a car
+    that really is moving. Once the guard withdrew the fast interval, the
+    parked ladder took over and the next poll was fifteen minutes away - the
+    exact symptom the issue reported. A claimed trip now holds at base."""
+    m = _coordinator_module()
+    const = load("const")
+    prof = const.POLL_PROFILES["normal"]
+    driving = _status(speed="0", engine="engine_running")
+    for streak in (m._STUCK_POLLS, m._STUCK_POLLS + 5, 99):
+        secs = m._adaptive_interval(driving, streak, prof).total_seconds()
+        assert secs == prof["base"], (streak, secs)
+        assert secs < prof["cap"], "a moving car must never sit at the parked cap"
+
+
+def test_a_parked_car_still_walks_all_the_way_to_the_cap():
+    """The back-off that exists to spare the owner's phone-app session must be
+    untouched by the fix above."""
+    m = _coordinator_module()
+    const = load("const")
+    prof = const.POLL_PROFILES["normal"]
+    parked = _status(speed="0", engine="engine_off")
+    assert m._adaptive_interval(parked, 0, prof).total_seconds() == prof["base"]
+    assert m._adaptive_interval(parked, 9, prof).total_seconds() == prof["cap"]

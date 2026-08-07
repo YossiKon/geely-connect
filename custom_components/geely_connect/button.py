@@ -79,6 +79,7 @@ class GeelyRefreshButton(ButtonEntity):
     def __init__(self, hass: HomeAssistant, bundle: dict) -> None:
         self._hass = hass
         self._coordinator = bundle["coordinator"]
+        self._poll_state = bundle.get("poll_state")
         vin = bundle["vin"]
         self._attr_unique_id = f"geely_{vin}_btn_refresh"
         self._attr_name = "Refresh Data"
@@ -96,7 +97,13 @@ class GeelyRefreshButton(ButtonEntity):
         polling mode this button is the only thing that fetches data, so a
         press has to actually run the poll and surface a failure instead of
         silently leaving stale values on screen.
+
+        It also asks for the secondary endpoints, which the timer only fetches
+        every few cycles: a press means "everything, now", and without this
+        three presses in four left the vehicle-state block untouched (#4).
         """
+        if self._poll_state is not None:
+            self._poll_state["force_secondary"] = True
         await self._coordinator.async_refresh()
         if not self._coordinator.last_update_success:
             err = self._coordinator.last_exception

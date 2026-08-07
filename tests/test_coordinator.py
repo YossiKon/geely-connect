@@ -6,6 +6,7 @@ every Nth cycle. Everything here is about not losing what we already knew.
 import ast
 import io
 import os
+import os
 
 from conftest import PKG, load
 
@@ -30,7 +31,7 @@ def test_last_known_secondary_data_is_carried_forward_unconditionally():
     """
     body = _update_body()
     carry = body.index('data["_state"] = prev["_state"]')
-    gate = body.index("if charging or was_charging or")
+    gate = body.index("charging or was_charging or")
     assert carry < gate, (
         "the carry-forward must run BEFORE the fetch gate, so it also covers "
         "the case where the fetch is attempted and fails"
@@ -91,4 +92,22 @@ def test_fire_control_is_admin_only():
     assert "async_register_admin_service(hass, DOMAIN, \"fire_control\"" in body, (
         "fire_control forwards an arbitrary serviceId to the car and must be "
         "gated to administrators"
+    )
+
+
+def test_a_manual_refresh_forces_the_secondary_endpoints():
+    """The Refresh Data button means "everything, now". Without the force flag
+    the cycle counter decided, so three presses in four re-fetched only the
+    main status - which made hunting an unmapped field in the vehicle-state
+    block a matter of luck (#4)."""
+    body = _update_body()
+    assert 'poll_state.pop("force_secondary"' in body, (
+        "a forced fetch must be able to bypass the cycle counter"
+    )
+    forced = body.index('poll_state.pop("force_secondary"')
+    gate = body.index("charging or was_charging or")
+    assert forced < gate, "the flag has to be read before the gate uses it"
+    btn = io.open(os.path.join(PKG, "button.py"), encoding="utf-8").read()
+    assert '"force_secondary"] = True' in btn, (
+        "the Refresh Data button is what sets the flag"
     )

@@ -575,10 +575,13 @@ class GeelySensor(CoordinatorEntity, _AutoPrecision):
         # Tire pressure stays in its native kPa here; Home Assistant converts
         # it to the unit chosen at setup. Converting it ourselves as well
         # would apply the factor twice.
-        # Kept for a future per-series calibration, currently unused: the
-        # P145 exterior-temperature offset it was built for turned out not
-        # to be a constant (#11) - one car read 10 low parked and 10 high
-        # after a drive, so no single number can fix that field.
+        #
+        # value_offset is a spare part, and nothing passes one today. It was
+        # built for a per-series exterior-temperature correction that was
+        # retracted hours later, when a second car of the same platform read
+        # the field ten degrees LOW parked and ten HIGH after a drive (#11).
+        # Tested rather than deleted, so the next real calibration has a
+        # working lever instead of an untried one.
         if self._value_offset and isinstance(val, (int, float)):
             val = round(val + self._value_offset, 1)
         if self._key == "charger_connected" and val == "Plugged in"                 and _is_charging(self.coordinator.data or {}):
@@ -960,8 +963,11 @@ def _charge_leg(data: dict) -> tuple[float, float] | None:
     # with plausibility walls as backstops: no AC supply exceeds ~500 V or
     # ~150 A, and a negative AC current is V2L discharge, not charging. The
     # DC pair keeps its either-sign rule (charging current flows INTO the
-    # pack, about -200 A in the #10 log) and reports magnitudes.
-    dc_ok = dc is not None and dc[0] > 0 and abs(dc[1]) > 0
+    # pack, about -200 A in the #10 log) and reports magnitudes - within the
+    # same voltage window Pack Power uses, because the 1586 V one car sends
+    # would otherwise reach these entities by the other branch (#22).
+    dc_ok = (dc is not None and abs(dc[1]) > 0
+             and _PACK_VOLTS_MIN <= dc[0] <= _PACK_VOLTS_MAX)
     ac_ok = ac is not None and 0 < ac[0] <= 500 and 0 < ac[1] <= 150
     if str(_walk(data, (*_EV, "dcDcConnectStatus"))) == "3":
         if dc_ok:

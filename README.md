@@ -260,7 +260,7 @@ All of these are created **enabled** - nothing to switch on by hand.
 | Entity | Description |
 |---|---|
 | Interior Temperature | Cabin temp (°C) |
-| Exterior Temperature | Outside temp (°C). Reliable on the EX5; **not trustworthy on Starray / EX5 EM-i** - see [Known limitations](#%EF%B8%8F-known-limitations) |
+| Exterior Temperature | Outside temp (°C) - **treat with suspicion**, see [Known limitations](#%EF%B8%8F-known-limitations). Owners of both the Starray and the EX5 have measured it ten degrees out |
 
 ### Tires
 Two sets of four, one reading each corner:
@@ -353,7 +353,7 @@ back off removes the generated entities again.
 | Control | Actions |
 |---|---|
 | **Lock** | Lock / unlock the doors |
-| **Trunk** | Releases the tailgate latch, then it is yours to lift - and it re-locks itself after about 45 seconds if you don't. This is what the official app's tailgate action does too on the cars checked so far; a *powered* open command has not been found in this API |
+| **Trunk** | Asks the car to release the tailgate latch, which then re-locks itself after a short window if nobody lifts the gate. What that achieves varies by car: one owner's latch releases, another's car only flashes its indicators - and two owners report the official app behaving the same way, with the key fob doing the actual opening. No *powered* open command has been found in this API |
 | **Climate (remote pre-conditioning)** | Remote pre-heat/pre-cool: on/off, set temperature (15.5-28.5 °C), Rapid Warming, Rapid Cooling. The rapid presets ask for the front seats too - heat when warming, ventilation when cooling - inside the same single request the car accepts, since a second command racing the first gets rejected while the car is still working. Only reflects remote pre-climate cycles: the cloud does not report manual cabin HVAC |
 | **Seat heating** | Driver & passenger (rear if supported): Off/Low/Medium/High |
 | **Seat ventilation** | Driver & passenger (rear if supported) |
@@ -721,17 +721,20 @@ When Home Assistant logs in, the phone app is signed out, and vice-versa. If it
 happens, HA shows a **Reconfigure** prompt - request a fresh code and
 re-authenticate. Tip: run the first setup on a network you trust.
 
-### Outside temperature on Starray / EX5 EM-i (P145 platform)
-On these cars the cloud's outside-temperature field cannot be trusted, and no
-correction fixes it. Measured on two cars against their own clusters: parked, it
-sits about ten degrees **below** the real air temperature and returns to the same
-value every time; after a drive it reads about ten degrees **above** it. The real
-temperature never moved in either case, so the field is reporting two different
-things rather than one thing with an offset (a shipped -10 correction was
-retracted in v1.21.5 for exactly this reason). The reading is passed through
+### Outside temperature
+The cloud's outside-temperature field cannot be trusted, and no correction
+fixes it. Measured against the cars' own clusters: parked, one car sat about ten
+degrees **below** the real air temperature and returned to the same value every
+time; after a drive it read about ten degrees **above** it, with the real
+temperature unmoved. So the field reports two different things rather than one
+thing with an offset, and a -10 correction shipped on the first evidence was
+retracted in v1.21.5 for exactly that reason.
+
+Reported so far on the Starray / EX5 EM-i (P145) **and** on an EX5 (E245), so
+this is not one platform's quirk - assume the reading is suspect on any car
+until yours proves otherwise against its own cluster. It is passed through
 untouched; for automations that need real outside air, use one of Home
 Assistant's [weather integrations](https://www.home-assistant.io/integrations/#weather).
-The EX5 (E245 platform) reads plausibly and is unaffected.
 
 ---
 

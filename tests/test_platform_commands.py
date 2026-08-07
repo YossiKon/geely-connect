@@ -588,3 +588,26 @@ def test_tracker_altitude_attribute_is_none_when_the_car_omits_it():
     # The key is always present; a missing altitude reads None, never 0.
     assert attrs["altitude_m"] is None
     assert attrs["raw_latitude"] == "185400000"
+
+
+def test_the_refresh_button_asks_for_the_secondary_endpoints_too():
+    """A press means "everything, now". The vehicle-state block is otherwise
+    fetched every fourth cycle, so three presses in four re-fetched nothing
+    but the main status - which turned hunting an unmapped field into a
+    coin flip (#4)."""
+    _need_ha()
+    poll_state = {}
+    bundle = _bundle()
+    bundle["poll_state"] = poll_state
+    _, got = _setup_buttons(bundle)
+    btn = _by_uid(got, "btn_refresh")
+    asyncio.run(btn.async_press())
+    assert poll_state.get("force_secondary") is True
+
+
+def test_the_refresh_button_survives_a_bundle_without_poll_state():
+    """An entry set up by an older code path carries no poll_state; the button
+    must still refresh rather than raise."""
+    _need_ha()
+    _, got = _setup_buttons(_bundle())
+    asyncio.run(_by_uid(got, "btn_refresh").async_press())

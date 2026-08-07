@@ -407,3 +407,25 @@ def test_pack_power_still_reports_both_directions_of_a_real_flow():
     assert _make("GeelyPackPowerSensor", charging).native_value == -91.43
     idle = _status(dcChargeUAct="349.0", dcChargeIAct="0.0")
     assert _make("GeelyPackPowerSensor", idle).native_value == 0.0
+
+
+def test_the_dc_leg_gets_the_same_voltage_wall_as_the_pack():
+    """#22 follow-through: with the contactor open and the AC pair not yet
+    plausible, the impossible 1586 V could still win the leg election by the
+    fallback branch and publish it as Charge Voltage. The wall is on both
+    legs now, so the reading is refused rather than repackaged."""
+    data = _charging(chargeUAct="0.0", chargeIAct="0.2",
+                     dcChargeUAct="1586", dcChargeIAct="-16.1",
+                     dcDcConnectStatus="0")
+    volts = _make("GeelyChargeVoltageSensor", data).native_value
+    assert volts != 1586.0, "an impossible pack voltage must not be published"
+    assert _power(data) in (0.0, None), _power(data)
+
+
+def test_a_real_dc_fast_charge_still_passes_the_wall():
+    """The window has to be wide enough for an 800 V-class pack: the #10
+    session ran at 459.7 V and must be unaffected."""
+    data = _charging(dcDcConnectStatus="3", dcChargeUAct="459.7",
+                     dcChargeIAct="-198.9")
+    assert _power(data) == 91.43
+    assert _make("GeelyChargeVoltageSensor", data).native_value == 459.7
