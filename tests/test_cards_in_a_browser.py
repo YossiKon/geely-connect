@@ -76,7 +76,8 @@ def _load(page, with_polyfill):
         page.add_script_tag(content=_source(POLYFILL))
 
 
-def _evaluate(script, *, with_polyfill=False, wait_for_cards=True, timeout=4000):
+def _evaluate(script, *, with_polyfill=False, wait_for_cards=True, timeout=4000,
+              arg=None):
     """Load the card, wait until it has registered, then evaluate `script`.
 
     Any uncaught page error fails the test: a card that throws renders nothing,
@@ -103,7 +104,7 @@ def _evaluate(script, *, with_polyfill=False, wait_for_cards=True, timeout=4000)
                 timeout=timeout)
         else:
             page.wait_for_function("() => !!window.mkHass", timeout=timeout)
-        value = page.evaluate(script)
+        value = page.evaluate(script, arg)
         assert not errors, f"the card threw: {errors}"
         return value
     finally:
@@ -155,9 +156,23 @@ def test_a_registry_polyfill_really_does_hide_earlier_registrations():
     recovery test below is measuring nothing, so assert the disease as well as
     the cure: several popular cards ship
     @webcomponents/scoped-custom-element-registry, and loading it makes
-    customElements.get() forget everything registered before it (#8)."""
-    got = _evaluate("() => !!customElements.get('geely-card')",
-                    with_polyfill=True, wait_for_cards=False, timeout=2000)
+    customElements.get() forget everything registered before it (#8).
+
+    The polyfill is injected and the registry read inside a single expression,
+    because the watchdog is on a 50 ms timer and a timer cannot run in the
+    middle of a synchronous task. Loading the polyfill as its own script tag and
+    then evaluating separately was a race with the cure - it passed alone and
+    failed once under the load of the full suite, which is the worst way for a
+    test to behave.
+    """
+    got = _evaluate(
+        """(polyfillSource) => {
+             const s = document.createElement("script");
+             s.textContent = polyfillSource;
+             document.head.appendChild(s);   // inline scripts run synchronously
+             return !!customElements.get("geely-card");
+           }""",
+        arg=_source(POLYFILL))
     assert got is False, (
         "the polyfill no longer wipes earlier registrations - re-check why the "
         "watchdog exists before deleting it"

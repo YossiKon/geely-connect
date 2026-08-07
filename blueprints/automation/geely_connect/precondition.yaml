@@ -32,10 +32,12 @@ condition:
   - condition: template
     value_template: "{{ now().strftime('%a').lower() in allowed_days }}"
 action:
+  # One command, deliberately. set_temperature already switches the climate on -
+  # it sends rce.conditioner + rce.temp together - so a following set_hvac_mode
+  # was both redundant and harmful: the car executes one remote command at a
+  # time and rejects the next with "the last request has not yet been executed",
+  # which is what left an owner's climate not running in issue #19.
   - service: climate.set_temperature
     target: { entity_id: !input climate_entity }
     data: { temperature: !input target_temp }
-  - service: climate.set_hvac_mode
-    target: { entity_id: !input climate_entity }
-    data: { hvac_mode: heat_cool }
 mode: single

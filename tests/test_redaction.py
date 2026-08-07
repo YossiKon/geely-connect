@@ -3,6 +3,8 @@
 These are the tests that guard the work in 1.8.1, 1.10.1 and 1.10.2. Every one
 of them corresponds to something that actually leaked at some point.
 """
+import json
+
 from conftest import FAKE_VIN, load
 
 api = load("api")
@@ -92,3 +94,48 @@ def test_every_secret_key_list_entry_is_normalised():
     # an underscore or a capital would silently never match.
     for k in api._SECRET_KEYS | api._IDENTIFYING_KEYS:
         assert k == k.lower().replace("_", "").replace("-", ""), k
+
+
+# ------------------------------------- the {key, value} parameter pair shape ---
+# serviceParameters carry the field name as a *value*, so matching on key names
+# never sees it. fire_control prints this shape at WARNING level and the command
+# trail stores it in the diagnostics report, so a secret passed as a parameter
+# used to reach both. It is the same class of miss that let the VIN out through
+# the scheduled-charging `pin` field.
+
+def test_a_secret_passed_as_a_parameter_pair_is_masked():
+    got = api.redact([{"key": "sessionId", "value": TOKEN},
+                      {"key": "accessToken", "value": TOKEN}])
+    assert TOKEN not in json.dumps(got), got
+    assert all(p["value"] == "***redacted***" for p in got), got
+
+
+def test_a_vin_passed_as_a_parameter_pair_keeps_only_its_tail():
+    got = api.redact([{"key": "vin", "value": FAKE_VIN}])
+    assert got[0]["value"] == f"...{FAKE_VIN[-4:]}"
+
+
+def test_ordinary_control_parameters_stay_completely_readable():
+    """The trail and the log are worthless if every parameter is stars. These
+    are the real ones from the AVD captures."""
+    params = [{"key": "rce.conditioner", "value": "1"},
+              {"key": "rce.temp", "value": "15.5"},
+              {"key": "rce.heat", "value": "front-left"},
+              {"key": "operation", "value": "4"},
+              {"key": "door", "value": "all"}]
+    assert api.redact(params) == params
+
+
+def test_key_material_under_the_key_field_is_still_caught():
+    """The pair rule must not become a way in: a long blob under `key` is
+    credential material, not a parameter name, and the older rule handles it."""
+    got = api.redact({"key": "-----BEGIN PRIVATE KEY-----AAAA", "value": "x"})
+    assert got["key"] == "***redacted***"
+    assert "BEGIN PRIVATE KEY" not in json.dumps(got)
+
+
+def test_a_pair_shaped_dict_with_extra_fields_is_still_handled():
+    """The command trail stores notes alongside the pair, so the rule cannot
+    depend on the dict holding exactly two items."""
+    got = api.redact({"key": "sessionId", "value": TOKEN, "note": "probe"})
+    assert got["value"] == "***redacted***" and got["note"] == "probe"

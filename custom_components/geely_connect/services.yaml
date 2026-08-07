@@ -1,3 +1,87 @@
+fire_rapid:
+  name: Fire rapid warm/cool body (probe)
+  description: >
+    Send the compound rapid warming / rapid cooling command (bizType=7) with a
+    body you choose, via POST /charge-server/ecarx_charge_set. For diagnostic
+    use: the Rapid Warming and Rapid Cooling presets on the climate entity send
+    a fixed version of this body. IMPORTANT - the gateway answers "Success" to
+    any well-formed body, including seat positions the car does not recognise,
+    so do NOT read the response to decide whether a probe worked. Fire it,
+    wait, then read the seat entities (or climateStatus drvVentSts /
+    passVentSts / drvHeatSts / passHeatingSts) and see whether they moved.
+  fields:
+    temp:
+      name: Target temperature
+      description: AC setpoint in Celsius, as the string the API expects.
+      required: true
+      example: "15.5"
+      selector:
+        text:
+    ac:
+      name: Air conditioning
+      description: Whether the bundle turns the climate on.
+      required: false
+      default: true
+      selector:
+        boolean:
+    heat_seats:
+      name: Heated seat positions
+      description: >
+        Positions to request seat heating for. The presets send 11 (driver) and
+        19 (passenger), which one EX5 accepts and ignores - candidates worth
+        trying are front-left / front-right (what the RCE_2 seat entities use
+        and the car honours), and low integers such as 1 and 2.
+      required: false
+      default: []
+      example: '["front-left", "front-right"]'
+      selector:
+        object:
+    vent_seats:
+      name: Ventilated seat positions
+      description: Same positions, for seat ventilation instead of heating.
+      required: false
+      default: []
+      example: '["11", "19"]'
+      selector:
+        object:
+    level:
+      name: Seat level
+      description: Level applied to every seat in the request. 3 is the highest.
+      required: false
+      default: "3"
+      selector:
+        select:
+          options:
+            - "1"
+            - "2"
+            - "3"
+    window_vent:
+      name: Window venting
+      description: Crack the windows, as rapid cooling does.
+      required: false
+      default: false
+      selector:
+        boolean:
+    extra:
+      name: Extra body fields
+      description: >
+        Raw key/value pairs merged into the body last, so they can add an
+        undocumented field or override a computed one. This is how to probe for
+        controls that have no capture yet - for example a steering-wheel-heat
+        field alongside the rapid bundle (#4).
+      required: false
+      default: {}
+      example: '{"bw": "true"}'
+      selector:
+        object:
+    vin:
+      name: VIN
+      description: VIN of the target vehicle. Optional if you have only one vehicle configured.
+      required: false
+      example: L6T00000000000000
+      selector:
+        text:
+
 fire_control:
   name: Fire control command
   description: >

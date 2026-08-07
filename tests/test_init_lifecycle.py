@@ -292,6 +292,10 @@ class _FakeApi:
         self.calls.append(("control", sid, params, cmd))
         return {"code": 1000}
 
+    def rapid_climate(self, **kw):
+        self.calls.append(("rapid", kw))
+        return {"code": "1000", "data": {"param": {"paa.ac": "true"}}}
+
 
 class _FakeCoordinator:
     instance = None
@@ -644,7 +648,7 @@ def test_a_coordinator_that_rejects_its_interval_does_not_kill_the_poll():
 
 # ------------------------------------------------------------- fire_control ---
 
-def _service(m, bundles, call_data):
+def _service(m, bundles, call_data, name="fire_control"):
     hass = _Hass()
     hass.data["geely_connect"] = bundles
     registered = {}
@@ -652,7 +656,7 @@ def _service(m, bundles, call_data):
                   registered.update({n: f})):
         m._register_debug_service(hass)
     call = types.SimpleNamespace(data=call_data)
-    return hass, lambda: asyncio.run(registered["fire_control"](call))
+    return hass, lambda: asyncio.run(registered[name](call))
 
 
 def test_fire_control_requires_a_loaded_vehicle_and_an_unambiguous_vin():
@@ -694,6 +698,119 @@ def test_fire_control_sends_the_command_to_the_chosen_car():
     run()
     assert api.calls == [("control", "RCT",
                           [{"key": "temperature", "value": "22.5"}], "start")]
+
+
+def test_a_named_vin_picks_that_car_and_not_the_first_one_loaded():
+    """hass.data order is entry-setup order, so the wrong pick here sends a
+    command to whichever car happened to load first - which can change across
+    restarts."""
+    m = _mod()
+    first, second = _FakeApi(), _FakeApi()
+    _, run = _service(m, {"e1": {"vin": "AAA", "api": first},
+                          "e2": {"vin": "BBB", "api": second}},
+                      {"service_id": "RCT", "vin": "BBB"})
+    run()
+    assert first.calls == [] and second.calls == [("control", "RCT", [], "start")]
+
+
+# ------------------------------------------------------------- fire_rapid ---
+# The compound bizType=7 body is the one that carries the seats, and it was
+# never addressable by hand: fire_control speaks the telematics PUT, this is the
+# charge-server POST. #19 has an EX5 accepting `paa.heat.11: 3` for both front
+# seats and ignoring them, so settling the position encoding needs the body
+# varied against a real car.
+
+def test_fire_rapid_passes_the_probe_body_through_verbatim():
+    m = _mod()
+    api = _FakeApi()
+    _, run = _service(m, {"e1": {"vin": FAKE_VIN, "api": api}},
+                      {"temp": "15.5", "ac": True, "heat_seats": [],
+                       "vent_seats": ["front-left", "front-right"],
+                       "level": "3", "window_vent": True, "extra": {}},
+                      name="fire_rapid")
+    run()
+    (kind, kw), = api.calls
+    assert kind == "rapid"
+    assert kw == {"ac": True, "temp": "15.5", "heat_seats": None,
+                  "vent_seats": ["front-left", "front-right"], "vlt": True,
+                  "level": "3", "extra": None}
+
+
+def test_fire_rapid_defaults_leave_every_optional_field_alone():
+    """Only `temp` is required, so a probe aimed at one field does not have to
+    restate the rest."""
+    m = _mod()
+    api = _FakeApi()
+    _, run = _service(m, {"e1": {"vin": FAKE_VIN, "api": api}},
+                      {"temp": "28.5"}, name="fire_rapid")
+    run()
+    (_, kw), = api.calls
+    assert kw == {"ac": True, "temp": "28.5", "heat_seats": None,
+                  "vent_seats": None, "vlt": False, "level": "3", "extra": None}
+
+
+def test_fire_rapid_forwards_extra_fields_and_a_chosen_level():
+    """`extra` is how a field with no capture yet gets probed at all - the
+    steering-wheel heat in #4 being the open example."""
+    m = _mod()
+    api = _FakeApi()
+    _, run = _service(m, {"e1": {"vin": FAKE_VIN, "api": api}},
+                      {"temp": "28.5", "heat_seats": ["11", "19"],
+                       "level": "1", "extra": {"bw": "true"}},
+                      name="fire_rapid")
+    run()
+    (_, kw), = api.calls
+    assert kw["level"] == "1"
+    assert kw["extra"] == {"bw": "true"}
+    assert kw["heat_seats"] == ["11", "19"]
+
+
+def test_fire_rapid_surfaces_a_rejection_instead_of_looking_successful():
+    m = _mod()
+    api_mod = load("api")
+    from homeassistant.exceptions import HomeAssistantError
+
+    class _Rejecting(_FakeApi):
+        def rapid_climate(self, **kw):
+            raise api_mod.GeelyControlError("8070", "pending")
+
+    _, run = _service(m, {"e1": {"vin": FAKE_VIN, "api": _Rejecting()}},
+                      {"temp": "15.5"}, name="fire_rapid")
+    try:
+        run()
+    except HomeAssistantError as e:
+        assert "pending" in str(e)
+    else:
+        raise AssertionError("a rejected probe looked successful")
+
+
+def test_fire_rapid_reads_the_car_back_because_success_proves_nothing():
+    """The gateway answers Success to any well-formed body, including seat
+    positions the car does not recognise. What separates a probe that worked
+    from one that was ignored is whether an entity moved."""
+    m = _mod()
+
+    class _Coord:
+        def __init__(self):
+            self.refreshes = 0
+
+        async def async_request_refresh(self):
+            self.refreshes += 1
+
+    coord = _Coord()
+    hass, run = _service(m, {"e1": {"vin": FAKE_VIN, "api": _FakeApi(),
+                                    "coordinator": coord}},
+                         {"temp": "15.5"}, name="fire_rapid")
+    scheduled = []
+    hass.async_create_task = scheduled.append
+    fast = types.SimpleNamespace(sleep=_instant_sleep,
+                                 CancelledError=asyncio.CancelledError)
+    helpers = load("helpers")
+    with _Patched(helpers, asyncio=fast):
+        run()
+        for coro in scheduled:
+            asyncio.run(coro)
+    assert coord.refreshes == 2, coord.refreshes
 
 
 def test_fire_control_surfaces_rejections_and_expiry_the_entity_way():
@@ -745,14 +862,27 @@ def test_fire_control_surfaces_rejections_and_expiry_the_entity_way():
         raise AssertionError("a transport error looked successful")
 
 
-def test_the_service_registers_once():
+def test_the_services_register_once_but_a_missing_one_is_still_added():
+    """Registering per vehicle entry means this runs again on every setup. The
+    guard has to name every service it stands for: keyed on one of them, the
+    next service added would be skipped for good on any system where the first
+    was already present."""
     m = _mod()
+
+    def _register(hass):
+        calls = []
+        with _Patched(m, async_register_admin_service=lambda *a, **k: calls.append(1)):
+            m._register_debug_service(hass)
+        return calls
+
     hass = _Hass()
-    hass.services.registered["fire_control"] = object()
-    calls = []
-    with _Patched(m, async_register_admin_service=lambda *a, **k: calls.append(1)):
-        m._register_debug_service(hass)
-    assert calls == [], "a second registration must be a no-op"
+    hass.services.registered.update({"fire_control": object(),
+                                     "fire_rapid": object()})
+    assert _register(hass) == [], "a second registration must be a no-op"
+
+    partial = _Hass()
+    partial.services.registered["fire_control"] = object()
+    assert _register(partial), "a service that is missing must still be added"
 
 
 # ---------------------------------------------------- options, unload, remove ---

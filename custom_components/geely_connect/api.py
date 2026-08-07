@@ -15,6 +15,7 @@ All public methods are sync - HA wraps them with async_add_executor_job.
 from __future__ import annotations
 
 import base64
+import collections
 import hashlib
 import hmac
 import json
@@ -179,6 +180,13 @@ def _looks_like_key_material(value: Any) -> bool:
     return "-----BEGIN" in value or len(value) > 40
 
 
+def _norm_key(name: Any) -> str | None:
+    """The spelling-insensitive form the key lists are written in."""
+    if not isinstance(name, str):
+        return None
+    return name.lower().replace("-", "").replace("_", "")
+
+
 def redact(obj: Any):
     """Return a copy of a server response / dict with secret values masked.
 
@@ -189,9 +197,20 @@ def redact(obj: Any):
     last four characters rather than removed, so a log stays readable.
     """
     if isinstance(obj, dict):
+        # `{"key": <name>, "value": <data>}` - the serviceParameters shape, and
+        # the one fire_control prints and the command trail stores. The field
+        # name is a *value* here, so matching on key names never sees it and a
+        # secret sails straight through. This is the same class of miss that let
+        # the VIN out through the scheduled-charging `pin` field once already.
+        pair_name = obj.get("key")
+        pair_norm = (_norm_key(pair_name)
+                     if "value" in obj and isinstance(pair_name, str)
+                     and len(pair_name) <= 40 else None)
         out = {}
         for k, v in obj.items():
-            norm = k.lower().replace("-", "").replace("_", "") if isinstance(k, str) else None
+            norm = _norm_key(k)
+            if k == "value" and pair_norm is not None:
+                norm = pair_norm      # judge the payload by the name beside it
             if norm in _SECRET_KEYS or (
                 norm in _AMBIGUOUS_KEYS and _looks_like_key_material(v)
             ):
@@ -1088,10 +1107,85 @@ class GeelyApi:
         }
         body_bytes = json.dumps(body, separators=(",", ":")).encode()
         path = f"/charge-server/ecarx_charge_set/{self.vin}"
-        return _check_control_resp(
-            self._authed_apis_call("POST", path, body_bytes))
+        # The body carries `pin` and `vin`; only the schedule is worth a note.
+        return self._recorded(
+            f"scheduled_charging {command}",
+            {"start": start_time, "end": end_time, "target": rbc_target,
+             "chargeModel": charge_model},
+            lambda: _check_control_resp(
+                self._authed_apis_call("POST", path, body_bytes)))
 
     # ---- WRITE (control) ----
+
+    # ---- Command trail (read by diagnostics) ----
+
+    COMMAND_TRAIL_SIZE = 25
+
+    def _note_text(self, text: Any) -> str:
+        """One line of error text, with this car's VIN taken out of it."""
+        out = str(text)
+        vin = getattr(self, "vin", "") or ""
+        if vin and vin in out:
+            out = out.replace(vin, f"...{vin[-4:]}")
+        return out[:160]
+
+    def _recorded(self, label: str, detail: Any, send):
+        """Run one remote command and keep a note of how it went.
+
+        The faults that cost this integration the most are invisible after the
+        fact: a command rejected with "the last request has not yet been
+        executed" is not queued, it is lost, and the only trace is a debug line
+        the reporter would have had to enable *before* it happened. Nobody does.
+        So the last few commands and their outcomes are kept here, and the
+        diagnostics download can answer "what did the car accept, in what order,
+        and how long apart" on its own.
+
+        Recorded: the label, the parameters, the outcome, the round trip. Not
+        the URL - every control path carries the VIN - and not the response
+        body, which is large and adds nothing a code does not.
+
+        Exception text is scrubbed rather than trusted. A transport error names
+        the URL it failed on ("Max retries exceeded with url:
+        /remote-control/vehicle/telematics/<VIN>"), and both redaction passes
+        match key names, so a VIN sitting inside a sentence would travel intact
+        into a shared diagnostics report.
+
+        Deliberately not applied to `request_position_refresh`: it is fired by
+        the poller rather than by anyone, and it would push every real command
+        out of a 25-entry trail within an hour.
+        """
+        trail = getattr(self, "command_trail", None)
+        if trail is None:
+            # Lazily built: instances are also created through __new__ (tests,
+            # and any future path that skips the constructor), and a missing
+            # attribute must not turn a working command into an exception.
+            trail = self.command_trail = collections.deque(
+                maxlen=self.COMMAND_TRAIL_SIZE)
+        note: dict[str, Any] = {
+            "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "command": label,
+            "detail": redact(detail),
+        }
+        started = time.monotonic()
+        try:
+            resp = send()
+        except GeelyControlError as e:
+            note.update(outcome="rejected", code=str(e.code),
+                        message=self._note_text(e.message))
+            raise
+        except GeelyAuthError as e:
+            note.update(outcome="session-expired", message=self._note_text(e))
+            raise
+        except Exception as e:
+            note.update(outcome="error",
+                        message=self._note_text(f"{type(e).__name__}: {e}"))
+            raise
+        else:
+            note.update(outcome="accepted", code=str(resp.get("code")))
+            return resp
+        finally:
+            note["ms"] = int((time.monotonic() - started) * 1000)
+            trail.append(note)
 
     def control(self, service_id: str, parameters: list[dict] | None = None,
                 command: str = "start", duration: int = 0) -> dict:
@@ -1114,15 +1208,18 @@ class GeelyApi:
         }
         body = json.dumps(body_dict, separators=(",", ":")).encode()
         path = f"/remote-control/vehicle/telematics/{self.vin}"
-        return _check_control_resp(
-            self._authed_apis_call("PUT", path, body))
+        return self._recorded(
+            f"{service_id} {command}", parameters or [],
+            lambda: _check_control_resp(
+                self._authed_apis_call("PUT", path, body)))
 
     # ---- Compound rapid warm/cool (different endpoint) ----
 
     def rapid_climate(self, *, ac: bool, temp: str, heat_seats: list[str] | None,
                       vent_seats: list[str] | None, vlt: bool,
                       duration: str = "180", vlt_duration: str = "60",
-                      vlt_pos: str = "12") -> dict:
+                      vlt_pos: str = "12", level: str = "3",
+                      extra: dict[str, str] | None = None) -> dict:
         """Fire compound climate command via POST /charge-server/ecarx_charge_set.
 
         Captured from the Android app's "rapid warming" / "rapid cooling"
@@ -1130,6 +1227,16 @@ class GeelyApi:
         in a single shot.
 
         seats: numeric Zeekr-style positions - 11=driver, 19=passenger.
+
+        `level` and `extra` exist for the `fire_rapid` probe service, not for
+        the entities. The seat block in this body is *accepted* - a real EX5
+        echoed `paa.heat.11: 3` and `paa.heat.19: 3` back on Success (#19) -
+        and the car still did not act on it, while the same seats respond
+        reliably to RCE_2 addressed by name. Deciding whether the fault is the
+        position encoding needs this body varied by hand against one car, so
+        the probe can set the level and merge arbitrary fields. `extra` is
+        applied last and may therefore override a computed key: that is
+        deliberate, and it is why nothing but the probe passes it.
         """
         body: dict = {
             "ac": "true" if ac else "false",
@@ -1144,13 +1251,19 @@ class GeelyApi:
             "vltPos": vlt_pos,
         }
         if heat_seats:
-            body["heat"] = [{"level": "3", "pos": p} for p in heat_seats]
+            body["heat"] = [{"level": level, "pos": p} for p in heat_seats]
         if vent_seats:
-            body["ventilation"] = [{"level": "3", "pos": p} for p in vent_seats]
+            body["ventilation"] = [{"level": level, "pos": p} for p in vent_seats]
+        if extra:
+            body.update(extra)
         body_bytes = json.dumps(body, separators=(",", ":")).encode()
         path = f"/charge-server/ecarx_charge_set/{self.vin}"
-        return _check_control_resp(
-            self._authed_apis_call("POST", path, body_bytes))
+        return self._recorded(
+            "rapid_climate",
+            {"temp": temp, "ac": body["ac"], "heat": body.get("heat"),
+             "ventilation": body.get("ventilation"), "vlt": body["vlt"]},
+            lambda: _check_control_resp(
+                self._authed_apis_call("POST", path, body_bytes)))
 
     # ---- Capability discovery ----
 

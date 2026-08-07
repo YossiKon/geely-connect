@@ -5,6 +5,7 @@ kept its own redaction list which had drifted from api.py's. These tests exist
 so that cannot happen again unnoticed.
 """
 import asyncio
+import datetime
 import json
 
 from conftest import FAKE_VIN, have_homeassistant, load
@@ -20,6 +21,12 @@ def _report():
     diag = load("diagnostics")
 
     class Coord:
+        # A failure whose message names the vehicle. Error text is supposed to be
+        # VIN-free and was fixed to be - but a report is the wrong place to bet
+        # on every future `raise` remembering that.
+        last_exception = Exception(f"status fetch failed for {FAKE_VIN}")
+        last_update_success = False
+        update_interval = datetime.timedelta(seconds=300)
         data = {
             "vehicleStatus": {"basicVehicleStatus": {
                 "position": {"latitude": LAT, "longitude": LON}}},
@@ -37,10 +44,31 @@ def _report():
                 "poll_mode": "manual"}
         options = {"pressure_unit": "psi"}
 
+    class Api:
+        command_trail = [
+            {"at": "2026-08-07T09:01:47Z", "command": "RCE_2 start",
+             "detail": [{"key": "rce.temp", "value": "15.5"}],
+             "outcome": "accepted", "code": "1000", "ms": 812},
+            {"at": "2026-08-07T09:01:47Z", "command": "RCE_2 start",
+             "detail": [{"key": "rce.heat", "value": "front-left"},
+                        {"key": "sessionId", "value": TOKEN}],
+             "outcome": "rejected", "code": "8070",
+             "message": "The last request has not yet been executed",
+             "ms": 190},
+        ]
+
     class Hass:
         data = {"geely_connect": {"e1": {
             "coordinator": Coord(),
-            "capabilities": {"ac.enabled": True, "vin": FAKE_VIN}}}}
+            "api": Api(),
+            "poll_state": {"cycle": 41, "idle": 7, "sig": "9f2c1d",
+                           "force_secondary": True},
+            "capabilities": {"ac.enabled": True, "vin": FAKE_VIN},
+            "capabilities_raw": [
+                {"functionId": "remote_climate_control_2", "vin": FAKE_VIN,
+                 "valueEnable": True, "valueRange": "15.5|28.5",
+                 "paramsJson": '{"dpt_vent_loc":"front-left,front-right"}'},
+            ]}}}
 
     return asyncio.run(diag.async_get_config_entry_diagnostics(Hass(), Entry()))
 
@@ -72,11 +100,77 @@ def test_the_capability_catalog_is_redacted_too():
     assert caps["ac.enabled"] is True, "redaction ate a useful flag"
 
 
+def test_the_raw_catalog_reaches_the_report_intact_but_redacted():
+    """The parsed summary keeps about a dozen derived flags and drops the rest,
+    which is how "does this trim advertise a blower level, or seat positions by
+    name?" became unanswerable from a report - so the catalog goes in verbatim.
+    It is echoed from the server and carries a vin field, hence both passes."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    raw = _report()["capabilities_raw"]
+    assert FAKE_VIN not in json.dumps(raw)
+    entry = raw[0]
+    assert entry["functionId"] == "remote_climate_control_2"
+    assert entry["valueRange"] == "15.5|28.5", "redaction ate the temp range"
+    assert "front-left" in entry["paramsJson"], "redaction ate the seat positions"
+
+
+def test_the_report_says_why_the_data_is_as_old_as_it_is():
+    """A stale reading and a failing fetch are indistinguishable from `status`
+    alone, which is how #21 stayed open for days - the owner could see numbers
+    that did not move but nothing saying whether the car or the poller was at
+    fault."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    p = _report()["polling"]
+    assert p["cycle"] == 41 and p["unchanged_polls"] == 7
+    assert p["interval_seconds"] == 300.0
+    assert p["last_update_success"] is False
+    assert p["force_secondary_pending"] is True
+    assert "status fetch failed" in p["last_exception"]
+    assert "sig" not in p, "the opaque change hash is noise in a report"
+
+
+def test_a_vin_inside_an_exception_message_does_not_survive():
+    """Both redaction passes match key names, so a VIN in the middle of a
+    sentence walks straight through them."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    assert FAKE_VIN not in _report()["polling"]["last_exception"]
+
+
+def test_the_command_trail_shows_the_rejection_that_would_otherwise_vanish():
+    """A command refused with "the last request has not yet been executed" is
+    dropped rather than retried, and leaves no trace unless debug logging was
+    already on. This is the section that makes that visible after the fact."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    trail = _report()["recent_commands"]
+    assert [c["outcome"] for c in trail] == ["accepted", "rejected"]
+    assert trail[1]["code"] == "8070"
+    assert "has not yet been executed" in trail[1]["message"]
+    # The useful parameter survives; a secret riding along does not.
+    detail = json.dumps(trail[1]["detail"])
+    assert "front-left" in detail
+    assert TOKEN not in detail, "a token in a command parameter reached the report"
+
+
+def test_the_report_says_whether_debug_logging_is_actually_on():
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    log = _report()["logging"]
+    assert log["effective_level"] in {"DEBUG", "INFO", "WARNING", "ERROR",
+                                      "CRITICAL", "NOTSET"}
+    assert isinstance(log["debug_enabled"], bool)
+
+
 def test_the_report_is_still_worth_reading():
     if not have_homeassistant():
         skip("homeassistant not installed")
     r = _report()
-    assert set(r) == {"entry_data", "options", "capabilities", "status", "cards"}
+    assert set(r) == {"entry_data", "options", "polling", "recent_commands",
+                      "logging", "capabilities", "capabilities_raw", "status",
+                      "cards"}
     assert r["options"]["pressure_unit"] == "psi"
     assert r["status"]["_state"]["parkComfortState"] == "1"
 

@@ -492,3 +492,40 @@ def test_turning_the_climate_off_without_defrost_claims_off_immediately():
         asyncio.run(e.async_set_hvac_mode(HVACMode.OFF))
     assert len(api.calls) == 1
     assert e.hvac_mode == HVACMode.OFF
+
+
+def test_rapid_cooling_asks_for_the_coldest_setpoint_the_car_allows():
+    """The whole point of the preset. It must come from the vehicle's own
+    advertised range rather than a constant, because a trim that starts at 16.0
+    would otherwise be sent 15.5 and reject the body - and the accepted request
+    from a real car proves the field travels: `paa.ac.temp: 28.5` came back on
+    Rapid Warming (#19)."""
+    _ha()
+    c = load("climate")
+    for caps, low, high in (({}, "15.5", "28.5"),
+                            ({"ac.min": 16.0, "ac.max": 32.0}, "16.0", "32.0")):
+        e, api, _ = _entity(_status(), caps=caps)
+        with _quiet_refresh(c):
+            asyncio.run(e.async_set_preset_mode(c.PRESET_RAPID_COOLING))
+        assert api.calls[0][1]["temp"] == low, (caps, api.calls)
+
+        e, api, _ = _entity(_status(), caps=caps)
+        with _quiet_refresh(c):
+            asyncio.run(e.async_set_preset_mode(c.PRESET_RAPID_WARMING))
+        assert api.calls[0][1]["temp"] == high, (caps, api.calls)
+
+
+def test_rapid_cooling_asks_for_both_seats_at_the_highest_level():
+    """Level 3 is the top of CLIMATE_SEAT_LEVELS, and cooling ventilates rather
+    than heats - swapping those two silently would produce a request that warms
+    the seats of someone who asked to be cooled."""
+    _ha()
+    c = load("climate")
+    e, api, _ = _entity(_status())
+    with _quiet_refresh(c):
+        asyncio.run(e.async_set_preset_mode(c.PRESET_RAPID_COOLING))
+    _, kw = api.calls[0]
+    assert kw["vent_seats"] == ["11", "19"] and kw["heat_seats"] is None
+    assert kw.get("level", "3") == "3"
+    # Window venting is part of cooling and must not fire while warming.
+    assert kw["vlt"] is True

@@ -574,10 +574,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # platform setup files to decide which entities to expose. Best-effort:
     # on error we log and proceed with default (all-features-enabled) view.
     capabilities: dict = {}
+    raw_catalog: list = []
     try:
         from . import capabilities as cap_parser
-        raw = await hass.async_add_executor_job(api.fetch_capabilities)
-        capabilities = cap_parser.parse(raw or [])
+        raw_catalog = await hass.async_add_executor_job(api.fetch_capabilities) or []
+        capabilities = cap_parser.parse(raw_catalog)
         _LOGGER.info(
             "Capability catalog parsed: %d raw entries, %d derived flags",
             capabilities.get("raw_count", 0), len(capabilities) - 1,
@@ -599,6 +600,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "vin":           d[CONF_VIN],
         "device_name":   _resolve_device_name(d),
         "capabilities":  capabilities,
+        # The catalog as the server sent it. `capabilities` above is a dozen
+        # derived flags, and the parser drops everything it has no rule for -
+        # which is how "does this trim advertise a blower level at all?" became
+        # unanswerable from a diagnostics report. Kept verbatim so the next
+        # question about an unmapped feature can be answered from a file the
+        # owner downloads, instead of asking them to capture app traffic.
+        "capabilities_raw": raw_catalog,
         "propulsion":    verdict,
         # The platform series code (E245 = EX5, P145 = Starray / EX5 EM-i).
         # Nothing reads it today: it was added for a per-series temperature
@@ -634,12 +642,13 @@ async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> Non
 
 
 def _register_debug_service(hass: HomeAssistant) -> None:
-    """Register `geely_connect.fire_control` once. Idempotent.
+    """Register `geely_connect.fire_control` and `.fire_rapid` once. Idempotent.
 
-    Lets you fire any serviceId+params from Developer Tools → Actions while
-    iterating on un-mapped controls. Logs the response at WARNING level so it
-    is visible without turning on debug logging, and schedules two polls
-    afterwards so any change the command caused lands in the entities.
+    Lets you fire any serviceId+params - or any shape of the compound rapid
+    warm/cool body - from Developer Tools → Actions while iterating on
+    un-mapped controls. Logs the response at WARNING level so it is visible
+    without turning on debug logging, and schedules two polls afterwards so any
+    change the command caused lands in the entities.
 
     Read the entities, not the response: the gateway returns
     `code 1000 / operationResult 1 / "operation succeed"` for any well-formed
@@ -652,7 +661,11 @@ def _register_debug_service(hass: HomeAssistant) -> None:
         params:
           - {key: temperature, value: "22.5"}
     """
-    if hass.services.has_service(DOMAIN, "fire_control"):
+    # Keyed on both names rather than one standing in for the other: they are
+    # registered together today, so a guard on a sibling's name would silently
+    # skip whichever service is added next.
+    if all(hass.services.has_service(DOMAIN, name)
+           for name in ("fire_control", "fire_rapid")):
         return
 
     schema = vol.Schema({
@@ -667,16 +680,14 @@ def _register_debug_service(hass: HomeAssistant) -> None:
         vol.Optional("vin"): cv.string,
     })
 
-    async def _handle(call: ServiceCall) -> None:
-        sid = call.data["service_id"]
-        cmd = call.data.get("command", "start")
-        params = call.data.get("params") or []
-        target_vin = call.data.get("vin")
+    def _target(target_vin: str | None) -> tuple[str, dict]:
+        """Pick the vehicle a raw service call is aimed at.
 
-        # Find the matching API. Omitting `vin` is only unambiguous with a
-        # single vehicle configured - hass.data order is entry-setup order, so
-        # picking the first would send a lock or window command to whichever
-        # car happened to load first, and that can change across restarts.
+        Omitting `vin` is only unambiguous with a single vehicle configured -
+        hass.data order is entry-setup order, so picking the first would send a
+        lock or window command to whichever car happened to load first, and
+        that can change across restarts.
+        """
         loaded = list((hass.data.get(DOMAIN) or {}).items())
         if not loaded:
             raise ServiceValidationError("No Geely Connect vehicle is loaded")
@@ -686,20 +697,21 @@ def _register_debug_service(hass: HomeAssistant) -> None:
                 raise ServiceValidationError(
                     f"No configured Geely vehicle with VIN {target_vin}"
                 )
-        elif len(loaded) > 1:
+            return chosen
+        if len(loaded) > 1:
             raise ServiceValidationError(
                 "vin is required when more than one vehicle is configured"
             )
-        else:
-            chosen = loaded[0]
-        entry_id, bundle = chosen
-        api = bundle["api"]
+        return loaded[0]
 
-        # Surface failures the way every entity does. Swallowing them here made
-        # a rejected command look successful, and hid an expired session from
-        # the reauth flow.
+    async def _send(entry_id: str, label: str, fn) -> dict:
+        """Run one blocking API call, surfacing failures the way entities do.
+
+        Swallowing them here made a rejected command look successful, and hid
+        an expired session from the reauth flow.
+        """
         try:
-            resp = await hass.async_add_executor_job(api.control, sid, params, cmd)
+            return await hass.async_add_executor_job(fn)
         except GeelyControlError as e:
             raise HomeAssistantError(e.message) from e
         except GeelyAuthError as e:
@@ -708,29 +720,86 @@ def _register_debug_service(hass: HomeAssistant) -> None:
                 entry.async_start_reauth(hass)
             raise HomeAssistantError(f"Geely session expired: {e}") from e
         except Exception as e:
-            raise HomeAssistantError(f"fire_control {sid} failed: {e}") from e
-        _LOGGER.warning(
-            "fire_control %s %s params=%s → response=%s",
-            sid, cmd, redact(params), redact(resp),
-        )
-        # Poll straight after, twice, and say so: the gateway answers
-        # "operation succeed" to any well-formed request, whether or not the
-        # target means anything to the car (three candidate tailgate commands
-        # in #20 returned byte-identical successes). What separates a probe
-        # that worked from one the car ignored is whether an entity moved, and
-        # that needs a fetch - so a probe fired from the sofa becomes readable
-        # in the entity history instead of requiring someone at the car.
+            raise HomeAssistantError(f"{label} failed: {e}") from e
+
+    def _read_back(bundle: dict) -> None:
+        """Poll straight after a probe, twice.
+
+        The gateway answers "operation succeed" to any well-formed request,
+        whether or not the target means anything to the car (three candidate
+        tailgate commands in #20 returned byte-identical successes, and the
+        seat block in #19 came back accepted from a car that ignored it). What
+        separates a probe that worked from one the car ignored is whether an
+        entity moved, and that needs a fetch - so a probe fired from the sofa
+        becomes readable in the entity history instead of requiring someone at
+        the car.
+        """
         coordinator = bundle.get("coordinator")
         if coordinator is not None:
             schedule_refresh(hass, coordinator, 6, 12)
 
+    async def _handle(call: ServiceCall) -> None:
+        sid = call.data["service_id"]
+        cmd = call.data.get("command", "start")
+        params = call.data.get("params") or []
+        entry_id, bundle = _target(call.data.get("vin"))
+        resp = await _send(entry_id, f"fire_control {sid}", functools.partial(
+            bundle["api"].control, sid, params, cmd))
+        _LOGGER.warning(
+            "fire_control %s %s params=%s → response=%s",
+            sid, cmd, redact(params), redact(resp),
+        )
+        _read_back(bundle)
+
+    # The compound bizType=7 body, addressable by hand. `fire_control` cannot
+    # reach it - that one speaks the telematics PUT, and this is the
+    # charge-server POST - which is why the seat encoding in #19 has stayed a
+    # guess: the request that carries it was never variable. bizType is pinned
+    # to the rapid body on purpose, because 4 and 6 on the same endpoint write
+    # the parking-comfort and scheduled-charging windows and a malformed probe
+    # there would clobber a schedule the owner set.
+    rapid_schema = vol.Schema({
+        vol.Required("temp"): cv.string,
+        vol.Optional("ac", default=True): cv.boolean,
+        vol.Optional("heat_seats", default=list): vol.All(cv.ensure_list, [cv.string]),
+        vol.Optional("vent_seats", default=list): vol.All(cv.ensure_list, [cv.string]),
+        vol.Optional("level", default="3"): cv.string,
+        vol.Optional("window_vent", default=False): cv.boolean,
+        vol.Optional("extra", default=dict): {cv.string: cv.string},
+        vol.Optional("vin"): cv.string,
+    })
+
+    async def _handle_rapid(call: ServiceCall) -> None:
+        entry_id, bundle = _target(call.data.get("vin"))
+        heat = call.data.get("heat_seats") or None
+        vent = call.data.get("vent_seats") or None
+        level = call.data.get("level", "3")
+        resp = await _send(entry_id, "fire_rapid", functools.partial(
+            bundle["api"].rapid_climate,
+            ac=call.data.get("ac", True),
+            temp=call.data["temp"],
+            heat_seats=heat,
+            vent_seats=vent,
+            vlt=call.data.get("window_vent", False),
+            level=level,
+            extra=call.data.get("extra") or None,
+        ))
+        _LOGGER.warning(
+            "fire_rapid temp=%s heat=%s vent=%s level=%s → response=%s",
+            call.data["temp"], heat, vent, level, redact(resp),
+        )
+        _read_back(bundle)
+
     # Admin-only. The entities are the supported surface and stay available to
-    # every Home Assistant user; this one forwards an arbitrary serviceId and
-    # parameter list straight to the car, including commands no entity exposes,
-    # so it is a raw escape hatch rather than a feature and is gated to
-    # administrators the way Home Assistant gates its other raw services.
+    # every Home Assistant user; these two forward an arbitrary command
+    # straight to the car, including ones no entity exposes, so they are raw
+    # escape hatches rather than features and are gated to administrators the
+    # way Home Assistant gates its other raw services.
     async_register_admin_service(hass, DOMAIN, "fire_control", _handle, schema=schema)
-    _LOGGER.info("Registered geely_connect.fire_control debug service (admin only)")
+    async_register_admin_service(hass, DOMAIN, "fire_rapid", _handle_rapid,
+                                 schema=rapid_schema)
+    _LOGGER.info("Registered geely_connect.fire_control and .fire_rapid "
+                 "debug services (admin only)")
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

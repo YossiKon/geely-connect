@@ -49,6 +49,7 @@ polished setup on top.
 - [Sensors](#-what-you-can-see-sensors) · [Controls](#%EF%B8%8F-what-you-can-do-controls)
 - [Polling modes](#-efficient-adaptive-polling)
 - [Automations, dashboards & widgets](#-automations-dashboards--widgets)
+- [Troubleshooting & debugging](#-troubleshooting--debugging)
 - [Security](#-security) · [Supported regions](#-supported-regions)
 - [Changing settings later](#%EF%B8%8F-changing-settings-later) · [Known limitations](#%EF%B8%8F-known-limitations)
 - [Repository structure](#-repository-structure) · [License & credits](#-license--credits)
@@ -354,7 +355,7 @@ back off removes the generated entities again.
 |---|---|
 | **Lock** | Lock / unlock the doors |
 | **Trunk** | Asks the car to release the tailgate latch, which then re-locks itself after a short window if nobody lifts the gate. What that achieves varies by car: one owner's latch releases, another's car only flashes its indicators - and two owners report the official app behaving the same way, with the key fob doing the actual opening. No *powered* open command has been found in this API |
-| **Climate (remote pre-conditioning)** | Remote pre-heat/pre-cool: on/off, set temperature (15.5-28.5 °C), Rapid Warming, Rapid Cooling. The rapid presets ask for the front seats too - heat when warming, ventilation when cooling - inside the same single request the car accepts, since a second command racing the first gets rejected while the car is still working. Only reflects remote pre-climate cycles: the cloud does not report manual cabin HVAC |
+| **Climate (remote pre-conditioning)** | Remote pre-heat/pre-cool: on/off, set temperature (15.5-28.5 °C), Rapid Warming, Rapid Cooling. The rapid presets drive the setpoint to the coldest or hottest the car allows and ask for both front seats at the highest level - heat when warming, ventilation when cooling - inside the same single request the car accepts, since a second command racing the first gets rejected while the car is still working. On some cars the cabin obeys and the seats do not; [Troubleshooting](#-troubleshooting--debugging) has the script that fixes that, and why fan speed cannot be asked for at all. Only reflects remote pre-climate cycles: the cloud does not report manual cabin HVAC |
 | **Seat heating** | Driver & passenger (rear if supported): Off/Low/Medium/High |
 | **Seat ventilation** | Driver & passenger (rear if supported) |
 | **Defrost** | Windscreen defrost on/off |
@@ -468,7 +469,11 @@ Replace `notify.mobile_app_your_phone` with your own notifier.
 > Change them if you picked bar or kPa - the file says where.
 
 Prefer a UI? The same ideas are in [`blueprints/`](blueprints/) as importable
-blueprints.
+blueprints - plus one that is only available there:
+**`blueprints/script/geely_connect/rapid_climate_with_seats.yaml`** builds a
+button that fires Rapid Cooling (or Warming) and then the seat vents or heaters,
+spaced out so the car accepts every command. See
+[Troubleshooting](#-troubleshooting--debugging) for why the spacing matters.
 
 ### 🖥️ Full dashboards - [`dashboards/`](dashboards/)
 A **dashboard** starts with `title:` / `views:` and is pasted via
@@ -592,6 +597,100 @@ Tip: press the **Refresh Data** button (or call `button.press` on
 
 ---
 
+## 🩺 Troubleshooting & debugging
+
+Everything here is designed so a report can be complete on the first try. The
+car takes **one remote command at a time** and drops - not queues - whatever
+arrives while it is busy, so most puzzling behaviour is a timing story, and a
+timing story needs a timeline.
+
+### 1. Download the diagnostics
+
+**Settings → Devices & Services → Geely Connect → ⋮ → Download diagnostics.**
+It is a JSON file, redacted, and safe to attach to an issue. Home Assistant wraps
+it with your HA version and system info, the version of every custom component
+you have installed, this integration's manifest, and how long setup took - so
+"which version is this?" never needs asking. Under `data` is ours:
+
+| Section | What it answers |
+|---|---|
+| `polling` | Why the data is as old as it is. Poll cycle, how many polls in a row saw nothing change, the interval the adaptive logic settled on, whether the last fetch succeeded, and the last error |
+| `recent_commands` | The last 25 remote commands: what was sent, what came back, and how far apart. **This is the section that shows a command the car refused because it was still busy** - which leaves no other trace at all |
+| `logging` | Whether debug logging is actually on, so "I enabled it and got nothing" has an answer |
+| `capabilities` | The feature flags this trim advertises, as the integration derived them |
+| `capabilities_raw` | The capability catalog exactly as the server sent it. This is what answers "does this car support X at all, or is it only missing from the integration?" |
+| `status` | The full vehicle payload behind every sensor |
+| `cards` | Whether the dashboard cards are being served, and from where |
+
+**What is removed:** tokens, certificates, the captcha secret, and the mTLS key
+material outright; VIN, user ID, e-mail and device IDs down to their last four
+characters. Two independent passes run over the whole report - the
+integration's own, which matches key names *and* the `{key, value}` parameter
+shape where the field name is itself a value, and then Home Assistant's, which
+matches key names. Neither can see a VIN sitting inside a sentence, so error
+messages are scrubbed for it separately, where they are recorded and again where
+they are reported. Tests assert that none of it survives - see
+`tests/test_diagnostics.py`, `tests/test_redaction.py`.
+
+**What stays, so you know what you are sharing:** which commands you sent and
+when, your polling mode, your car's feature list, and its current state
+including tire pressures and battery level. No location - GPS is redacted.
+
+### 2. Turn on debug logging when the timing matters
+
+The integration page's ⋮ menu has **Enable debug logging**; press it, reproduce
+the problem, then **Disable debug logging** and Home Assistant hands you the log
+slice as a download. For a longer window, put this in `configuration.yaml`:
+
+```yaml
+logger:
+  default: warning
+  logs:
+    custom_components.geely_connect: debug
+```
+
+Command responses are logged with every secret masked, so a debug log is as safe
+to attach as the diagnostics file.
+
+### 3. Probe a control the integration doesn't expose yet
+
+Two admin-only actions in **Developer Tools → Actions**, for feature work rather
+than daily use:
+
+- **`geely_connect.fire_control`** - any `serviceId` + parameters through the
+  telematics endpoint. This is how the tailgate and steering-wheel candidates
+  get tested.
+- **`geely_connect.fire_rapid`** - the compound rapid warm/cool body, with the
+  seat positions, level and any extra field you choose.
+
+> ⚠️ **A "Success" here proves nothing.** The gateway answers `code 1000` to any
+> well-formed request, including one naming a seat position the car does not
+> recognise - that is exactly the open question in
+> [#19](https://github.com/YossiKon/geely-connect/issues/19). Fire it, wait,
+> then look at whether an **entity actually moved**. Both actions poll the car
+> twice afterwards so the answer lands in the entity history.
+
+### Rapid warming / cooling and the seats
+
+The presets ask for the front seats inside the same single request they use for
+the cabin - heat when warming, ventilation when cooling, both at the highest
+level, with the setpoint driven to the lowest or highest temperature the car
+advertises. On at least one EX5 the cloud **accepts** that request, echoes the
+seats back, and the car acts on the cabin only. Until the position encoding is
+settled, the reliable route is the individual Seat Heat / Seat Vent entities,
+which work on that same car - and
+[`blueprints/script/geely_connect/rapid_climate_with_seats.yaml`](blueprints/script/geely_connect/rapid_climate_with_seats.yaml)
+wires the two together with the pauses the car needs. Import it, create a script,
+put it on a button.
+
+**Fan speed is not available.** No field for the blower exists anywhere in this
+API - not in the accepted parameters of the rapid command, and not as a
+capability this car advertises. When the app's rapid cooling runs the fan hard,
+that is the car's own program, not something the request asks for. If a future
+`capabilities_raw` from any trim shows otherwise, that changes.
+
+---
+
 ## 🔒 Security
 
 Security was a first-class goal of this build. Every connection is validated
@@ -632,7 +731,7 @@ like a credential path rather than a convenience:
 |---|---|
 | **Certificate validation** | Strict public-CA validation with hostname checking on every connection. The private-CA fallback is allowlisted to two known gateways, requires a private-CA verify code, and is permanently disabled for any host that has ever validated publicly - so a bad certificate cannot force a downgrade |
 | **Server identity** | SPKI public-key pins ship with the integration and are remembered on disk, so a swapped server key is caught across restarts, before any credential is sent |
-| **Logs & diagnostics** | Tokens, certificates and the captcha secret are masked; VIN, user ID, e-mail and device IDs are reduced to their last four characters. The diagnostics download is redacted separately, so a bug report is safe to attach |
+| **Logs & diagnostics** | Tokens, certificates and the captcha secret are masked; VIN, user ID, e-mail and device IDs are reduced to their last four characters. Masking matches key *names* and also the `{key, value}` parameter shape, where the field name is itself a value and a name-only pass sees nothing - the same blind spot that let the VIN out through a scheduled-charging field once. The diagnostics download runs a second, independent pass and scrubs the VIN from free-text error messages, so a bug report is safe to attach |
 | **Request building** | The VIN, user ID and server-supplied headers are rejected if they contain CR/LF, so a hostile backend value cannot smuggle a second request onto the authenticated socket |
 | **Stored secrets** | The mTLS private key is created `0600` from the first byte - never briefly world-readable - inside a `0700` directory |
 | **Identifiers** | VIN and user ID must match a strict charset before they reach a filesystem path or a request line |
@@ -749,6 +848,7 @@ custom_components/geely_connect/   the integration itself (what HACS installs)
 └── *.py                           platforms, API client, config flow, …
 automations/                       ready-to-paste automations
 blueprints/automation/             the same ideas as importable blueprints
+blueprints/script/                 rapid warm/cool including the seats, spaced
 dashboards/                        full dashboards (paste in Raw config editor)
 docs/images/                       the card screenshots in this README
 hacs.json                          HACS metadata

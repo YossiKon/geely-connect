@@ -1,0 +1,109 @@
+blueprint:
+  name: Geely Connect - Rapid warm/cool including the seats
+  description: >-
+    What the official app's Rapid Warming / Rapid Cooling does, including the
+    seats, spaced out so the car accepts every command.
+
+
+    The integration's Rapid Warming and Rapid Cooling presets already ask for
+    the seats inside their single compound request - and at least one EX5
+    accepts that request, echoes `paa.heat.11: 3` back for both front seats,
+    and still does not act on the seat half (issue #19). The individual Seat
+    Heat / Seat Vent entities travel a different channel and work reliably on
+    that same car, so this script fires the preset first and then those
+    entities, one at a time.
+
+
+    The gaps are the point. The car executes one remote command at a time and
+    rejects the next with "the last request has not yet been executed" - and a
+    rejected command is not queued, it is lost. Firing the seats immediately
+    after the preset is exactly what broke an owner's climate in v1.21.5, which
+    is why this lives in a script you can see and interrupt rather than on a
+    hidden timer inside the integration.
+
+
+    Create a script from this blueprint and put it on a dashboard button.
+  domain: script
+  homeassistant:
+    min_version: 2024.12.0
+  input:
+    climate_entity:
+      name: Climate entity
+      selector:
+        entity: { domain: climate, integration: geely_connect }
+    preset:
+      name: Which preset
+      description: >-
+        Rapid Cooling also cracks the windows and drops the setpoint to the
+        lowest the car allows; Rapid Warming raises it to the highest.
+      default: Rapid Cooling
+      selector:
+        select:
+          options:
+            - Rapid Cooling
+            - Rapid Warming
+    first_seat:
+      name: First seat (usually the driver's)
+      description: >-
+        The Seat Vent select for cooling, or the Seat Heat select for warming.
+        Leave it empty on a trim without the feature - an empty pick is skipped
+        rather than failing the script.
+      default: []
+      selector:
+        entity:
+          multiple: true
+          domain: select
+          integration: geely_connect
+    second_seat:
+      name: Second seat (usually the passenger's)
+      default: []
+      selector:
+        entity:
+          multiple: true
+          domain: select
+          integration: geely_connect
+    seat_level:
+      name: Seat level
+      default: High
+      selector:
+        select:
+          options: [Low, Medium, High]
+    first_gap:
+      name: Wait after the preset (seconds)
+      description: >-
+        Time for the car to finish the compound command. Thirty seconds is what
+        worked on the car that reported the problem; shorten it only after
+        checking your own log for rejections.
+      default: 30
+      selector:
+        number: { min: 10, max: 120, step: 5, unit_of_measurement: s }
+    seat_gap:
+      name: Wait between the two seats (seconds)
+      default: 10
+      selector:
+        number: { min: 5, max: 60, step: 5, unit_of_measurement: s }
+alias: Rapid climate including the seats
+icon: mdi:car-seat-cooler
+# Two presses in a row would interleave two command sequences and both would
+# lose commands to the car's queue, so a second run is dropped, not queued.
+mode: single
+max_exceeded: silent
+sequence:
+  - service: climate.set_preset_mode
+    target: { entity_id: !input climate_entity }
+    data: { preset_mode: !input preset }
+  - delay:
+      seconds: !input first_gap
+  # continue_on_error on both seat steps: the cabin command has already
+  # succeeded by here, so a seat the car refuses must not turn a working script
+  # into a failing one - and must not stop the other seat from being tried.
+  - service: select.select_option
+    continue_on_error: true
+    target: { entity_id: !input first_seat }
+    data: { option: !input seat_level }
+  - delay:
+      seconds: !input seat_gap
+  - service: select.select_option
+    continue_on_error: true
+    target: { entity_id: !input second_seat }
+    data: { option: !input seat_level }
