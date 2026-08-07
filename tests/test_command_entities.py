@@ -214,8 +214,15 @@ def test_generic_switch_state_comes_from_its_declared_path():
     data["vehicleStatus"]["additionalVehicleStatus"][
         "electricVehicleStatus"]["statusOfChargerConnection"] = "0"
     assert charging.is_on is False
+    # The path being absent no longer means unknown for THIS switch: the
+    # charging composite does not need statusOfChargerConnection, so a trim
+    # that omits it still gets a real answer (False here - no contactor, no
+    # current). The generic missing-value rule is pinned on another switch
+    # below, where it still applies.
     hass2, b2 = _bundle(_status())          # path absent entirely
-    assert sw.GeelySwitch(hass2, b2, *_switch_def(sw, "charging")[:-1]).is_on is None
+    assert sw.GeelySwitch(hass2, b2, *_switch_def(sw, "charging")[:-1]).is_on is False
+    parking = sw.GeelySwitch(hass2, b2, *_switch_def(sw, "parking_comfort")[:-1])
+    assert parking.is_on is None, "a switch with no composite still reads unknown"
 
 
 def test_parking_comfort_reports_unknown_rather_than_trusting_parkcomfortstate():

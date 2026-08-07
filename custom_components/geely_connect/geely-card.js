@@ -1268,6 +1268,7 @@
   class GeelyCardStrip extends GeelyCardBase {
     _watched() {
       return ["sensor.battery", "sensor.electric_range", "sensor.charging_power",
+        "sensor.charger_connection",
         "lock.doors", "climate.climate", "binary_sensor.connected",
         "binary_sensor.door_driver", "binary_sensor.door_passenger",
         "binary_sensor.door_rear_left", "binary_sensor.door_rear_right",
@@ -1348,9 +1349,17 @@
 
   class GeelyCardMini extends GeelyCardBase {
     _watched() {
+      // Everything _carState() reads has to be here: the render is skipped
+      // when the signature is unchanged, so an entity that is drawn but not
+      // watched freezes on screen - the door count and the charging label
+      // both did.
       return ["sensor.battery", "sensor.electric_range",
         "sensor.interior_temperature", "sensor.charging_power",
-        "lock.doors", "climate.climate", "binary_sensor.connected"];
+        "sensor.charger_connection",
+        "lock.doors", "climate.climate", "binary_sensor.connected",
+        "binary_sensor.door_driver", "binary_sensor.door_passenger",
+        "binary_sensor.door_rear_left", "binary_sensor.door_rear_right",
+        "binary_sensor.trunk", "binary_sensor.hood"];
     }
 
     getCardSize() { return 3; }
@@ -1487,9 +1496,17 @@
       // The driver sits left in LHD markets and right in RHD ones; the rear
       // door sensors are side-named already and never swap.
       const rhd = this._isRHD();
+      // The tire entities are named from the car's own driver/passenger
+      // fields under a left-hand-drive assumption, exactly like the front
+      // doors - tyreStatusDriver becomes tire_front_left. So on a
+      // right-hand-drive car all four mirror, or the drawing would put the
+      // driver's door on the right and the driver's tire on the left.
       const d = {
-        tires: { fl: tire("front_left"), fr: tire("front_right"),
-                 rl: tire("rear_left"), rr: tire("rear_right") },
+        tires: rhd
+          ? { fl: tire("front_right"), fr: tire("front_left"),
+              rl: tire("rear_right"), rr: tire("rear_left") }
+          : { fl: tire("front_left"), fr: tire("front_right"),
+              rl: tire("rear_left"), rr: tire("rear_right") },
         doors: { fl: isOpen(rhd ? "door_passenger" : "door_driver"),
                  fr: isOpen(rhd ? "door_driver" : "door_passenger"),
                  rl: isOpen("door_rear_left"), rr: isOpen("door_rear_right") },
@@ -1620,6 +1637,12 @@
     }
   }
 
+  // The elements this file owns, named once. The watchdog, the banner and the
+  // status line all count them, and a list that disagrees with reality is how
+  // #12 was misdiagnosed from a console banner claiming two cards.
+  const CARD_TAGS = ["geely-card", "geely-card-compact", "geely-card-top",
+                     "geely-card-mini", "geely-card-strip"];
+
   const registerElements = () => {
     defineOnce("geely-card-compact", GeelyCardCompact);
     defineOnce("geely-card-top", GeelyCardTop);
@@ -1706,7 +1729,7 @@
   // console separates "the file never ran" from "it ran and something else
   // is wrong" - the two have opposite fixes.
   console.info(
-    `%c GEELY-CARD %c ${VERSION} loaded - geely-card, geely-card-compact registered`,
+    `%c GEELY-CARD %c ${VERSION} loaded - ${CARD_TAGS.length} cards registered`,
     "background:#2fd6a4;color:#0b2b22;font-weight:600;border-radius:3px 0 0 3px",
     "background:#0b2b22;color:#2fd6a4;border-radius:0 3px 3px 0");
 

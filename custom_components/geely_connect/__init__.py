@@ -299,9 +299,18 @@ def _poll_signature(d: dict) -> tuple:
         # on a trim that never reports an engine state. It lives under
         # maintenanceStatus, not with the other driving fields.
         maint.get("odometer"),
-        # DC sessions move only these two (#10) - without them a fast charge
+        # A DC session moves this one cleanly - 0 to 3 at plug-in, back at
+        # unplug, "with no noise" in the #10 log - so without it a fast charge
         # can look like an idle car and slow its own polling down.
-        ev.get("dcDcConnectStatus"), ev.get("dcChargeIAct"),
+        #
+        # Its companion dcChargeIAct is deliberately NOT here, though it was
+        # for a day. The same log records the pack current wandering while
+        # DISCONNECTED - 1.6 A drifting, with a 412 A single-sample spike - and
+        # a field that changes on a parked car resets the idle streak on every
+        # poll, which pins the interval at base and stops the back-off ever
+        # reaching the cap. That back-off is what spares the owner's phone-app
+        # session, so noise must stay out of this tuple.
+        ev.get("dcDcConnectStatus"),
     )
 
 
@@ -424,7 +433,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Position wake (PAI) is expensive and actually wakes the car, so we do
         # NOT fire it every cycle. Only while driving, or once every Nth cycle
         # when parked. The rest of the time we serve the last-known GPS.
-        if was_driving or (cyc % _POSITION_EVERY == 1):
+        if was_driving or ((cyc - 1) % _POSITION_EVERY == 0):
             try:
                 await _call_with_retry(api.request_position_refresh)
             except GeelyAuthError as e:
@@ -483,8 +492,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # presses in four otherwise re-fetched nothing but the main status,
         # which made hunting an unmapped field in the _state block a matter
         # of luck (#4).
-        forced = poll_state.pop("force_secondary", False)
-        if forced or charging or was_charging or (cyc % _SECONDARY_EVERY == 1):
+        # (cyc - 1) % N == 0 rather than cyc % N == 1. The two are identical
+        # for every N above one - 1, 5, 9, 13 for N=4 - but n % 1 is always
+        # zero and never one, so the old shape was permanently FALSE in Manual
+        # mode, whose profile sets both divisors to 1 precisely to mean
+        # "fetch everything on every sync". Manual users got no vehicle-state
+        # block and no position at all, and the const.py comment promising the
+        # opposite made it invisible.
+        forced = poll_state.get("force_secondary", False)
+        if forced or charging or was_charging or ((cyc - 1) % _SECONDARY_EVERY == 0):
             try:
                 state_resp = await _call_with_retry(api.vehicle_status_state)
                 if state_resp.get("code") in _SUCCESS_CODES and isinstance(state_resp.get("data"), dict):
@@ -507,16 +523,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 _LOGGER.error("scheduled-charging fetch: TLS pin check failed: %s", e)
             except Exception as e:  # noqa: BLE001
                 _LOGGER.debug("scheduled-charging fetch non-fatal failure: %s", e)
+            # Cleared only once the fetch it asked for has actually been
+            # attempted to completion. Clearing it before, as this did for a
+            # day, meant one failed vehicle-state call silently swallowed the
+            # user's Refresh Data press and the next press was needed to try
+            # again.
+            if "_state" in data:
+                poll_state.pop("force_secondary", None)
 
         fail_state["consecutive"] = 0
 
         # Idle back-off tracking: if parked and nothing meaningful changed, grow
         # the idle streak so the interval stretches out (see _adaptive_interval).
         sig = _poll_signature(data)
-        # Counts identical polls, whatever the flags claim - that is what makes
-        # the stuck-flag guard in _adaptive_interval possible. A real drive
-        # changes speed, range or the odometer every time, so the streak stays
-        # at zero throughout and the fast interval holds.
+        # Counts identical polls whatever the DRIVING flag claims - that is
+        # what makes the stuck-flag guard in _adaptive_interval possible. A
+        # real drive changes speed, range or the odometer every time, so the
+        # streak stays at zero throughout and the fast interval holds.
+        #
+        # Charging is exempt, and deliberately: near the top of a charge the
+        # taper can hold chargeLevel and range still for several polls in a
+        # row, so counting those would slow a live charging session - the one
+        # thing #10 was about. A charge also ends on its own, unlike a flag
+        # that sticks, so it needs no ceiling.
         if not charging and sig == poll_state["sig"]:
             poll_state["idle"] += 1
         else:

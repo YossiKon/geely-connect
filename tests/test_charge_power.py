@@ -195,8 +195,14 @@ def test_junk_readings_do_not_raise():
 
 
 def test_a_negative_current_is_not_negative_power():
-    """Discharge on the same pins (V2L) must not read as negative charging."""
-    assert _power(_charging(chargeUAct="240.0", chargeIAct="-10.0")) == 0.0
+    """Discharge on the same pins (V2L) must not read as negative charging.
+
+    It used to read 0 kW, because the last-resort return handed back the raw
+    AC pair and the power sensor's own amps<=0 guard caught it. The leg
+    election now refuses an implausible pair outright, so the honest answer is
+    unknown - the point being only that a negative number never appears."""
+    v = _power(_charging(chargeUAct="240.0", chargeIAct="-10.0"))
+    assert v is None or v == 0.0, v
 
 
 # ----------------------------------------------- current and voltage pair ---
@@ -429,3 +435,67 @@ def test_a_real_dc_fast_charge_still_passes_the_wall():
                      dcChargeIAct="-198.9")
     assert _power(data) == 91.43
     assert _make("GeelyChargeVoltageSensor", data).native_value == 459.7
+
+
+def test_the_charging_switch_really_reads_the_composite():
+    """An audit deleted the composite branch from the switch and the suite
+    stayed green: the older test called load("switch") and then only asserted
+    on sensor._is_charging. This drives the entity itself."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    switch = load("switch")
+    mid = _dc_session(dcChargeUAct="459.7", dcChargeIAct="-198.9")
+    after = _status(statusOfChargerConnection="0", dcDcConnectStatus="0",
+                    dcChargeUAct="452.0", dcChargeIAct="0.5")
+
+    def _switch(data):
+        defn = next(d for d in switch.SWITCH_DEFS if d[0] == "charging")
+        hass = type("H", (), {"data": {}})()
+        bundle = {"coordinator": _Coord(data), "api": None, "vin": FAKE_VIN,
+                  "device_name": "Geely (0000)"}
+        return switch.GeelySwitch(hass, bundle, *defn[:-1])
+
+    assert _switch(mid).is_on is True, "a DC session must show the switch on"
+    assert _switch(after).is_on is False
+
+
+def test_the_charging_switch_works_without_the_raw_field_at_all():
+    """The composite exists so the connection field is not needed. A trim that
+    omits it entirely used to report unknown for a whole DC session, because
+    the missing-value guard ran first."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    switch = load("switch")
+    data = _dc_session(dcChargeUAct="459.7", dcChargeIAct="-198.9")
+    ev = data["vehicleStatus"]["additionalVehicleStatus"]["electricVehicleStatus"]
+    del ev["statusOfChargerConnection"]
+    defn = next(d for d in switch.SWITCH_DEFS if d[0] == "charging")
+    hass = type("H", (), {"data": {}})()
+    ent = switch.GeelySwitch(hass, {"coordinator": _Coord(data), "api": None,
+                                    "vin": FAKE_VIN, "device_name": "G"}, *defn[:-1])
+    assert ent.is_on is True
+
+
+def test_no_leg_at_all_beats_publishing_an_impossible_one():
+    """The last-resort returns used to hand back the raw pair, so 1586 V
+    reached Charge Voltage - which records long-term statistics - while Pack
+    Power rejected the same two numbers. Three entities disagreeing about one
+    payload is worse than a gap."""
+    data = _charging(dcDcConnectStatus="3", dcChargeUAct="1586",
+                     dcChargeIAct="16.1")
+    ev = data["vehicleStatus"]["additionalVehicleStatus"]["electricVehicleStatus"]
+    del ev["chargeUAct"], ev["chargeIAct"]
+    assert _make("GeelyChargeVoltageSensor", data).native_value is None
+    assert _make("GeelyChargeCurrentSensor", data).native_value is None
+    assert _power(data) is None
+    assert _make("GeelyPackPowerSensor", data).native_value is None
+
+
+def test_a_negative_ac_current_is_never_published_as_a_charge_current():
+    """V2L discharge on the AC pins: the wall rejects it for power, so it must
+    not slip out through the current entity either."""
+    data = _charging(chargeUAct="230", chargeIAct="-10")
+    ev = data["vehicleStatus"]["additionalVehicleStatus"]["electricVehicleStatus"]
+    del ev["dcChargeUAct"], ev["dcChargeIAct"]
+    amps = _make("GeelyChargeCurrentSensor", data).native_value
+    assert amps is None or amps >= 0, amps

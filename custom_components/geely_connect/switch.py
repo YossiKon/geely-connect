@@ -187,15 +187,19 @@ class GeelySwitch(CoordinatorEntity, SwitchEntity):
     @property
     def is_on(self) -> bool | None:
         v = _walk(self.coordinator.data or {}, self._state_path)
-        if v is None:
-            return None
         if self._key == "charging":
             # DC fast charge never moves statusOfChargerConnection off 1 on
             # some cars (#10); the composite in sensor._is_charging reads the
             # DC contactor and current sign as well, so the switch shows on
             # for the sessions that field misses.
+            # Checked before the missing-value guard below on purpose: the
+            # whole point of the composite is that it does not need this
+            # field, so a trim that omits statusOfChargerConnection entirely
+            # would otherwise report unknown through a whole DC session.
             from .sensor import _is_charging
             return _is_charging(self.coordinator.data or {})
+        if v is None:
+            return None
         return _state_in(v, self._on_when_in)
 
     async def async_turn_on(self, **_: Any) -> None:

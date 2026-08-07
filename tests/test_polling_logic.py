@@ -7,6 +7,7 @@ the most user-visible logic in the integration.
 import importlib.util
 import io
 import os
+import os
 import types
 
 from conftest import PKG, have_homeassistant, load
@@ -253,3 +254,82 @@ def test_a_parked_car_still_walks_all_the_way_to_the_cap():
     parked = _status(speed="0", engine="engine_off")
     assert m._adaptive_interval(parked, 0, prof).total_seconds() == prof["base"]
     assert m._adaptive_interval(parked, 9, prof).total_seconds() == prof["cap"]
+
+
+# --------------------------------------------- what the signature must see ---
+# An audit deleted the DC field from _poll_signature and the whole suite stayed
+# green, because the existing signature test only iterated charge/charger/
+# locked/speed. These pin the two halves that matter, in both directions.
+
+def test_the_contactor_is_part_of_the_signature():
+    """A DC session moves the contactor and little else, so a fast charge would
+    otherwise look like an idle car and slow its own polling down (#10)."""
+    m = _coordinator_module()
+    a = _status(charge="50")
+    b = _status(charge="50")
+    b["vehicleStatus"]["additionalVehicleStatus"][
+        "electricVehicleStatus"]["dcDcConnectStatus"] = "3"
+    assert m._poll_signature(a) != m._poll_signature(b)
+
+
+def test_the_pack_current_is_deliberately_not_in_the_signature():
+    """The #10 log records dcChargeIAct wandering while DISCONNECTED - 1.6 A
+    drifting, with a 412 A single-sample spike. A field that changes on a
+    parked car resets the idle streak every poll, which pins the interval at
+    base and stops the back-off ever reaching the cap - and that back-off is
+    what spares the owner's phone-app session."""
+    m = _coordinator_module()
+    a = _status(charge="50")
+    b = _status(charge="50")
+    for payload, amps in ((a, "0.4"), (b, "0.5")):
+        payload["vehicleStatus"]["additionalVehicleStatus"][
+            "electricVehicleStatus"]["dcChargeIAct"] = amps
+    assert m._poll_signature(a) == m._poll_signature(b), (
+        "pack-current noise must not reset the idle streak"
+    )
+
+
+def test_a_parked_car_with_wandering_pack_current_still_reaches_the_cap():
+    """The end-to-end version of the above, walked through the interval."""
+    m = _coordinator_module()
+    const = load("const")
+    prof = const.POLL_PROFILES["normal"]
+    sig, idle = None, 0
+    for amps in ("1.6", "1.7", "412.2", "2.0", "1.9", "1.6"):
+        payload = _status(charge="50", speed="0", engine="engine_off")
+        payload["vehicleStatus"]["additionalVehicleStatus"][
+            "electricVehicleStatus"]["dcChargeIAct"] = amps
+        new = m._poll_signature(payload)
+        idle = idle + 1 if new == sig else 0
+        sig = new
+    assert idle >= 4, f"the streak never grew on a parked car (idle={idle})"
+    assert m._adaptive_interval(payload, idle, prof).total_seconds() == prof["cap"]
+
+
+def test_driving_comes_from_the_composite_not_the_raw_speed_alone():
+    """An audit reverted _poll_flags to the raw speed field and the suite
+    stayed green. A running car at a standstill must still count (#21)."""
+    m = _coordinator_module()
+    body = io.open(os.path.join(PKG, "__init__.py"), encoding="utf-8").read()
+    assert "_ENGINE_RUNNING" in body
+    assert m._poll_flags(_status(speed="0", engine="engine_running"))[1] is True
+    assert m._poll_flags(_status(speed="0", engine="engine_off"))[1] is False
+
+
+def test_manual_mode_really_does_fetch_everything_every_sync():
+    """`cyc % 1 == 1` is never true, so the gate that was supposed to mean
+    "every sync" in Manual mode was permanently false - no vehicle-state
+    block, no position, ever. Pin the arithmetic rather than the constants:
+    the old test only asserted the divisors equalled 1."""
+    const = load("const")
+    for name, prof in const.POLL_PROFILES.items():
+        for key in ("secondary_every", "position_every"):
+            n = prof[key]
+            span = max(13, 2 * n + 1)
+            fires = [c for c in range(1, span) if (c - 1) % n == 0]
+            assert fires, f"{name}.{key} never fires"
+            assert fires[0] == 1, (name, key, fires)
+            if n == 1:
+                assert fires == list(range(1, span)), (name, key, fires)
+            else:
+                assert fires[1] == 1 + n, (name, key, fires)

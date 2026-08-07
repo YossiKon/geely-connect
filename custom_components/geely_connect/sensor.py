@@ -972,7 +972,14 @@ def _charge_leg(data: dict) -> tuple[float, float] | None:
     if str(_walk(data, (*_EV, "dcDcConnectStatus"))) == "3":
         if dc_ok:
             return (dc[0], abs(dc[1]))
-        return ac if ac is not None else dc
+        if ac_ok:
+            return ac
+        # Contactor closed but neither pair is usable. Returning the raw pair
+        # here used to publish exactly what the walls above exist to refuse -
+        # 1586 V as Charge Voltage, with a negative current behind it - while
+        # Pack Power rejected the same two numbers. Three entities disagreeing
+        # about one payload is worse than a gap.
+        return None
     # Contactor open or absent: an AC session when the AC pair is plausible.
     # The DC pair stays as fallback for trims that fast-charge without
     # reporting the contactor at all.
@@ -980,7 +987,7 @@ def _charge_leg(data: dict) -> tuple[float, float] | None:
         return ac
     if dc_ok:
         return (dc[0], abs(dc[1]))
-    return ac if ac is not None else dc
+    return None
 
 
 class GeelyChargePowerSensor(CoordinatorEntity, _AutoPrecision):
@@ -1109,7 +1116,9 @@ class GeelyPackPowerSensor(CoordinatorEntity, _AutoPrecision):
         except (TypeError, ValueError):
             return None
         # A traction pack lives between roughly 250 V (a flat 400 V-class
-        # pack) and 800 V (a full 800 V-class one). One car reports
+        # pack) and 800 V (a full 800 V-class one); the window enforced here is
+        # wider on purpose - 100 to 900 - so an unfamiliar pack chemistry is
+        # not called impossible on our say-so. One car reports
         # dcChargeUAct climbing through 1575, 1580, 1586 while AC charging
         # (#17), which multiplied out to a -25 kW pack flow on a 6.7 kW
         # wallbox (#22) - and this entity feeds long-term statistics, so a

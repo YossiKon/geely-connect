@@ -33,7 +33,16 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -c "import json; print('\n'.join(json.load(open('custom_components/geely_connect/manifest.json'))['requirements']))" > requirements-ci.txt
-          python -m pip install -r requirements-ci.txt homeassistant coverage
+          python -m pip install -r requirements-ci.txt homeassistant coverage playwright
+
+      # The cards are JavaScript, and four of their fixes are invisible to a
+      # Python test - a registry-wiping polyfill, the 12V-battery prefix
+      # collision, which side the driver sits on, and whether a card watches
+      # what it draws. tests/test_cards_in_a_browser.py drives the real file in
+      # Chromium and skips itself when the browser is absent, so this step is
+      # what makes those cases enforced rather than decorative.
+      - name: Install Chromium for the card tests
+        run: python -m playwright install --with-deps chromium
 
       # The suite covers every line of the integration; keep it that way.
       # A PR that adds uncovered code fails here - either test it or discuss

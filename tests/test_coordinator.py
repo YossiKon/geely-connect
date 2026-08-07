@@ -101,12 +101,19 @@ def test_a_manual_refresh_forces_the_secondary_endpoints():
     main status - which made hunting an unmapped field in the vehicle-state
     block a matter of luck (#4)."""
     body = _update_body()
-    assert 'poll_state.pop("force_secondary"' in body, (
+    assert 'poll_state.get("force_secondary"' in body, (
         "a forced fetch must be able to bypass the cycle counter"
     )
-    forced = body.index('poll_state.pop("force_secondary"')
+    forced = body.index('poll_state.get("force_secondary"')
     gate = body.index("charging or was_charging or")
     assert forced < gate, "the flag has to be read before the gate uses it"
+    # ...and cleared only after the fetch it asked for has been attempted, or
+    # one failed vehicle-state call silently swallows the user's press.
+    cleared = body.index('poll_state.pop("force_secondary"')
+    assert cleared > gate, (
+        "clearing the flag before the fetch discards a Refresh press when the "
+        "secondary call fails"
+    )
     btn = io.open(os.path.join(PKG, "button.py"), encoding="utf-8").read()
     assert '"force_secondary"] = True' in btn, (
         "the Refresh Data button is what sets the flag"

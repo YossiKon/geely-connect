@@ -76,6 +76,11 @@
         entity_id: climate.my_geely_ex5_climate
       data:
         preset_mode: Rapid Warming
+    # The car executes one remote command at a time and rejects the next with
+    # "the last request has not yet been executed" - so the setpoint below has
+    # to wait for the preset above to land. Firing them back to back left one
+    # owner's climate not running at all (issue #19).
+    - delay: "00:00:30"
     # This single call both switches the climate on and sets the target, so
     # there is no separate climate.set_hvac_mode step - one less remote
     # command sent to the car.
@@ -130,6 +135,8 @@
         entity_id: climate.my_geely_ex5_climate
       data:
         preset_mode: Rapid Cooling
+    # Same reason as the pre-heat above: one command at a time.
+    - delay: "00:00:30"
     # TUNE: cabin target temperature. Valid range is 15.5-28.5 C.
     - action: climate.set_temperature
       target:

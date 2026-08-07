@@ -262,23 +262,35 @@ def test_turning_on_sends_ac_with_the_cached_setpoint():
     assert e.hvac_mode == HVACMode.HEAT_COOL, "optimistic state must follow"
 
 
-def test_turning_off_a_defrosting_car_stops_both_circuits():
-    """Stopping only the AC leaves defrost running, and the entity flips back
-    to on when the optimistic window closes - the user pressed Off and the
-    car must actually go off."""
+def test_turning_off_a_defrosting_car_stops_the_ac_and_says_so():
+    """This test used to assert the opposite - two commands, AC then defrost -
+    and in doing so enshrined a bug. The car executes one remote command at a
+    time and rejects the next with "the last request has not yet been
+    executed", so the second stop failed, the exception skipped the optimistic
+    update, and the user got an error toast for an action that had worked. The
+    fake API here cannot reject, which is why the suite never noticed.
+
+    One command now. And rather than claim Off while the defroster is still
+    running - which would flip back when the optimistic window closed, the
+    original reason for chaining - the entity keeps reporting heat_cool,
+    because that is the truth. switch.defrost stops the defroster in its own
+    single command."""
     _ha()
     const = load("const")
+    from homeassistant.components.climate import HVACMode
     e, api, c = _entity(_status(defrost="1"))
     with _quiet_refresh(c):
         asyncio.run(e.async_turn_off())
-    assert len(api.calls) == 2
+    assert len(api.calls) == 1, api.calls
     assert api.calls[0][2] == "stop"
-    assert api.calls[1][1] == [{"key": const.RCE_KEY_CONDITIONER,
-                               "value": const.RCE_VAL_DEFROST}]
+    assert api.calls[0][1][0] == {"key": const.RCE_KEY_CONDITIONER,
+                                  "value": const.RCE_VAL_AC}
+    assert e.hvac_mode == HVACMode.HEAT_COOL, "defrost is still running"
     e2, api2, _ = _entity(_status())
     with _quiet_refresh(c):
         asyncio.run(e2.async_turn_off())
-    assert len(api2.calls) == 1, "no defrost running -> no second command"
+    assert len(api2.calls) == 1
+    assert e2.hvac_mode == HVACMode.OFF, "nothing left running -> Off"
 
 
 def test_set_temperature_clamps_fires_and_only_then_caches():
@@ -453,3 +465,30 @@ def test_the_bundle_still_asks_for_the_seats_itself():
     _, kw = api.calls[0]
     assert kw["heat_seats"] == ["11", "19"]
     assert kw["vent_seats"] is None
+
+
+def test_turning_the_climate_off_sends_one_command_even_with_defrost_running():
+    """The car executes one remote command at a time. Chaining a defrost stop
+    behind the AC stop meant the second was rejected, the exception skipped the
+    optimistic update, and the user got an error for an action that worked -
+    the same double-fire that broke rapid warming (#19)."""
+    _ha()
+    c = load("climate")
+    from homeassistant.components.climate import HVACMode
+    e, api, _ = _entity(_status(defrost="1"))
+    with _quiet_refresh(c):
+        asyncio.run(e.async_set_hvac_mode(HVACMode.OFF))
+    assert len(api.calls) == 1, api.calls
+    # And it must not claim Off while the defroster is still running.
+    assert e.hvac_mode == HVACMode.HEAT_COOL
+
+
+def test_turning_the_climate_off_without_defrost_claims_off_immediately():
+    _ha()
+    c = load("climate")
+    from homeassistant.components.climate import HVACMode
+    e, api, _ = _entity(_status())
+    with _quiet_refresh(c):
+        asyncio.run(e.async_set_hvac_mode(HVACMode.OFF))
+    assert len(api.calls) == 1
+    assert e.hvac_mode == HVACMode.OFF
