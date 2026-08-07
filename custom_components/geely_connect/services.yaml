@@ -27,10 +27,9 @@ fire_rapid:
     heat_seats:
       name: Heated seat positions
       description: >
-        Positions to request seat heating for. The presets send 11 (driver) and
-        19 (passenger), which one EX5 accepts and ignores - candidates worth
-        trying are front-left / front-right (what the RCE_2 seat entities use
-        and the car honours), and low integers such as 1 and 2.
+        Positions to request seat heating for. 11 is the driver and 19 the
+        passenger - verified on a real EX5, which warmed both seats from this
+        service, so these are the values the climate presets send.
       required: false
       default: []
       example: '["front-left", "front-right"]'

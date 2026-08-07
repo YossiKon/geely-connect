@@ -40,6 +40,14 @@
     "charger_plug", "total_mileage", "refresh_data", "unlock_trunk",
     "door_driver", "12v_battery", "trip_meter", "fuel_level", "fuel_range",
     "pack_power", "efficiency", "find_car", "connected", "defrost", "sunroof",
+    // Average Speed and Engine Speed both produce ids ending in "_speed", and
+    // Engine State is read for the driving lock, so all three are listed: the
+    // sort below is longest-first, which is what stops a renamed trip-average
+    // entity resolving as the live speed and pinning every card to "Driving".
+    // These are entity-id spellings, not the definition keys - the sensors set
+    // has_entity_name, so the id comes from the friendly name ("Average Speed"
+    // is keyed `avg_speed` and lands at `..._average_speed`).
+    "average_speed", "engine_speed", "engine_state",
     "charging", "climate", "battery", "trunk", "doors", "speed", "hood",
   ].sort((a, b) => b.length - a.length);
 
@@ -62,6 +70,16 @@
     "KE", "LK", "LS", "MT", "MU", "MW", "MY", "NA", "NG", "NP", "NZ", "PG",
     "PK", "SG", "SZ", "TT", "TZ", "UG", "ZA", "ZM", "ZW",
   ]);
+
+  /* Engine-state readings that mean the car is live. Mirrors _ENGINE_RUNNING in
+   * __init__.py, plus "running" as the mapped display value the sensor shows. */
+  const DRIVING_STATES = new Set([
+    "engine_running", "running", "on", "1", "true",
+  ]);
+
+  /* Folded into every card's change signature on top of its own list, because
+   * the driving banner is drawn for all of them by the base class. */
+  const ALWAYS_WATCHED = ["sensor.speed", "sensor.engine_state"];
 
   const ACCENT = "var(--geely-accent, #2fd6a4)";
   const AMBER = "var(--geely-warn, #e8a13a)";
@@ -300,6 +318,9 @@
   /* One cohesive hand-drawn stroke set - 24px grid, 1.8 stroke, round caps. */
 
   const ICONS = {
+    driving: `<path d="M3.5 14.5h17M5 14.5l1.7-4.6A2 2 0 0 1 8.6 8.5h6.8a2 2 0 0 1 1.9 1.4l1.7 4.6"/>
+              <path d="M4.5 14.5v3h3v-3M16.5 14.5v3h3v-3"/>
+              <circle cx="7.5" cy="15.6" r="1.1"/><circle cx="16.5" cy="15.6" r="1.1"/>`,
     lock: `<rect x="5" y="10.5" width="14" height="9.5" rx="2.5"/>
            <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/><circle cx="12" cy="15.2" r="1.4"/>`,
     unlock: `<rect x="5" y="10.5" width="14" height="9.5" rx="2.5"/>
@@ -433,6 +454,29 @@
     .act.armed { color: ${AMBER}; border-color: ${AMBER}; animation: geely-arm 1s ease infinite; }
     .act.armed span { color: ${AMBER}; }
     .act[disabled] { opacity: .35; pointer-events: none; }
+
+    /* While the car is moving. Amber rather than red: nothing is wrong, the
+     * controls are simply not available yet. */
+    .driving {
+      display: flex; align-items: center; gap: 10px;
+      margin: 0 0 14px; padding: 9px 12px;
+      border-radius: 12px;
+      border: 1px solid color-mix(in srgb, ${AMBER} 40%, transparent);
+      background: color-mix(in srgb, ${AMBER} 12%, transparent);
+      color: ${AMBER};
+    }
+    .driving svg { width: 20px; height: 20px; flex: none; }
+    .driving span {
+      display: flex; flex-direction: column; gap: 1px; min-width: 0;
+      font-size: 11px; line-height: 1.35;
+      color: var(--secondary-text-color, #7a7f87);
+    }
+    .driving b {
+      font-size: 10px; font-weight: 700; letter-spacing: .18em;
+      text-transform: uppercase; color: ${AMBER};
+    }
+    /* Every disabled control reads the same, whichever class the card used. */
+    .blocked { opacity: .35 !important; pointer-events: none; filter: saturate(.4); }
     @keyframes geely-arm { 50% { border-color: color-mix(in srgb, ${AMBER} 35%, transparent); } }
     .bar { position: relative; height: 5px; border-radius: 999px; overflow: hidden;
            background: color-mix(in srgb, currentColor 12%, transparent); }
@@ -655,7 +699,12 @@
 
     _signature(hass) {
       if (!this._prefix) return "no-prefix";
-      return this._watched()
+      // ALWAYS_WATCHED is added to whatever the card listed. The driving banner
+      // and the action lock are rendered by this base class for all five cards,
+      // so a card that forgot to watch these would freeze its banner on screen
+      // - exactly how the door count and the charging label froze before. One
+      // rule here cannot be forgotten by the sixth card.
+      return [...new Set(this._watched().concat(ALWAYS_WATCHED))]
         .map((e) => {
           const st = this._st(e);
           if (!st) return "-";
@@ -695,7 +744,42 @@
       this._sig = ""; this._safeRender();
     }
 
+    /* Is the car being driven?
+     *
+     * Deliberately the same test the integration's own poller uses: engine
+     * running OR any speed. Speed alone reads 0 at every red light, so a card
+     * keyed on it would unlock its buttons at each stop; the ignition state
+     * stays on through those, and on a trim that never reports it this reduces
+     * to the speed test on its own.
+     *
+     * `sensor.engine_state` is a display value ("Running"), but a trim whose
+     * raw value is not in the map passes it through unchanged, so both
+     * spellings count.
+     */
+    _isDriving() {
+      const speed = NUM(this._st("sensor.speed"));
+      if (speed != null && speed > 0) return true;
+      const eng = this._st("sensor.engine_state");
+      const raw = eng ? String(eng.state).trim().toLowerCase() : "";
+      return DRIVING_STATES.has(raw);
+    }
+
+    /* The banner every card shows while the car is moving. Rendered by each
+     * card at the top of its shell, so it reads the same everywhere. */
+    _drivingNotice() {
+      if (!this._isDriving()) return "";
+      return `<div class="driving" role="status">${icon("driving")}
+        <span><b>Driving</b>Remote actions are unavailable until the car is parked</span>
+      </div>`;
+    }
+
     _onAction(key) {
+      // The buttons are disabled while driving, but a disabled button is a
+      // styling promise, not a lock: keyboard activation and anything that
+      // reaches this method another way would still fire a command the car is
+      // going to refuse. Refresh is a read, and live data is exactly what is
+      // wanted mid-drive, so it stays.
+      if (key !== "refresh" && this._isDriving()) return;
       switch (key) {
         case "lock": this._call("lock", "lock", "doors"); break;
         case "unlock": this._guarded("unlock", () => this._call("lock", "unlock", "doors")); break;
@@ -781,6 +865,27 @@
             this._call("time", "set_value", el.dataset.time, { time: `${el.value}:00` });
           }
         }));
+      if (this._isDriving()) this._lockActions();
+    }
+
+    /* Grey out and disable every control while the car is moving.
+     *
+     * Applied after wiring rather than woven through each card's markup: the
+     * five cards build their buttons in five different places, and a rule
+     * expressed once here cannot be forgotten by the sixth. Refresh Data is
+     * left alone - it reads, and it is the one thing worth pressing mid-drive.
+     */
+    _lockActions() {
+      this.shadowRoot.querySelectorAll("[data-act]").forEach((el) => {
+        if (el.dataset.act === "refresh") return;
+        el.setAttribute("disabled", "");
+        el.setAttribute("aria-disabled", "true");
+        el.classList.add("blocked");
+      });
+      this.shadowRoot.querySelectorAll("input[data-time]").forEach((el) => {
+        el.setAttribute("disabled", "");
+        el.classList.add("blocked");
+      });
     }
 
     _preset() {
@@ -985,6 +1090,7 @@
         .carwrap { flex:1; max-width:300px; margin-left:auto; }
         </style>
         <div class="shell">
+          ${this._drivingNotice()}
           <div class="head">
             <div class="title">
               <i class="dot ${online && online.state === "off" ? "off" : ""}"></i>
@@ -1115,6 +1221,7 @@
         .footer .micro { letter-spacing:.1em; }
         </style>
         <div class="shell">
+          ${this._drivingNotice()}
           <div class="head">
             <div>
               <div class="title">
@@ -1290,7 +1397,14 @@
       const power = NUM(this._st("sensor.charging_power"));
       const locked = s.locked && s.locked.state === "locked";
       const online = this._st("binary_sensor.connected");
-      const statusLine = s.charging
+      // Driving outranks everything else on this line. These two cards are one
+      // row tall by design, so the banner the larger cards show would double
+      // their height: the status line carries the same message instead, and the
+      // buttons beside it are greyed out either way.
+      const driving = this._isDriving();
+      const statusLine = driving
+        ? "Driving · actions locked"
+        : s.charging
         ? `Charging${power != null ? " · " + power.toFixed(1) + " kW" : ""}`
         : s.doorsOpen.length ? `${s.doorsOpen.length} open`
         : locked ? "Locked" : s.locked ? "Unlocked" : "Parked";
@@ -1325,7 +1439,7 @@
                 <span class="num rng ${OK(s.range) ? "" : "unavail"}">${range}<span class="u">km</span></span>
                 <span class="pct">${batt}%</span>
               </div>
-              <div class="status ${s.charging ? "charging" : s.doorsOpen.length ? "warn" : ""}">${esc(statusLine)}</div>
+              <div class="status ${driving ? "warn" : s.charging ? "charging" : s.doorsOpen.length ? "warn" : ""}">${esc(statusLine)}</div>
             </div>
             <div class="actions">
               ${locked
@@ -1377,7 +1491,14 @@
       const locked = s.locked && s.locked.state === "locked";
       const preset = this._preset();
       const online = this._st("binary_sensor.connected");
-      const statusLine = s.charging
+      // Driving outranks everything else on this line. These two cards are one
+      // row tall by design, so the banner the larger cards show would double
+      // their height: the status line carries the same message instead, and the
+      // buttons beside it are greyed out either way.
+      const driving = this._isDriving();
+      const statusLine = driving
+        ? "Driving · actions locked"
+        : s.charging
         ? `Charging${power != null ? " · " + power.toFixed(1) + " kW" : ""}`
         : s.doorsOpen.length ? `${s.doorsOpen.length} open`
         : locked ? "Locked" : s.locked ? "Unlocked" : "Parked";
@@ -1413,7 +1534,7 @@
           </div>
           <div class="mid">
             <span class="num n ${OK(s.range) ? "" : "unavail"}">${range}</span><span class="u">km</span>
-            <div class="status ${s.charging ? "charging" : s.doorsOpen.length ? "warn" : ""}">${esc(statusLine)}</div>
+            <div class="status ${driving ? "warn" : s.charging ? "charging" : s.doorsOpen.length ? "warn" : ""}">${esc(statusLine)}</div>
           </div>
           <div class="actions">
             ${locked
@@ -1544,6 +1665,7 @@
         .footer .micro { letter-spacing:.1em; }
         </style>
         <div class="shell">
+          ${this._drivingNotice()}
           <div class="head">
             <div>
               <div class="title">

@@ -50,8 +50,14 @@ window.mkHass = (opts) => {
   put(`binary_sensor.${P}_door_rear_right`, "off");
   put(`binary_sensor.${P}_trunk`, "off");
   put(`binary_sensor.${P}_hood`, "off");
+  put(`sensor.${P}_speed`, opts.speed === undefined ? "0" : opts.speed,
+      { unit_of_measurement: "km/h" });
+  put(`sensor.${P}_engine_state`, opts.engine || "Off");
+  const served = [];
   return { states: S, entities: E, devices: { d: { name: "Geely EX5" } },
-           config: { country: opts.country || "IL" }, callService: () => {} };
+           config: { country: opts.country || "IL" },
+           serviceCalls: served,
+           callService: (d, s, data) => served.push([d, s, data]) };
 };
 """
 
@@ -276,3 +282,151 @@ def test_no_card_renders_an_entity_it_does_not_watch():
         watched = src[start:end]
         missing = sorted(e for e in from_carstate if f'"{e}"' not in watched)
         assert not missing, f"{cls} renders _carState() but does not watch {missing}"
+
+
+# --------------------------------------- the car is moving: nothing to press
+
+def _driving_probe():
+    """One expression, evaluated against a mounted card."""
+    return """{
+        banner: !!el.shadowRoot.querySelector(".driving"),
+        text: (el.shadowRoot.querySelector(".driving span") ||
+               el.shadowRoot.querySelector(".status") || {}).textContent || "",
+        live: [...el.shadowRoot.querySelectorAll("[data-act]")]
+                .filter((b) => !b.hasAttribute("disabled"))
+                .map((b) => b.dataset.act),
+        timers: [...el.shadowRoot.querySelectorAll("input[data-time]")]
+                .filter((i) => !i.hasAttribute("disabled")).length,
+    }"""
+
+
+def test_every_card_says_the_car_is_driving_and_offers_nothing_to_press():
+    """Asked for directly: while the car is moving each card should say so and
+    refuse to offer actions. The two one-row cards carry the words on their
+    status line instead of a banner - a banner would double their height - so
+    the assertion is on the wording, not on the element."""
+    for tag in CARD_TAGS:
+        got = _mount(tag, _driving_probe(), speed="63", engine="Running")
+        assert "Driving" in got["text"], (tag, got)
+        # Refresh is a read, not a command, and live data is the one thing worth
+        # having mid-drive - everything else has to be disabled.
+        assert got["live"] in ([], ["refresh"]), (tag, got["live"])
+        assert got["timers"] == 0, (tag, got["timers"])
+
+
+def test_a_parked_car_still_has_all_of_its_buttons():
+    """The other half of the same promise. A lock that cannot be lifted is the
+    worse bug of the two."""
+    for tag in CARD_TAGS:
+        got = _mount(tag, _driving_probe(), speed="0", engine="Off")
+        assert got["banner"] is False, tag
+        assert "Driving" not in got["text"], (tag, got["text"])
+        assert got["live"], f"{tag} has no usable buttons while parked"
+
+
+def test_a_car_stopped_at_a_light_is_still_driving():
+    """Speed reads 0 at every red light. Keying the lock on speed alone would
+    hand the buttons back at each stop and take them away again on pulling
+    away - the ignition state is what stays put, which is the same reason the
+    poller reads both (#21)."""
+    for tag in ("geely-card", "geely-card-mini"):
+        got = _mount(tag, _driving_probe(), speed="0", engine="Running")
+        assert "Driving" in got["text"], (tag, got)
+        assert got["live"] in ([], ["refresh"]), (tag, got["live"])
+
+
+def test_a_trim_that_never_reports_an_engine_state_falls_back_to_speed():
+    """`engine_state` is absent on some trims, where the test has to reduce to
+    the old speed check rather than concluding "parked" for ever."""
+    got = _mount("geely-card", _driving_probe(), speed="41", engine="unknown")
+    assert "Driving" in got["text"], got
+
+
+def test_no_command_is_sent_while_driving_even_if_a_button_is_reached():
+    """A disabled attribute is a styling promise, not a lock: keyboard
+    activation and anything that dispatches a click another way would still
+    fire a command the car is about to refuse."""
+    script = """() => {
+        const el = document.createElement("geely-card");
+        document.body.appendChild(el);
+        el.setConfig({});
+        const hass = window.mkHass({ speed: "63", engine: "Running" });
+        el.hass = hass;
+        // Straight at the handler, past the disabled attribute entirely.
+        el._onAction("unlock"); el._onAction("unlock");
+        el._onAction("climate"); el._onAction("trunk");
+        const blocked = hass.serviceCalls.length;
+        el.hass = window.mkHass({ speed: "0", engine: "Off" });
+        el._onAction("lock");
+        return { blocked, afterParking: el._hass.serviceCalls.length };
+    }"""
+    got = _evaluate(script)
+    assert got["blocked"] == 0, f"{got['blocked']} commands escaped while driving"
+    assert got["afterParking"] == 1, "the lock did not lift once parked"
+
+
+def test_refresh_still_works_while_driving():
+    """Deliberately exempt: it reads the car rather than commanding it, and a
+    moving car is when fresh data is worth most."""
+    script = """() => {
+        const el = document.createElement("geely-card");
+        document.body.appendChild(el);
+        el.setConfig({});
+        const hass = window.mkHass({ speed: "63", engine: "Running" });
+        el.hass = hass;
+        el._onAction("refresh");
+        return hass.serviceCalls.map((c) => c[0] + "." + c[1]);
+    }"""
+    assert _evaluate(script) == ["button.press"]
+
+
+def test_the_banner_appears_without_any_other_state_changing():
+    """The render is skipped when the watched signature is unchanged, so if the
+    driving entities are not in it the banner never appears - or worse, appears
+    and then stays after the car parks. Nothing else moves between these two
+    assignments."""
+    script = """() => {
+        const out = [];
+        const el = document.createElement("geely-card-compact");
+        document.body.appendChild(el);
+        el.setConfig({});
+        el.hass = window.mkHass({ speed: "0", engine: "Off" });
+        out.push(!!el.shadowRoot.querySelector(".driving"));
+        el.hass = window.mkHass({ speed: "0", engine: "Running" });
+        out.push(!!el.shadowRoot.querySelector(".driving"));
+        el.hass = window.mkHass({ speed: "0", engine: "Off" });
+        out.push(!!el.shadowRoot.querySelector(".driving"));
+        return out;
+    }"""
+    assert _evaluate(script) == [False, True, False]
+
+
+def test_a_renamed_trip_average_is_not_mistaken_for_the_live_speed():
+    """`avg_speed` and `engine_speed` both end in `_speed`. The suffix map is
+    only consulted once a strict id is missing - i.e. after a rename - and a
+    trip average above zero would then pin every card to "Driving" for good.
+    Longest-suffix-first is what prevents it, the same rule that stops the 12V
+    battery masquerading as the pack."""
+    script = """() => {
+        const el = document.createElement("geely-card");
+        document.body.appendChild(el);
+        el.setConfig({});
+        const hass = window.mkHass({ speed: "0", engine: "Off" });
+        // The owner renamed the live speed sensor away; the trip average, which
+        // still reads 47 km/h from this morning's drive, is all that is left.
+        delete hass.states["sensor.car_speed"];
+        hass.states["sensor.car_average_speed"] =
+          { entity_id: "sensor.car_average_speed", state: "47", attributes: {} };
+        hass.entities["sensor.car_average_speed"] =
+          { platform: "geely_connect", device_id: "d" };
+        el.hass = hass;
+        return {
+            resolved: el._eid("sensor", "speed"),
+            driving: el._isDriving(),
+            banner: !!el.shadowRoot.querySelector(".driving"),
+        };
+    }"""
+    got = _evaluate(script)
+    assert got["resolved"] != "sensor.car_average_speed", got
+    assert got["driving"] is False, got
+    assert got["banner"] is False, got

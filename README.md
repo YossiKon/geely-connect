@@ -159,6 +159,17 @@ everything else.
 
 ## 🖥️ Dashboards & cards
 
+> **While the car is being driven, every card locks itself.** The three larger
+> cards show a banner - *"Driving · remote actions are unavailable until the car
+> is parked"* - and the two one-row cards say the same thing on their status
+> line; every button and time field is greyed out, and the handler refuses the
+> command even if a button is reached another way. **Refresh Data stays live**,
+> because it reads the car rather than commanding it, and a moving car is when
+> fresh data is worth most. Driving means *engine running or any speed*, the same
+> test the poller uses - speed alone reads 0 at every red light, and a lock keyed
+> on it would hand the buttons back at each stop. A car that reports neither
+> field is never locked.
+
 ### 🚙 The built-in cards - zero setup
 
 The integration ships **five custom cards** and registers them by itself - no
@@ -262,6 +273,7 @@ All of these are created **enabled** - nothing to switch on by hand.
 |---|---|
 | Interior Temperature | Cabin temp (°C) |
 | Exterior Temperature | Outside temp (°C) - **treat with suspicion**, see [Known limitations](#%EF%B8%8F-known-limitations). Owners of both the Starray and the EX5 have measured it ten degrees out |
+| Steering Wheel Heating | On / off, on the trims that have it. Read-only: the reading was measured on a real car (1 means heating at any level, 2 means off) but no command for it has ever been verified, so there is deliberately no switch. Unknown on a car that does not report the field |
 
 ### Tires
 Two sets of four, one reading each corner:
@@ -675,13 +687,21 @@ than daily use:
 The presets ask for the front seats inside the same single request they use for
 the cabin - heat when warming, ventilation when cooling, both at the highest
 level, with the setpoint driven to the lowest or highest temperature the car
-advertises. On at least one EX5 the cloud **accepts** that request, echoes the
-seats back, and the car acts on the cabin only. Until the position encoding is
-settled, the reliable route is the individual Seat Heat / Seat Vent entities,
-which work on that same car - and
+advertises.
+
+An owner reported the cabin warming and the seats staying cold, and for a while
+the suspicion was the seat position encoding. **It is not.** He fired the exact
+same request by hand with `fire_rapid` and both seats went to high, so the
+positions the presets send are correct and the request was never the problem.
+What differed between the two paths was the read-back: the preset polled the car
+once, eight seconds after firing, and the seat state arrives in the car's own
+time - so the seat *entities* could read Off while the seats were warming, with
+nothing polling again to correct them. The presets poll twice now.
+
 [`blueprints/script/geely_connect/rapid_climate_with_seats.yaml`](blueprints/script/geely_connect/rapid_climate_with_seats.yaml)
-wires the two together with the pauses the car needs. Import it, create a script,
-put it on a button.
+is still there if your car genuinely ignores the bundled seat block: it fires the
+preset and then the individual Seat Heat / Seat Vent entities, spaced out so the
+car accepts every command.
 
 **Fan speed is not available.** No field for the blower exists anywhere in this
 API - not in the accepted parameters of the rapid command, and not as a

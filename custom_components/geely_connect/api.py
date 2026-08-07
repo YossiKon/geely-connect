@@ -1226,17 +1226,16 @@ class GeelyApi:
         buttons (bizType=7). Bundles AC + seat heat OR vent + window vent
         in a single shot.
 
-        seats: numeric Zeekr-style positions - 11=driver, 19=passenger.
+        seats: numeric positions - 11=driver, 19=passenger. Verified on a real
+        EX5 (#19): the owner fired exactly this body through the `fire_rapid`
+        service and both front seats went to high, which settled a long-running
+        suspicion that the encoding was wrong. It is not - when the seats appear
+        not to respond, suspect the read-back timing instead, because the seat
+        state arrives in `climateStatus` after the request is already accepted.
 
-        `level` and `extra` exist for the `fire_rapid` probe service, not for
-        the entities. The seat block in this body is *accepted* - a real EX5
-        echoed `paa.heat.11: 3` and `paa.heat.19: 3` back on Success (#19) -
-        and the car still did not act on it, while the same seats respond
-        reliably to RCE_2 addressed by name. Deciding whether the fault is the
-        position encoding needs this body varied by hand against one car, so
-        the probe can set the level and merge arbitrary fields. `extra` is
-        applied last and may therefore override a computed key: that is
-        deliberate, and it is why nothing but the probe passes it.
+        `level` and `extra` exist for the `fire_rapid` probe service rather than
+        the entities. `extra` is applied last and may therefore override a
+        computed key: deliberate, and the reason nothing but the probe passes it.
         """
         body: dict = {
             "ac": "true" if ac else "false",

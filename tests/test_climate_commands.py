@@ -529,3 +529,27 @@ def test_rapid_cooling_asks_for_both_seats_at_the_highest_level():
     assert kw.get("level", "3") == "3"
     # Window venting is part of cooling and must not fire while warming.
     assert kw["vlt"] is True
+
+
+def test_a_rapid_preset_polls_twice_so_the_seat_entities_catch_up():
+    """The seat state arrives in climateStatus on the car's own schedule. A
+    single poll eight seconds after firing can land before the seats are
+    reported, and nothing followed it - so the seat entities read Off while the
+    seats were warming, which is very likely what "it only turns on the heater"
+    was (#19). The request itself is proven: the reporter fired the identical
+    body by hand and both seats went to high."""
+    _ha()
+    c = load("climate")
+    seen = []
+    orig = c.schedule_refresh
+    c.schedule_refresh = lambda hass, coord, *delays, **kw: seen.append(delays)
+    try:
+        e, api, _ = _entity(_status())
+        asyncio.run(e.async_set_preset_mode(c.PRESET_RAPID_WARMING))
+    finally:
+        c.schedule_refresh = orig
+    assert len(api.calls) == 1, "the read-back must not have become a second command"
+    assert seen and len(seen[0]) >= 2, (
+        f"the rapid preset still polls only once: {seen}")
+    # Relative and cumulative, so the second read lands well after the first.
+    assert sum(seen[0]) >= 20, seen

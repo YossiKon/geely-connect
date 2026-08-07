@@ -348,3 +348,57 @@ def test_a_failed_poll_does_not_strand_an_optimistic_state():
 
     assert asyncio.run(run(False)) is True, "after() skipped on the happy path"
     assert asyncio.run(run(True)) is True, "a failed refresh stranded the entity"
+
+
+# ------------------------------- #4: steering-wheel heat, read-only ---------
+
+def _steering(value):
+    """One steering-wheel binary sensor over a climateStatus with `value`."""
+    import copy
+    data = copy.deepcopy(STATUS)
+    clim = data["vehicleStatus"]["additionalVehicleStatus"]["climateStatus"]
+    if value is None:
+        clim.pop("steerWhlHeatingSts", None)
+    else:
+        clim["steerWhlHeatingSts"] = value
+
+    class C(_Coord):
+        pass
+    C.data = data
+    bs = load("binary_sensor")
+    spec = next(s for s in bs.SPECS if s[0] == "steering_wheel_heating")
+    return bs.GeelyBinarySensor(C(), FAKE_VIN, "Geely EX5 (0000)", *spec)
+
+
+def test_the_steering_wheel_reads_one_as_on_and_two_as_off():
+    """Inverted relative to every other flag in that table, and measured on a
+    real car: 1 while heating at any level, 2 while off (#4). Guessing the usual
+    way round would have shown "heating" on a cold wheel, permanently."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    assert _steering("1").is_on is True
+    assert _steering("2").is_on is False
+    # Levels are not reported separately - any level reads 1.
+    assert _steering(1).is_on is True
+
+
+def test_a_car_without_a_heated_wheel_says_unknown_not_off():
+    """The feature is absent on most trims. "Off" would be a claim about
+    hardware that is not there; unknown is the truth."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    assert _steering(None).is_on is None
+
+
+def test_the_steering_wheel_sensor_exists_and_is_read_only():
+    """No command for it has ever been verified - every candidate fired at a
+    real car returned "operation succeed" and moved nothing - so it must appear
+    as a sensor and NOT as a switch anyone could press."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    built = _build_all()
+    keys = _keys(built)
+    assert "bs_steering_wheel_heating" in keys, sorted(k for k in keys if "steer" in k)
+    assert not any("steer" in k for k in keys if k.startswith(("sw_", "select_"))), (
+        "a pressable steering-wheel control appeared, with no verified command"
+    )

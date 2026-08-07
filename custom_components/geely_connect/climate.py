@@ -452,7 +452,17 @@ class GeelyClimate(CoordinatorEntity, ClimateEntity, RestoreEntity):
         _LOGGER.debug("Geely rapid %s response=%s",
                       "warming" if warming else "cooling", redact(resp))
 
-        schedule_refresh(self._hass, self.coordinator, 8)
+        # Two polls, and the second one is the point. The rapid bundle asks for
+        # the cabin AND both front seats in one request, and the seat state
+        # arrives in `climateStatus` on the car's own schedule - a single poll at
+        # eight seconds can land before the seats are reported, and nothing came
+        # after it, so the seat entities read Off while the seats were warming.
+        # That is very likely what "it only turns on the heater" was (#19): the
+        # request has been proved correct since - the reporter fired the exact
+        # same body by hand and both seats went to high - which leaves the
+        # read-back as the difference between the two paths. The probe service
+        # polls twice for the same reason.
+        schedule_refresh(self._hass, self.coordinator, 8, 20)
         self.async_write_ha_state()
 
     # ---- helpers ----

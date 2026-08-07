@@ -559,3 +559,71 @@ def test_a_file_with_no_timestamp_still_produces_a_url():
     c = _cards()
     assert c._card_mtime(c._card_path() + ".nope") == 0
     assert c._card_mtime(c._card_path()) > 0
+
+
+# ------------------------------------- the driving lock, on both sides ------
+
+def test_the_cards_and_the_poller_agree_on_what_driving_means():
+    """The card greys out every control while the car is moving, and it decides
+    that with its own copy of the rule - a browser cannot import Python. Two
+    copies drift, and the failure would be silent in both directions: buttons
+    that stay live at 60 km/h, or a card locked solid on a parked car.
+
+    Speed is checked separately in the browser tests; this pins the enum, which
+    exists because speed legitimately reads 0 at every red light (#21)."""
+    import io
+    import re
+
+    src = io.open(os.path.join(PKG, "geely-card.js"), encoding="utf-8").read()
+    block = src.split("const DRIVING_STATES = new Set([", 1)[1].split("]", 1)[0]
+    in_card = {s for s in re.findall(r'"([^"]+)"', block)}
+
+    body = io.open(os.path.join(PKG, "__init__.py"), encoding="utf-8").read()
+    py_block = body.split("_ENGINE_RUNNING = frozenset({", 1)[1].split("}", 1)[0]
+    in_python = {s for s in re.findall(r'"([^"]+)"', py_block)}
+
+    assert in_python, "the poller's engine-state set could not be read"
+    missing = in_python - in_card
+    assert not missing, (
+        f"the poller treats {sorted(missing)} as running and the cards do not - "
+        "a car in that state would keep every button live while moving"
+    )
+    # The card is allowed the mapped display value the sensor actually shows.
+    extra = in_card - in_python - {"running"}
+    assert not extra, f"the cards call {sorted(extra)} driving and the poller does not"
+
+
+def _card_class_body(src, name):
+    """One card class, ending at its own closing brace.
+
+    Slicing to the next `class` keyword instead would run past the last card and
+    swallow the registry watchdog that sits between it and the status tile - so a
+    check for "this class does not add listeners" would see the watchdog's two
+    and fail on the innocent card.
+    """
+    lines = src.split("\n")
+    start = next(i for i, l in enumerate(lines)
+                 if l.startswith(f"  class {name} extends"))
+    end = next(i for i in range(start + 1, len(lines)) if lines[i] == "  }")
+    return "\n".join(lines[start:end + 1])
+
+
+def test_every_card_class_leaves_the_driving_lock_to_the_base():
+    """The banner and the lock are applied in one place for all five cards. A
+    card that built its own wiring instead of calling _wire() would draw the
+    banner and leave working buttons underneath it."""
+    import io
+
+    src = io.open(os.path.join(PKG, "geely-card.js"), encoding="utf-8").read()
+    for cls in ("GeelyCard", "GeelyCardTop", "GeelyCardCompact",
+                "GeelyCardMini", "GeelyCardStrip"):
+        body = _card_class_body(src, cls)
+        assert "this._wire()" in body, f"{cls} never calls _wire()"
+        assert "addEventListener" not in body, (
+            f"{cls} wires its own listeners, bypassing the driving lock")
+        # The three larger cards draw the banner; the two one-row cards say it on
+        # their status line, because a banner would double their height.
+        if cls in ("GeelyCard", "GeelyCardTop", "GeelyCardCompact"):
+            assert "_drivingNotice()" in body, f"{cls} has no driving banner"
+        else:
+            assert "actions locked" in body, f"{cls} never says actions are locked"

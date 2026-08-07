@@ -38,6 +38,7 @@ _ICONS: dict[str, str] = {
     "driver_seatbelt":  "mdi:seatbelt",
     "charger_plugged_in": "mdi:ev-plug-type2",
     "tank_flap":        "mdi:gas-station",
+    "steering_wheel_heating": "mdi:steering",
 }
 
 
@@ -62,6 +63,19 @@ SPECS: tuple[tuple[str, str, tuple[str, ...], BinarySensorDeviceClass | None, tu
     # reads the DC contactor and the sign of the pack current - and that is
     # what switch.charging follows.
     ("charger_plugged_in",   "Charger Plug",      (*_EV,   "statusOfChargerConnection"),    BinarySensorDeviceClass.PLUG,    ("1", 1, "2", 2, "3", 3)),
+    # Steering-wheel heat, READ ONLY. There is still no verified command for it
+    # (#4) - every candidate fired at a real car came back "operation succeed"
+    # and moved nothing - but the reading is now known, measured on an
+    # Australian EX5 Inspire by the owner who tested those candidates:
+    #
+    #   steerWhlHeatingSts = 1  while the wheel is heating, at ANY level
+    #                      = 2  while it is off
+    #
+    # Inverted relative to every other flag in this table, and the same 1=on /
+    # 2=off convention the seat-ventilation status fields use. A car without the
+    # feature sends nothing and the entity stays unknown, which is the honest
+    # answer rather than a confident "off".
+    ("steering_wheel_heating", "Steering Wheel Heating", (*_CLIM, "steerWhlHeatingSts"), None, ("1", 1)),
 )
 
 # Removed (redundant with proper entities):
