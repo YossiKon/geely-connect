@@ -1051,6 +1051,13 @@ class GeelyChargeVoltageSensor(CoordinatorEntity, _AutoPrecision):
         return None if leg is None else round(leg[0], 1)
 
 
+# The window a real traction pack's voltage can occupy. Below is a reading
+# that cannot power a car; above is not a pack voltage at all. Used to reject
+# the mis-scaled dcChargeUAct one car sends during AC charging (#17, #22).
+_PACK_VOLTS_MIN = 100.0
+_PACK_VOLTS_MAX = 900.0
+
+
 class GeelyPackPowerSensor(CoordinatorEntity, _AutoPrecision):
     """The pack's own power flow in kW, signed: positive out, negative in.
 
@@ -1090,6 +1097,14 @@ class GeelyPackPowerSensor(CoordinatorEntity, _AutoPrecision):
             volts = float(_walk(data, (*_EV, "dcChargeUAct")))
             amps = float(_walk(data, (*_EV, "dcChargeIAct")))
         except (TypeError, ValueError):
+            return None
+        # A traction pack lives between roughly 250 V (a flat 400 V-class
+        # pack) and 800 V (a full 800 V-class one). One car reports
+        # dcChargeUAct climbing through 1575, 1580, 1586 while AC charging
+        # (#17), which multiplied out to a -25 kW pack flow on a 6.7 kW
+        # wallbox (#22) - and this entity feeds long-term statistics, so a
+        # fabricated number is worse than a gap. Unknown beats invented.
+        if not _PACK_VOLTS_MIN <= volts <= _PACK_VOLTS_MAX:
             return None
         return round(volts * amps / 1000.0, 2)
 

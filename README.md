@@ -303,7 +303,7 @@ Location (device tracker) - GPS position on the map, with altitude.
 | **Charge Complete** | When charging finishes, as a time rather than a minute count - so a notification can fire on it |
 | **Charging Power** | How fast the car is charging, in kW. The car reports volts and amps but never their product, so this is the only place the charge rate exists. A real `power` entity, so it records long-term statistics and can be graphed alongside your house load. Reads 0 kW unless the car is genuinely charging: the connection field alone is not enough, because some cars never move it off "Plugged in" through an entire DC fast charge, so the DC contactor and the sign of the pack current count as well. Without that gate the pack pair - which carries traction current while you drive - publishes a 17 kW "charge" on the motorway |
 | **Charge Voltage** / **Charge Current** | The two halves behind that number (diagnostic). Worth a look when a charge is slower than expected - a derated circuit shows up as low current, not low voltage. The car sends an AC pair and a DC pair and never labels them, so the **DC contactor** decides which one is live: closed means a DC session, open means the AC leg. Comparing the two by apparent power used to do this job and was wrong - one car reports a nonsense 1586 V on the DC pair during AC charging, which won that comparison and published 25 kW on a 6 kW wallbox |
-| **Pack Power** | The battery's own power flow in kW, signed the way the car signs it: positive leaving the pack, negative going in. This is the figure the car's dashboard shows while driving - about 17 kW up a hill, and around −1.5 kW on a 1.8 kW wall charge, the difference being the onboard charger's losses and the 12 V systems |
+| **Pack Power** | The battery's own power flow in kW, signed the way the car signs it: positive leaving the pack, negative going in. This is the figure the car's dashboard shows while driving - about 17 kW up a hill, and around −1.5 kW on a 1.8 kW wall charge, the difference being the onboard charger's losses and the 12 V systems. Reads unknown rather than a number when the pack voltage the car reports is physically impossible - one car sends about 1586 V during AC charging, which would otherwise publish −25 kW into long-term statistics |
 | **Range At Full Charge** | Remaining range extrapolated to 100% at the current efficiency, so it's comparable week to week. Blank below 10% charge, where the estimate is mostly noise |
 | **Last Trip** | How far the last completed journey went, worked out from the odometer between engine-on and engine-off |
 | **Trip In Progress** | How far the current journey has gone; 0 when parked |
@@ -354,7 +354,7 @@ back off removes the generated entities again.
 | **Defrost** | Windscreen defrost on/off |
 | **Windows** | Open / close / ventilate |
 | **Sunroof / Sunshade** | Open / close |
-| **Charging** | Start / stop, plus scheduled charging (start & end time) |
+| **Charging** | Start / stop, plus scheduled charging (start & end time). Stopping a charge does not release the cable: the charge-port latch follows the doors, so to let someone unplug remotely, stop the charge **and** unlock the car - it re-locks itself afterwards if no door is opened |
 | **Parking Comfort** | On/off. The switch reports *unknown* rather than a state: the field that looked like its on/off flag reads 1 on a car with the feature off, and no field in this API reports it truthfully |
 | **Cabin purge (G-Clean)** | On/off |
 | **Find Car** | Horn + lights |

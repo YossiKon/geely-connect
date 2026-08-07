@@ -387,3 +387,23 @@ def test_a_closed_contactor_with_a_dead_dc_pair_falls_back_to_ac():
     data = _charging(dcDcConnectStatus="3", dcChargeUAct="0.0",
                      dcChargeIAct="0.0", chargeUAct="240.0", chargeIAct="30.0")
     assert _power(data) == 7.2
+
+
+def test_pack_power_refuses_an_impossible_pack_voltage():
+    """#22: the same mis-scaled 1586 V that broke the leg election also made
+    Pack Power publish -25.5 kW on a 6.7 kW wallbox. This entity feeds
+    long-term statistics, so a gap is better than a fabricated figure."""
+    data = _charging(dcChargeUAct="1586", dcChargeIAct="-16.1",
+                     chargeUAct="236.7", chargeIAct="28.4")
+    assert _make("GeelyPackPowerSensor", data).native_value is None
+
+
+def test_pack_power_still_reports_both_directions_of_a_real_flow():
+    """The whole point of this entity: signed pack flow, ungated by charging
+    state, as the car's own dashboard shows it."""
+    driving = _status(dcChargeUAct="338.2", dcChargeIAct="52.4")
+    assert _make("GeelyPackPowerSensor", driving).native_value == 17.72
+    charging = _charging(dcChargeUAct="459.7", dcChargeIAct="-198.9")
+    assert _make("GeelyPackPowerSensor", charging).native_value == -91.43
+    idle = _status(dcChargeUAct="349.0", dcChargeIAct="0.0")
+    assert _make("GeelyPackPowerSensor", idle).native_value == 0.0
