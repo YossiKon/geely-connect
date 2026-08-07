@@ -172,6 +172,7 @@ everything else.
 > tank but no traction battery gets the fuel bar on its own instead of an empty
 > battery bar implying it cannot move. The mini card shows no bar or percentage on
 > any car by design, so there the difference is the number itself.
+> [See both side by side](#%EF%B8%8F-dashboards--cards).
 
 > **While the car is being driven, every card locks itself.** The three larger
 > cards show a banner - *"Driving · remote actions are unavailable until the car
@@ -207,6 +208,15 @@ dashboard, **Add card**, and search "Geely":
 | ![Geely Card compact](docs/images/card-compact.png) | ![Geely Card mini](docs/images/card-mini.png) |
 
 ![Geely Card strip](docs/images/card-strip.png)
+
+**The same card, two different cars.** Nothing is configured: the integration only
+creates the fuel entities once it has decided the car has a tank, so the cards go
+by whether those entities exist. On the right the headline is the **combined**
+range with the two halves under it, there is a second bar for the tank, the header
+carries both percentages, and a Fuel section reports the level, the fuel range and
+whether the engine is running.
+
+![The full card on a battery-only car and on a plug-in hybrid](docs/images/card-propulsion.png)
 
 With one Geely on the account the cards find their entities on their own -
 even after you rename them. With several cars, point each card at one:
