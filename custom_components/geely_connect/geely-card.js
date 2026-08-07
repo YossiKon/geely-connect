@@ -53,6 +53,16 @@
     "UG", "ZA", "ZM", "ZW",
   ]);
 
+  /* Where English-speakers call it a boot rather than a trunk. Not the same
+   * list as RHD_COUNTRIES - India drives on the left and says boot, the
+   * Philippines drives on the right and says trunk - so it is its own set.
+   * Only the card's own wording; the entity keeps its name. */
+  const BOOT_COUNTRIES = new Set([
+    "AU", "BD", "BW", "CY", "FJ", "GB", "GH", "GY", "HK", "IE", "IN", "JM",
+    "KE", "LK", "LS", "MT", "MU", "MW", "MY", "NA", "NG", "NP", "NZ", "PG",
+    "PK", "SG", "SZ", "TT", "TZ", "UG", "ZA", "ZM", "ZW",
+  ]);
+
   const ACCENT = "var(--geely-accent, #2fd6a4)";
   const AMBER = "var(--geely-warn, #e8a13a)";
 
@@ -281,7 +291,7 @@
       ${d.sunroof == null ? "" : `
       <text class="tv-lab onglass" x="200" y="322" text-anchor="middle">SUNROOF</text>
       <text class="${cl(d.sunroof)} onglass" x="200" y="342" text-anchor="middle">${stat(d.sunroof)}</text>`}
-      <text class="tv-lab onbody" x="200" y="634" text-anchor="middle">TRUNK</text>
+      <text class="tv-lab onbody" x="200" y="634" text-anchor="middle">${d.bootWord}</text>
       <text class="${cl(d.trunk)} onbody" x="200" y="654" text-anchor="middle">${stat(d.trunk)}</text>
     </svg>`;
   };
@@ -741,6 +751,19 @@
       }
     }
 
+    /* "Boot" or "Trunk"? Home Assistant's country setting decides, and
+     * `boot: true/false` in the card config overrides it. Asked for by an
+     * Australian owner (#14), and it costs nothing: the label is ours. */
+    _bootWord(caps = false) {
+      const cfg = this._config.boot;
+      const c = this._hass && this._hass.config && this._hass.config.country;
+      const boot = typeof cfg === "boolean"
+        ? cfg
+        : !!c && BOOT_COUNTRIES.has(String(c).toUpperCase());
+      if (boot) return caps ? "BOOT" : "Boot";
+      return caps ? "TRUNK" : "Trunk";
+    }
+
     /* Right-hand-drive? `rhd: true/false` in the card config overrides;
      * otherwise Home Assistant's own country setting decides. */
     _isRHD() {
@@ -986,7 +1009,7 @@
             ${this._actBtn("rapidheat", "Heat", "heat", { on: this._preset() === "Rapid Warming" })}
             ${this._actBtn("rapidcool", "Cool", "cool", { on: this._preset() === "Rapid Cooling" })}
             ${this._actBtn("defrost", "Defrost", "defrost", { on: defrost && defrost.state === "on" })}
-            ${this._actBtn("trunk", "Trunk", "trunk")}
+            ${this._actBtn("trunk", this._bootWord(), "trunk")}
           </div>
         </div>`;
       this._wire();
@@ -1125,7 +1148,7 @@
             ${this._actBtn("climate", "Climate", "climate", { on: climateOn })}
             ${this._actBtn("defrost", "Defrost", "defrost", { on: defrost && defrost.state === "on" })}
             ${this._actBtn("vent", "Vent", "vent", { on: vent && vent.state === "on" })}
-            ${this._actBtn("trunk", "Trunk", "trunk")}
+            ${this._actBtn("trunk", this._bootWord(), "trunk")}
             ${this._actBtn("find", "Find", "find")}
             ${this._actBtn("refresh", "Sync", "refresh")}
           </div>
@@ -1309,7 +1332,7 @@
                 : this._actBtn("lock", "Lock", "lock")}
               ${this._actBtn("rapidheat", "Heat", "heat", { on: this._preset() === "Rapid Warming" })}
               ${this._actBtn("rapidcool", "Cool", "cool", { on: this._preset() === "Rapid Cooling" })}
-              ${this._actBtn("trunk", "Trunk", "trunk")}
+              ${this._actBtn("trunk", this._bootWord(), "trunk")}
               ${this._actBtn("find", "Find", "find")}
             </div>
           </div>
@@ -1472,6 +1495,7 @@
                  rl: isOpen("door_rear_left"), rr: isOpen("door_rear_right") },
         hood: isOpen("hood"),
         trunk: isOpen("trunk"),
+        bootWord: this._bootWord(true),
         sunroof: sunroofSt ? sunroofSt.state !== "closed" : null,
       };
 
@@ -1534,7 +1558,7 @@
             ${this._actBtn("climate", "Climate", "climate", { on: climateOn })}
             ${this._actBtn("defrost", "Defrost", "defrost", { on: defrost && defrost.state === "on" })}
             ${this._actBtn("vent", "Vent", "vent", { on: vent && vent.state === "on" })}
-            ${this._actBtn("trunk", "Trunk", "trunk")}
+            ${this._actBtn("trunk", this._bootWord(), "trunk")}
             ${this._actBtn("find", "Find", "find")}
             ${this._actBtn("refresh", "Sync", "refresh")}
           </div>

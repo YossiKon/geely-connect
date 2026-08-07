@@ -211,6 +211,12 @@ on the second** (a stray touch on a wall tablet can't open the car), and the
 accent colour follows the state - teal while charging, amber when something
 needs a look. `--geely-accent` / `--geely-warn` theme variables override both.
 
+The cards also read your Home Assistant **country** for two bits of local
+wording and layout: the boot is labelled *Boot* where English-speakers call it
+that and *Trunk* elsewhere, and the driver's door is drawn on the correct side
+in right-hand-drive markets. Both are overridable per card with `boot: true`
+/ `false` and `rhd: true` / `false`.
+
 #### If a card ever misbehaves
 
 The picker holds one more entry, **Geely Card (status vX.Y.Z)** - a plain
