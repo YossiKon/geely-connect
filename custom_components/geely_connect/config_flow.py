@@ -27,6 +27,7 @@ from homeassistant.helpers import entity_registry as er
 
 from . import api as geely_api
 from .const import (
+    CONF_BATTERY_KWH,
     CONF_FULL_EXPOSURE,
     CONF_REGION,
     DEFAULT_COUNTRY_CODE,
@@ -453,6 +454,16 @@ class GeelyIntlOptionsFlow(config_entries.OptionsFlow):
                     CONF_FULL_EXPOSURE,
                     default=current.get(CONF_FULL_EXPOSURE, False),
                 ): bool,
+                # Usable pack size in kWh. 0 leaves Range At Full Charge
+                # extrapolating the car's own estimate; a real figure makes it
+                # the range at this car's own measured consumption instead. No
+                # payload carries it and it cannot be guessed - the EX5 alone
+                # ships 49.52, 60.22 and 68.39 kWh packs, and the rated range
+                # moves again with the trim's wheels and weight.
+                vol.Optional(
+                    CONF_BATTERY_KWH,
+                    default=float(current.get(CONF_BATTERY_KWH) or 0),
+                ): vol.All(vol.Coerce(float), vol.Range(min=0, max=250)),
             }),
         )
 

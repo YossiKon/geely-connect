@@ -250,3 +250,68 @@ def test_the_offset_plumbing_still_works_for_a_future_calibration():
                                  "Exterior Temperature", path, "°C", None, "float",
                                  None, value_offset=-10.0)
     assert shifted.native_value == 24.0
+
+
+# ------------------------- Range At Full Charge: two answers, one honest state
+# An owner circled this figure: his card read 426 km while the same card showed
+# his lifetime consumption at 22.7 kWh/100 km, which on a 60.22 kWh pack is 265.
+# Both numbers are real. 426 is the car's own optimistic estimate scaled up - it
+# lands near the WLTP figure for that pack - and 265 is what this car actually
+# does. The pack size is not in any payload and cannot be guessed (the EX5 alone
+# ships 49.52, 60.22 and 68.39 kWh, and the rated range moves again with the
+# trim's wheels), so it is configured, and only then does the honest figure win.
+
+def test_the_measured_figure_wins_once_the_pack_size_is_known():
+    s = _make("GeelyFullRangeSensor",
+              _status(ev={"chargeLevel": "60", "distanceToEmptyOnBatteryOnly": "256",
+                          "averPowerConsumption": "22.7"}),
+              60.22)
+    # 60.22 kWh at 22.7 kWh/100km
+    assert s.native_value == 265
+    a = s.extra_state_attributes
+    assert a["method"] == "measured consumption"
+    assert a["at_measured_consumption_km"] == 265
+    # The optimistic one is still there to be compared against - this is the
+    # 426 from the report.
+    assert a["car_estimate_scaled_km"] == 427
+    assert a["battery_capacity_kwh"] == 60.22
+
+
+def test_without_a_pack_size_nothing_changes_for_anyone():
+    s = _make("GeelyFullRangeSensor",
+              _status(ev={"chargeLevel": "60", "distanceToEmptyOnBatteryOnly": "256",
+                          "averPowerConsumption": "22.7"}))
+    assert s.native_value == 427
+    a = s.extra_state_attributes
+    assert a["method"] == "car estimate scaled to 100%"
+    assert a["at_measured_consumption_km"] is None
+    assert a["battery_capacity_kwh"] is None
+
+
+def test_a_pack_size_with_no_consumption_yet_falls_back_rather_than_blanking():
+    """A car fresh from the factory reports no lifetime average. Better the
+    optimistic number than an empty tile."""
+    # The fixture supplies a lifetime average by default; a new car has none.
+    data = _status(ev={"chargeLevel": "60", "distanceToEmptyOnBatteryOnly": "256"})
+    del data["vehicleStatus"]["additionalVehicleStatus"][
+        "electricVehicleStatus"]["averPowerConsumption"]
+    sensor = load("sensor")
+    s = sensor.GeelyFullRangeSensor(_Coord(data), FAKE_VIN, "Geely EX5 (0000)", 60.22)
+    assert s.native_value == 427
+    assert s.extra_state_attributes["method"] == "car estimate scaled to 100%"
+    for junk in ("0", "-3", "", None, "abc"):
+        s = _make("GeelyFullRangeSensor",
+                  _status(ev={"chargeLevel": "60",
+                              "distanceToEmptyOnBatteryOnly": "256",
+                              "averPowerConsumption": junk}), 60.22)
+        assert s.native_value == 427, junk
+
+
+def test_the_measured_figure_stands_alone_when_the_car_estimate_is_unusable():
+    """Below 10% charge the extrapolation is noise and used to blank the entity.
+    With a pack size the measured figure does not depend on the charge at all."""
+    s = _make("GeelyFullRangeSensor",
+              _status(ev={"chargeLevel": "4", "distanceToEmptyOnBatteryOnly": "11",
+                          "averPowerConsumption": "22.7"}), 60.22)
+    assert s.native_value == 265
+    assert s.extra_state_attributes["car_estimate_scaled_km"] is None

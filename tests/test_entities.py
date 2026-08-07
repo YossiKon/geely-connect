@@ -425,3 +425,27 @@ def test_the_documented_entity_counts_are_the_real_ones():
         f"the README's counts are stale: a battery-only car builds {bev} entities "
         f"and a hybrid {hybrid}")
     assert f"{bev} entities and a PHEV gets {hybrid}." in readme
+
+
+def test_a_nonsense_pack_size_in_the_options_does_not_break_setup():
+    """The field is a number in the UI, but options survive round trips and
+    hand-edited storage - and a car that will not load because someone typed
+    "60,22" is a far worse outcome than a range figure falling back."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    import types
+    sensor = load("sensor")
+    for junk in ("60,22", "abc", [], {}):
+        hass, entry = _Hass(), _Entry()
+        entry.options = {"battery_capacity_kwh": junk}
+        hass.data["geely_connect"] = {"e1": {
+            "api": object(), "coordinator": _Coord(), "vin": FAKE_VIN,
+            "device_name": "Geely EX5 (0000)", "capabilities": {}}}
+        got = []
+        asyncio.run(sensor.async_setup_entry(
+            hass, entry, lambda e, *a, **k: got.extend(list(e))))
+        full = next(e for e in got
+                    if getattr(e, "_attr_unique_id", "").endswith("_full_range"))
+        assert full._capacity_kwh == 0.0, junk
+        # And it still reports, by the other method.
+        assert full.extra_state_attributes["method"] == "car estimate scaled to 100%"

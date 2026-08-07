@@ -39,6 +39,7 @@
     "charge_voltage", "electric_range", "charge_current", "door_passenger",
     "charger_plug", "total_mileage", "refresh_data", "unlock_trunk",
     "door_driver", "12v_battery", "trip_meter", "fuel_level", "fuel_range",
+    "location",
     "fuel_level_pct",
     "pack_power", "efficiency", "find_car", "connected", "defrost", "sunroof",
     // Average Speed and Engine Speed both produce ids ending in "_speed", and
@@ -80,6 +81,14 @@
 
   /* Folded into every card's change signature on top of its own list, because
    * the driving banner is drawn for all of them by the base class. */
+  /* Wait after a command before another may be sent, in seconds. Long enough
+   * that a second tap does not arrive while the car is still executing the
+   * first, short enough that the card does not feel broken. `cooldown:` in the
+   * card config overrides it, and 0 turns the wait off. */
+  const DEFAULT_COOLDOWN_S = 3;
+  /* How long the temperature stepper waits for the tapping to stop. */
+  const TEMP_SETTLE_MS = 1100;
+
   const ALWAYS_WATCHED = [
     "sensor.speed", "sensor.engine_state",
     // The propulsion split: _carState() reads these for every card, so a
@@ -326,6 +335,7 @@
   /* One cohesive hand-drawn stroke set - 24px grid, 1.8 stroke, round caps. */
 
   const ICONS = {
+    nav: `<path d="M20 4 10.5 20l-1.2-6.3L3 12.5z"/>`,
     driving: `<path d="M3.5 14.5h17M5 14.5l1.7-4.6A2 2 0 0 1 8.6 8.5h6.8a2 2 0 0 1 1.9 1.4l1.7 4.6"/>
               <path d="M4.5 14.5v3h3v-3M16.5 14.5v3h3v-3"/>
               <circle cx="7.5" cy="15.6" r="1.1"/><circle cx="16.5" cy="15.6" r="1.1"/>`,
@@ -462,6 +472,11 @@
     .act.armed { color: ${AMBER}; border-color: ${AMBER}; animation: geely-arm 1s ease infinite; }
     .act.armed span { color: ${AMBER}; }
     .act[disabled] { opacity: .35; pointer-events: none; }
+
+    /* Navigation links. Deliberately quieter than the command buttons beside
+     * them: they open a map app rather than doing anything to the car. */
+    .cbtn.nav { text-decoration: none; color: var(--secondary-text-color); }
+    .cbtn.nav:hover { color: var(--primary-text-color); }
 
     /* The second bar, on a car with a tank. Deliberately not the accent
      * colour: the two bars must not be mistaken for one another at a glance. */
@@ -730,14 +745,104 @@
           }
           return st.state;
         })
-        .join("|") + `|${this._armed || ""}`;
+        .join("|") + `|${this._armed || ""}|${this._pendingTemp}`
+        + `|${this._waiting() ? "wait" : ""}`;
+    }
+
+    /* How long to hold the controls after a command, in milliseconds.
+     * `cooldown:` in the card config, in seconds; 0 disables the wait. */
+    _cooldownMs() {
+      const c = this._config.cooldown;
+      const secs = c == null ? DEFAULT_COOLDOWN_S : Number(c);
+      return isFinite(secs) && secs >= 0 ? secs * 1000 : DEFAULT_COOLDOWN_S * 1000;
+    }
+
+    _waiting() {
+      return this._holdUntil != null && Date.now() < this._holdUntil;
+    }
+
+    /* Does this rejection mean "the car is still busy" rather than "no"? */
+    _isBusyError(err) {
+      const text = `${(err && (err.message || err.error || err.code)) || err || ""}`;
+      return /has not yet been executed|8070/i.test(text);
     }
 
     _call(domain, service, entitySuffix, data = {}) {
-      this._hass.callService(domain, service, {
-        entity_id: this._eid(domain, entitySuffix),
-        ...data,
-      });
+      // notifyOnError false: Home Assistant would otherwise raise its own
+      // "Failed to perform the action" toast before we get a chance to see
+      // whether the car simply wanted another moment. We surface the failures
+      // that matter ourselves, in _send.
+      return this._send(() => this._hass.callService(
+        domain, service,
+        { entity_id: this._eid(domain, entitySuffix), ...data },
+        undefined, false));
+    }
+
+    /* Tell the user, the way Home Assistant's own cards do. */
+    _toast(message) {
+      this.dispatchEvent(new CustomEvent("hass-notification", {
+        detail: { message: `Geely: ${message}` },
+        bubbles: true, composed: true,
+      }));
+    }
+
+    /* One command at a time, with a gap after it.
+     *
+     * The car executes one remote command at a time and refuses the next with
+     * "the last request has not yet been executed" - and a refused command is
+     * dropped, not queued, so the tap is simply lost and the user gets an error
+     * toast. Two quick taps on the temperature stepper produced exactly that.
+     *
+     * There is no way to know when the car has finished: the gateway
+     * acknowledges receipt, not execution, and nothing in the payload reports
+     * a command completing. So this is a timer, not a status - held for
+     * `cooldown` after the call resolves, with the controls visibly waiting.
+     *
+     * A command the car refused *because it was busy* is retried once, after
+     * twice the wait. That is not the double-fire this project reverted in
+     * v1.21.5: that one sent a second command while the first was still
+     * running, whereas this one never ran at all, and a retry is the only way
+     * it happens.
+     */
+    _send(fire, retried = false) {
+      if (this._waiting()) return Promise.resolve();
+      const hold = this._cooldownMs();
+      const release = () => {
+        this._holdUntil = Date.now() + hold;
+        clearTimeout(this._holdTimer);
+        this._holdTimer = setTimeout(() => {
+          this._holdUntil = 0;
+          this._sig = "";
+          this._safeRender();
+        }, hold);
+      };
+      this._holdUntil = Date.now() + hold;
+      this._sig = "";
+      this._safeRender();
+      // Fired now rather than on a microtask: a command should leave the moment
+      // the button is pressed, and only its *result* is handled asynchronously.
+      let sent;
+      try {
+        sent = fire();
+      } catch (err) {
+        release();
+        throw err;
+      }
+      return Promise.resolve(sent)
+        .then(release, (err) => {
+          release();
+          if (!retried && this._isBusyError(err)) {
+            // Retried quietly: the car was busy, the command never ran, and a
+            // toast for something that is about to work on its own is noise.
+            this._holdUntil = 0;
+            return new Promise((r) => setTimeout(r, hold * 2))
+              .then(() => this._send(fire, true));
+          }
+          // Anything else is the car saying no, or saying no twice. Hiding that
+          // would leave the owner believing a command worked.
+          this._toast(`${(err && (err.message || err.error)) || "command failed"}`);
+          throw err;
+        });
     }
 
     /* Destructive actions arm on the first tap and fire on the second. */
@@ -804,16 +909,32 @@
           break;
         }
         case "tempdown": case "tempup": {
+          // Each tap moves the number on screen at once and the car is told
+          // once, after the tapping stops. Sending per tap is what produced
+          // "the last request has not yet been executed" while stepping from
+          // 22 to 25 - three commands, two of them dropped, one error toast.
           const c = this._st("climate.climate");
           if (!c || !c.attributes) break;
           const a = c.attributes;
           const step = Number(a.target_temp_step) || 0.5;
-          const cur = Number(a.temperature);
-          if (!isFinite(cur)) break;
+          const base = this._pendingTemp != null ? this._pendingTemp
+            : Number(a.temperature);
+          if (!isFinite(base)) break;
           const next = Math.min(Number(a.max_temp) || 30,
             Math.max(Number(a.min_temp) || 16,
-              cur + (key === "tempup" ? step : -step)));
-          this._call("climate", "set_temperature", "climate", { temperature: next });
+              base + (key === "tempup" ? step : -step)));
+          this._pendingTemp = Math.round(next * 10) / 10;
+          this._sig = "";
+          this._safeRender();
+          clearTimeout(this._tempTimer);
+          this._tempTimer = setTimeout(() => {
+            const target = this._pendingTemp;
+            this._pendingTemp = null;
+            if (target != null) {
+              this._call("climate", "set_temperature", "climate",
+                         { temperature: target });
+            }
+          }, TEMP_SETTLE_MS);
           break;
         }
         case "rapidheat": case "rapidcool": {
@@ -878,7 +999,9 @@
             this._call("time", "set_value", el.dataset.time, { time: `${el.value}:00` });
           }
         }));
-      if (this._isDriving()) this._lockActions();
+      // Two reasons the controls stand down, and they read the same: the car is
+      // moving, or it is still working through the last command.
+      if (this._isDriving() || this._waiting()) this._lockActions();
     }
 
     /* Grey out and disable every control while the car is moving.
@@ -941,7 +1064,8 @@
       if (!c) return "";
       const a = c.attributes || {};
       const on = c.state !== "off";
-      const target = Number(a.temperature);
+      const target = this._pendingTemp != null ? this._pendingTemp
+        : Number(a.temperature);
       const preset = a.preset_mode;
       const seat = (key, label, ic, mode) => {
         const st = this._st(`select.${key}`);
@@ -1068,6 +1192,30 @@
     _levels(s, batt) {
       if (!s.hybrid || !OK(s.fuelPct)) return `${batt}%`;
       return `${batt}% · ${Math.round(NUM(s.fuelPct))}% fuel`;
+    }
+
+    /* Navigate to where the car is parked, in whichever app the owner has.
+     *
+     * Links, not commands: they open a map and never touch the car, which is
+     * also why the driving lock leaves them alone - that disables `[data-act]`
+     * controls and these are plain anchors. Rendered only once the car has
+     * actually reported a position, because a link to 0,0 is worse than none.
+     */
+    _navRow() {
+      const st = this._st("device_tracker.location");
+      const a = (st && st.attributes) || {};
+      const lat = Number(a.latitude);
+      const lon = Number(a.longitude);
+      if (!isFinite(lat) || !isFinite(lon) || (lat === 0 && lon === 0)) return "";
+      const at = `${lat.toFixed(6)},${lon.toFixed(6)}`;
+      const link = (href, label) =>
+        `<a class="cbtn nav" href="${esc(href)}" target="_blank" rel="noopener noreferrer"
+            title="Navigate to the car with ${esc(label)}">${icon("nav")}<span>${esc(label)}</span></a>`;
+      return `<p class="micro csub" style="margin-top:12px">${icon("nav")} Navigate to the car</p>
+        <div class="crow wrap">
+          ${link(`https://www.google.com/maps/dir/?api=1&destination=${at}&travelmode=driving`, "Maps")}
+          ${link(`https://www.waze.com/ul?ll=${at}&navigate=yes`, "Waze")}
+        </div>`;
     }
 
     /* What to call the headline number, so it never means two things. */
@@ -1337,6 +1485,7 @@
             ${this._actBtn("find", "Find", "find")}
             ${this._actBtn("refresh", "Sync", "refresh")}
           </div>
+          ${this._navRow()}
           ${this._climatePanel()}
 
           <hr class="hairline">
@@ -1785,6 +1934,7 @@
           </div>
 
           <div class="carwrap">${CAR_TOP_SVG(s.charging ? "charging" : "", d)}</div>
+          ${this._navRow()}
           ${this._climatePanel()}
 
           <hr class="hairline">

@@ -159,6 +159,22 @@ everything else.
 
 ## 🖥️ Dashboards & cards
 
+> **The big cards link straight to the car in Maps or Waze.** Two links under
+> the actions, from the position the car reported - not commands, so they keep
+> working while the car is being driven, which is exactly when someone wants
+> them. They appear only once the car has actually reported where it is.
+
+> **One command at a time.** The car refuses a command that arrives while it is
+> still executing the last one, and the refused command is *dropped, not queued* -
+> so the tap is lost and Home Assistant raises "the last request has not yet been
+> executed". The cards now hold the controls for three seconds after each command
+> and grey them out while they wait; the temperature stepper does not send per tap
+> at all, it moves the number instantly and tells the car once you stop tapping.
+> A command refused because the car was busy is retried once, quietly, since it
+> never ran. `cooldown:` in the card config changes the wait (seconds; 0 turns it
+> off). Nothing can report when the car has actually *finished* - the gateway
+> acknowledges receipt, not execution - so this is a spacing, not a status.
+
 > **The cards read a car with a tank differently from a battery-only one.** The
 > integration only creates the fuel entities when it has decided the car has a
 > tank, so their presence is what the cards go by - no configuration. On a hybrid
@@ -282,6 +298,38 @@ All of these are created **enabled** - nothing to switch on by hand.
 | Time To Full Charge | Minutes remaining while charging (the car's own countdown, blank when it has no estimate) |
 | Average Consumption | Energy use (kWh / 100 km), lifetime |
 | Trip Consumption | kWh/100 km for the current trip, next to the lifetime figure |
+
+### 🔋 Range at full charge - two honest answers
+
+This entity can be read two ways, and they differ by more than half on the same
+car. One owner's card said **426 km** while the same card showed his lifetime
+consumption at **22.7 kWh/100 km** - which on a 60.22 kWh pack is **265 km**.
+Both numbers are real:
+
+- **The car's own estimate, scaled to 100%** (the default). Inherits whatever the
+  car assumed about the driving to come, which lands near the *rated* figure.
+- **The range at this car's measured consumption** - pack size x the efficiency
+  the car itself reports. What it actually does, in the driving it has actually
+  had.
+
+The second needs the pack size, and **nothing in the payload carries it**. It
+cannot be guessed either, because it is not one number per model:
+
+| Pack | Claimed range | Which cars |
+|---|---|---|
+| **49.52 kWh** | 440 km CLTC · ~275 km WLTP | standard-range EX5 |
+| **60.22 kWh** | 530 km CLTC · ~495 km NEDC · ~425 km WLTP | the long-range EX5 most export markets got first |
+| **68.39 kWh** (2025→) | 610 km CLTC · **475 km WLTP** on Complete (18-inch wheels) · **450 km WLTP** on Inspire (19-inch wheels, glass roof) | the bigger pack from the 2025/26 update |
+
+Note the last row: **the same pack, same model, 25 km apart on trim alone** -
+wheels and weight. That is why the integration will not pick a number for you.
+
+Set **usable battery capacity (kWh)** in Configure (see
+[Changing settings later](#%EF%B8%8F-changing-settings-later)) and the entity
+switches to the measured figure. Leave it at 0 and nothing changes. Either way
+both numbers, and which one is being shown, are in the entity's attributes -
+`method`, `at_measured_consumption_km`, `car_estimate_scaled_km` - so the two can
+always be compared instead of one of them looking like a bug.
 
 ### Driving & trip
 | Entity | Description |
@@ -835,6 +883,12 @@ the four existing tire sensors, so history is kept rather than restarting.
 Switching to **Manual** stops the timer immediately, and switching away from it
 starts polling again - no entity is created or removed either way, so history
 and automations are untouched.
+
+**Usable battery capacity (kWh)** lives here too. It is optional and 0 by
+default; a real figure switches *Range At Full Charge* from the car's own
+optimistic estimate to the range at this car's measured consumption. See
+[Range at full charge](#-range-at-full-charge---two-honest-answers) for the
+per-trim pack sizes.
 
 ### Which entities appear
 

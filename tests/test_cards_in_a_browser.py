@@ -54,6 +54,10 @@ window.mkHass = (opts) => {
   put(`binary_sensor.${P}_door_rear_right`, "off");
   put(`binary_sensor.${P}_trunk`, "off");
   put(`binary_sensor.${P}_hood`, "off");
+  // The climate panel - and therefore every seat control inside it - renders
+  // only when the climate entity exists, which is what the seat tests need.
+  put(`climate.${P}_climate`, "off", { temperature: 22, min_temp: 15.5,
+      max_temp: 28.5, target_temp_step: 0.5, preset_mode: "none" });
   put(`sensor.${P}_speed`, opts.speed === undefined ? "0" : opts.speed,
       { unit_of_measurement: "km/h" });
   // A car with a tank. The integration only creates these when the propulsion
@@ -66,7 +70,21 @@ window.mkHass = (opts) => {
     if (f.combined !== null) put(`sensor.${P}_combined_range`, f.combined === undefined ? "736" : f.combined, { unit_of_measurement: "km" });
   }
   if (opts.noBattery) { delete S[`sensor.${P}_battery`]; }
+  // The seat controls render only for the positions the car advertises, so a
+  // trim without heated seats gets no row rather than a dead button.
+  if (opts.seats) {
+    const lvls = ["Off", "Low", "Medium", "High"];
+    const seat = opts.seats;
+    if (seat.heatDriver !== null) put(`select.${P}_seat_heat_driver`, seat.heatDriver || "Off", { options: lvls });
+    if (seat.heatPassenger !== null) put(`select.${P}_seat_heat_passenger`, seat.heatPassenger || "Off", { options: lvls });
+    if (seat.ventDriver !== null) put(`select.${P}_seat_vent_driver`, seat.ventDriver || "Off", { options: lvls });
+    if (seat.ventPassenger !== null) put(`select.${P}_seat_vent_passenger`, seat.ventPassenger || "Off", { options: lvls });
+  }
   if (opts.noElectric) { delete S[`sensor.${P}_electric_range`]; }
+  if (opts.at) {
+    S[`device_tracker.${P}_location`] = { entity_id: `device_tracker.${P}_location`,
+      state: "not_home", attributes: { latitude: opts.at[0], longitude: opts.at[1] } };
+  }
   put(`sensor.${P}_engine_state`, opts.engine || "Off");
   const served = [];
   return { states: S, entities: E, devices: { d: { name: "Geely EX5" } },
@@ -567,3 +585,218 @@ def test_the_fuel_section_reports_the_engine_and_not_the_headline_twice():
     # A trim that reports the halves but not the sum still gets it spelled out.
     rows = _mount("geely-card", probe, fuel={"combined": None})
     assert any(r.startswith("Fuel range") for r in rows), rows
+
+
+# ------------------------------------- seat heating and cooling on the big cards
+
+_SEAT_PROBE = """(() => {
+    const label = (sel) => [...el.shadowRoot.querySelectorAll(sel)]
+        .map((n) => n.textContent.replace(/\s+/g, " ").trim());
+    return {
+        headings: label(".csub"),
+        buttons: [...el.shadowRoot.querySelectorAll('[data-act^="seat_"]')]
+            .map((b) => ({ act: b.dataset.act,
+                           text: b.textContent.replace(/\s+/g, " ").trim(),
+                           lit: b.classList.contains("on") })),
+    };
+})()"""
+
+
+def test_the_big_cards_offer_seat_heating_and_cooling_per_seat():
+    """One button per seat per feature, each showing its own level. The card is
+    where these are reachable in one tap - the entities themselves are selects
+    buried in the device page."""
+    for tag in ("geely-card", "geely-card-top"):
+        got = _mount(tag, _SEAT_PROBE, seats={"heatDriver": "High",
+                                              "ventPassenger": "Medium"})
+        assert any("Seat heating" in h for h in got["headings"]), (tag, got)
+        assert any("Seat cooling" in h for h in got["headings"]), (tag, got)
+        acts = {b["act"]: b for b in got["buttons"]}
+        assert set(acts) == {"seat_heat_driver", "seat_heat_passenger",
+                             "seat_vent_driver", "seat_vent_passenger"}, (tag, acts)
+        assert "High" in acts["seat_heat_driver"]["text"], (tag, acts)
+        assert "Medium" in acts["seat_vent_passenger"]["text"], (tag, acts)
+        # A seat that is actually on has to look different from one that is off.
+        assert acts["seat_heat_driver"]["lit"] is True, (tag, acts)
+        assert acts["seat_heat_passenger"]["lit"] is False, (tag, acts)
+
+
+def test_a_trim_without_heated_seats_gets_no_row_at_all():
+    """Better than a button that cannot do anything: the row is absent."""
+    got = _mount("geely-card", _SEAT_PROBE)
+    assert got["buttons"] == [], got
+    assert not any("Seat" in h for h in got["headings"]), got
+
+
+def test_only_the_advertised_seats_appear():
+    got = _mount("geely-card", _SEAT_PROBE,
+                 seats={"heatPassenger": None, "ventDriver": None,
+                        "ventPassenger": None, "heatDriver": "Low"})
+    assert [b["act"] for b in got["buttons"]] == ["seat_heat_driver"], got
+    assert any("Seat heating" in h for h in got["headings"]), got
+    assert not any("Seat cooling" in h for h in got["headings"]), got
+
+
+def test_tapping_a_seat_steps_to_the_next_level_and_wraps():
+    """Off -> Low -> Medium -> High -> Off, so one control reaches every level
+    without a dropdown."""
+    script = """() => {
+        const el = document.createElement("geely-card");
+        document.body.appendChild(el);
+        el.setConfig({});
+        // cooldown: 0 - the gate between commands is what this test is not
+        // about, and two taps in a row is exactly what it holds back.
+        el.setConfig({ cooldown: 0 });
+        const hass = window.mkHass({ seats: { heatDriver: "Medium" } });
+        el.hass = hass;
+        el._onAction("seat_heat_driver");
+        hass.states["select.car_seat_heat_driver"].state = "High";
+        el._onAction("seat_heat_driver");
+        return hass.serviceCalls.map((c) => [c[0], c[1], c[2].option]);
+    }"""
+    assert _evaluate(script) == [["select", "select_option", "High"],
+                                ["select", "select_option", "Off"]]
+
+
+def test_the_seat_buttons_are_locked_while_driving_like_everything_else():
+    got = _mount("geely-card", """[...el.shadowRoot.querySelectorAll('[data-act^="seat_"]')]
+                     .filter((b) => !b.hasAttribute("disabled")).length""",
+                 seats={"heatDriver": "High"}, speed="63", engine="Running")
+    assert got == 0, f"{got} seat buttons stayed live on a moving car"
+
+
+# ---------------------------------------- navigating to where the car is parked
+
+def test_the_big_cards_link_to_the_car_in_maps_and_waze():
+    probe = """[...el.shadowRoot.querySelectorAll("a.nav")]
+                 .map((a) => [a.textContent.trim(), a.getAttribute("href"),
+                              a.getAttribute("target"), a.getAttribute("rel")])"""
+    for tag in ("geely-card", "geely-card-top"):
+        got = _mount(tag, probe, at=[32.0853, 34.7818])
+        assert len(got) == 2, (tag, got)
+        (m_label, m_href, m_t, m_rel), (w_label, w_href, _, _) = got
+        assert m_label == "Maps" and w_label == "Waze", got
+        assert "google.com/maps/dir/" in m_href and "32.085300,34.781800" in m_href, got
+        assert "waze.com/ul?ll=32.085300,34.781800" in w_href and "navigate=yes" in w_href, got
+        # Opening a map must not navigate the dashboard away, or leak the referrer.
+        assert m_t == "_blank" and "noopener" in m_rel, got
+
+
+def test_no_link_when_the_car_has_not_reported_where_it_is():
+    """A link to 0,0 sends the owner to the Atlantic. No position, no button."""
+    probe = 'el.shadowRoot.querySelectorAll("a.nav").length'
+    assert _mount("geely-card", probe) == 0
+    assert _mount("geely-card", probe, at=[0, 0]) == 0
+
+
+def test_the_navigation_links_stay_usable_while_the_car_is_driving():
+    """They open a map; they do not command the car. Someone whose car is being
+    driven away is exactly who wants to see where it is."""
+    probe = """[...el.shadowRoot.querySelectorAll("a.nav")]
+                 .filter((a) => !a.hasAttribute("disabled")).length"""
+    assert _mount("geely-card", probe, at=[32.1, 34.8],
+                  speed="63", engine="Running") == 2
+
+
+# ------------------------------------------ one command at a time, with a gap
+
+def test_a_second_tap_during_the_wait_is_not_sent():
+    """The car refuses a command that arrives while it is still executing the
+    last one, and the refused command is dropped rather than queued - so the tap
+    is lost and the owner gets an error toast. Holding it back here is the
+    difference between one working command and one working plus one lost."""
+    script = """() => {
+        const el = document.createElement("geely-card");
+        document.body.appendChild(el);
+        el.setConfig({});
+        const hass = window.mkHass({});
+        el.hass = hass;
+        el._onAction("find");
+        el._onAction("find");
+        el._onAction("defrost");
+        return hass.serviceCalls.map((c) => c[0] + "." + c[1]);
+    }"""
+    assert _evaluate(script) == ["button.press"]
+
+
+def test_cooldown_zero_turns_the_gate_off_for_anyone_who_wants_it_off():
+    script = """() => {
+        const el = document.createElement("geely-card");
+        document.body.appendChild(el);
+        el.setConfig({ cooldown: 0 });
+        const hass = window.mkHass({});
+        el.hass = hass;
+        el._onAction("find");
+        el._onAction("find");
+        return hass.serviceCalls.length;
+    }"""
+    assert _evaluate(script) == 2
+
+
+def test_the_stepper_moves_the_number_now_and_tells_the_car_once():
+    """Three taps from 22 to 23.5 used to be three commands, two of them dropped
+    with "the last request has not yet been executed". The display has to keep up
+    with the finger, and the car has to hear one number."""
+    script = """() => new Promise((done) => {
+        const el = document.createElement("geely-card");
+        document.body.appendChild(el);
+        el.setConfig({});
+        const hass = window.mkHass({});
+        el.hass = hass;
+        const shown = () => el.shadowRoot.querySelector(".tval").textContent.trim();
+        el._onAction("tempup"); el._onAction("tempup"); el._onAction("tempup");
+        const afterTaps = { shown: shown(), sent: hass.serviceCalls.length };
+        setTimeout(() => done({ afterTaps,
+            sent: hass.serviceCalls.map((c) => c[2].temperature) }), 1600);
+    })"""
+    got = _evaluate(script, timeout=8000)
+    assert got["afterTaps"] == {"shown": "23.5\u00b0", "sent": 0}, got
+    assert got["sent"] == [23.5], got
+
+
+def test_a_command_the_car_refused_because_it_was_busy_is_retried_once():
+    """A refused command never ran, so a retry is the only way it happens - and
+    that is a different thing from the second command this project reverted in
+    v1.21.5, which raced a first one that *was* running."""
+    script = """() => new Promise((done) => {
+        const el = document.createElement("geely-card");
+        document.body.appendChild(el);
+        el.setConfig({ cooldown: 0.05 });
+        const hass = window.mkHass({});
+        let attempts = 0;
+        hass.callService = () => {
+            attempts += 1;
+            return attempts === 1
+              ? Promise.reject({ message: "The last request has not yet been executed, please send the command later!" })
+              : Promise.resolve();
+        };
+        el.hass = hass;
+        el._onAction("find");
+        setTimeout(() => done(attempts), 900);
+    })"""
+    assert _evaluate(script, timeout=8000) == 2
+
+
+def test_a_real_refusal_is_not_retried_and_still_reaches_the_user():
+    """Only "still busy" earns a retry. Anything else is the car saying no, and
+    hiding it would leave the owner believing a command worked."""
+    script = """() => new Promise((done) => {
+        const el = document.createElement("geely-card");
+        document.body.appendChild(el);
+        el.setConfig({ cooldown: 0.05 });
+        const hass = window.mkHass({});
+        let attempts = 0, surfaced = null;
+        hass.callService = () => {
+            attempts += 1;
+            return Promise.reject({ message: "feature not available on this vehicle" });
+        };
+        el.hass = hass;
+        // The card raises its own toast, the way Home Assistant's cards do.
+        el.addEventListener("hass-notification", (e) => { surfaced = e.detail.message; });
+        el._onAction("find");
+        addEventListener("unhandledrejection", (e) => e.preventDefault());
+        setTimeout(() => done({ attempts, surfaced }), 700);
+    })"""
+    got = _evaluate(script, timeout=8000)
+    assert got["attempts"] == 1, got
+    assert got["surfaced"] == "Geely: feature not available on this vehicle", got

@@ -45,6 +45,7 @@ from homeassistant.util import dt as _dt_util
 from homeassistant.util.unit_conversion import DistanceConverter
 
 from .const import (
+    CONF_BATTERY_KWH,
     CONF_FULL_EXPOSURE,
     CONF_PRESSURE_UNIT,
     DEFAULT_PRESSURE_UNIT,
@@ -428,6 +429,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
     device_name = bundle.get("device_name") or f"Geely ({vin})"
     pressure_unit = (entry.options.get(CONF_PRESSURE_UNIT)
                      or entry.data.get(CONF_PRESSURE_UNIT, DEFAULT_PRESSURE_UNIT))
+    # Optional, and unset for everyone who has not been asked: Range At Full
+    # Charge falls back to extrapolating the car's own estimate without it.
+    try:
+        battery_kwh = float(entry.options.get(CONF_BATTERY_KWH)
+                            or entry.data.get(CONF_BATTERY_KWH) or 0.0)
+    except (TypeError, ValueError):
+        battery_kwh = 0.0
 
     # The verdict is decided once in __init__ so every platform agrees; a BEV
     # (or a missing verdict) takes every gate the permissive way and is
@@ -453,7 +461,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
     add_entities([
         GeelyEfficiencySensor(coordinator, vin, device_name),
         GeelyLastUpdatedSensor(coordinator, vin, device_name),
-        GeelyFullRangeSensor(coordinator, vin, device_name),
+        GeelyFullRangeSensor(coordinator, vin, device_name, battery_kwh),
         GeelyLastTripSensor(coordinator, vin, device_name),
         GeelyTripInProgressSensor(coordinator, vin, device_name),
         # Charging: the car sends volts and amps but never their product, so
@@ -764,15 +772,24 @@ class GeelyFullRangeSensor(CoordinatorEntity, _AutoPrecision):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:map-marker-path"
 
-    def __init__(self, coordinator, vin: str, device_name: str) -> None:
+    def __init__(self, coordinator, vin: str, device_name: str,
+                 capacity_kwh: float = 0.0) -> None:
         super().__init__(coordinator)
         self._attr_unique_id = f"geely_{vin}_full_range"
         self._attr_name = "Range At Full Charge"
+        self._capacity_kwh = capacity_kwh or 0.0
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, vin)}, manufacturer="Geely", name=device_name)
 
-    @property
-    def native_value(self):
+    def _projected(self) -> float | None:
+        """The car's own remaining-range estimate, scaled to 100%.
+
+        Inherits whatever the car assumed about the driving to come, which on an
+        EX5 lands near the WLTP figure - one owner's card read 426 km while the
+        same card showed his lifetime consumption at 22.7 kWh/100 km, which on a
+        60.22 kWh pack is 265 km. Both numbers are real; they answer different
+        questions, and this one is the optimistic answer.
+        """
         data = self.coordinator.data or {}
         try:
             charge = float(_walk(data, (*_EV, "chargeLevel")))
@@ -781,7 +798,51 @@ class GeelyFullRangeSensor(CoordinatorEntity, _AutoPrecision):
             return None
         if charge < 10 or rng <= 0:
             return None
-        return round(rng * 100.0 / charge)
+        return rng * 100.0 / charge
+
+    def _measured(self) -> float | None:
+        """Pack size x the car's own measured efficiency.
+
+        Grounded in how this car has actually been driven rather than in what it
+        hopes for, but it needs the pack size, which no payload carries and which
+        cannot be guessed: the EX5 ships 49.52, 60.22 and 68.39 kWh, and the
+        rated range then moves again with the trim's wheels and weight. So it is
+        configured, and unset means this method is simply unavailable.
+        """
+        if not self._capacity_kwh:
+            return None
+        try:
+            consumption = float(_walk(self.coordinator.data or {},
+                                      (*_EV, "averPowerConsumption")))
+        except (TypeError, ValueError):
+            return None
+        if consumption <= 0:
+            return None
+        return self._capacity_kwh * 100.0 / consumption
+
+    @property
+    def native_value(self):
+        measured = self._measured()
+        value = measured if measured is not None else self._projected()
+        return None if value is None else round(value)
+
+    @property
+    def extra_state_attributes(self):
+        """Both answers, and which one the state is.
+
+        Not decoration: the two can differ by 60% on the same car, and an owner
+        comparing this entity against the dashboard deserves to see why rather
+        than concluding the integration is broken.
+        """
+        measured = self._measured()
+        projected = self._projected()
+        return {
+            "method": "measured consumption" if measured is not None
+                      else "car estimate scaled to 100%",
+            "at_measured_consumption_km": None if measured is None else round(measured),
+            "car_estimate_scaled_km": None if projected is None else round(projected),
+            "battery_capacity_kwh": self._capacity_kwh or None,
+        }
 
 
 def _fuel_range_km(data: dict) -> float | None:

@@ -90,6 +90,11 @@ CONF_POLL_MODE     = "poll_mode"
 # Opt-in: expose every raw field the server returns as a diagnostic sensor.
 # Off by default - it is ~180 entities on an EX5 and buries the useful ones.
 CONF_FULL_EXPOSURE = "full_exposure"
+# Usable pack size in kWh, for Range At Full Charge. Not in any payload and not
+# guessable: the EX5 alone ships 49.52, 60.22 and 68.39 kWh packs, and the WLTP
+# figure moves again with the trim's wheels and weight. 0 means "not told", and
+# the sensor then extrapolates the car's own estimate as it always did.
+CONF_BATTERY_KWH = "battery_capacity_kwh"
 
 # Polling profiles. The Geely backend allows one session per account, so each
 # poll briefly logs the phone app out - the mode lets the user trade freshness
