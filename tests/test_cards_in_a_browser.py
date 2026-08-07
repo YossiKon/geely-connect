@@ -25,6 +25,10 @@ POLYFILL = os.path.join(HERE, "fixtures",
                         "scoped-custom-element-registry.js").replace("\\", "/")
 CARD_TAGS = ("geely-card", "geely-card-compact", "geely-card-top",
              "geely-card-mini", "geely-card-strip")
+# The mini card deliberately shows no bar and no percentage on any car: it is a
+# range, a status and three buttons. Cards that do show them:
+BAR_TAGS = ("geely-card", "geely-card-compact", "geely-card-top",
+            "geely-card-strip")
 
 # Builds a fake `hass` inside the page. Tire pressures differ per corner on
 # purpose, so a mirrored pair is visible in the rendered numbers.
@@ -52,6 +56,17 @@ window.mkHass = (opts) => {
   put(`binary_sensor.${P}_hood`, "off");
   put(`sensor.${P}_speed`, opts.speed === undefined ? "0" : opts.speed,
       { unit_of_measurement: "km/h" });
+  // A car with a tank. The integration only creates these when the propulsion
+  // verdict says the tank exists, so their presence is what the card reads.
+  if (opts.fuel) {
+    const f = opts.fuel;
+    if (f.litres !== null) put(`sensor.${P}_fuel_level`, f.litres === undefined ? "31" : f.litres, { unit_of_measurement: "L" });
+    if (f.pct !== null) put(`sensor.${P}_fuel_level_pct`, f.pct === undefined ? "62" : f.pct, { unit_of_measurement: "%" });
+    if (f.range !== null) put(`sensor.${P}_fuel_range`, f.range === undefined ? "480" : f.range, { unit_of_measurement: "km" });
+    if (f.combined !== null) put(`sensor.${P}_combined_range`, f.combined === undefined ? "736" : f.combined, { unit_of_measurement: "km" });
+  }
+  if (opts.noBattery) { delete S[`sensor.${P}_battery`]; }
+  if (opts.noElectric) { delete S[`sensor.${P}_electric_range`]; }
   put(`sensor.${P}_engine_state`, opts.engine || "Off");
   const served = [];
   return { states: S, entities: E, devices: { d: { name: "Geely EX5" } },
@@ -430,3 +445,125 @@ def test_a_renamed_trip_average_is_not_mistaken_for_the_live_speed():
     assert got["resolved"] != "sensor.car_average_speed", got
     assert got["driving"] is False, got
     assert got["banner"] is False, got
+
+
+# ------------------------------- a car with a tank is a different car to read
+
+def _energy_probe():
+    return """{
+        headline: (el.shadowRoot.querySelector(".num.n") ||
+                   el.shadowRoot.querySelector(".num.rng") || {}).textContent || "",
+        labels: [...el.shadowRoot.querySelectorAll(".micro, .pct, .status")]
+                  .map((n) => n.textContent.trim()),
+        bars: el.shadowRoot.querySelectorAll(".bar").length,
+        fuelBars: el.shadowRoot.querySelectorAll(".bar.fuel").length,
+    }"""
+
+
+def test_a_battery_only_car_shows_one_bar_and_calls_it_range():
+    for tag in BAR_TAGS:
+        got = _mount(tag, _energy_probe())
+        assert got["fuelBars"] == 0, (tag, got)
+        assert got["bars"] == 1, (tag, got)
+        assert "256" in got["headline"], (tag, got["headline"])
+        assert not any("fuel" in l.lower() for l in got["labels"]), (tag, got["labels"])
+
+
+def test_a_car_with_a_tank_leads_with_the_combined_range():
+    """The electric range alone understates a hybrid's reach by hundreds of
+    kilometres, so it cannot be the headline. 736 is the combined figure here;
+    256 is the electric one the battery-only card leads with."""
+    for tag in CARD_TAGS:
+        got = _mount(tag, _energy_probe(), fuel={})
+        assert "736" in got["headline"], (tag, got["headline"])
+        assert "256" not in got["headline"], (tag, got["headline"])
+
+
+def test_a_car_with_a_tank_gets_a_second_bar_and_both_percentages():
+    """One bar cannot say which tank it means, and 61% battery beside a 62% tank
+    is a different situation from 61% alone."""
+    for tag in BAR_TAGS:
+        got = _mount(tag, _energy_probe(), fuel={})
+        assert got["fuelBars"] == 1, (tag, got)
+        assert got["bars"] == 2, (tag, got)
+        assert any("62% fuel" in l for l in got["labels"]), (tag, got["labels"])
+
+
+def test_the_big_cards_show_the_split_behind_the_combined_number():
+    """A combined range does not tell a hybrid driver how far it gets before the
+    engine starts. The two halves do."""
+    for tag in ("geely-card", "geely-card-compact", "geely-card-top"):
+        got = _mount(tag, _energy_probe(), fuel={})
+        assert any("256 EV" in l and "480 fuel" in l for l in got["labels"]), (
+            tag, got["labels"])
+        assert any(l == "Combined range" for l in got["labels"]), (tag, got["labels"])
+
+
+def test_a_hybrid_without_a_combined_figure_falls_back_and_says_so():
+    """Some trims report the two halves and not the sum. Showing a dash there
+    would be worse than showing the electric range under its own name."""
+    got = _mount("geely-card", _energy_probe(), fuel={"combined": None})
+    assert "256" in got["headline"], got["headline"]
+    assert any(l == "Electric range" for l in got["labels"]), got["labels"]
+
+
+def test_a_hybrid_reporting_only_a_fuel_range_still_has_a_headline():
+    got = _mount("geely-card", _energy_probe(),
+                 fuel={"combined": None, "range": "412"}, noElectric=True)
+    assert "412" in got["headline"] or "256" in got["headline"], got["headline"]
+
+
+def test_a_tank_with_no_traction_battery_draws_the_fuel_bar_alone():
+    """An empty battery bar on a car that has no traction battery reads as "this
+    car cannot move", which is the opposite of the truth."""
+    got = _mount("geely-card", _energy_probe(), fuel={}, noBattery=True)
+    assert got["bars"] == 1 and got["fuelBars"] == 1, got
+
+
+def test_the_fuel_half_appears_without_any_other_state_changing():
+    """The render is skipped when the watched signature is unchanged, so if the
+    fuel entities are not in it a hybrid's bar and headline would freeze."""
+    script = """() => {
+        const el = document.createElement("geely-card");
+        document.body.appendChild(el);
+        el.setConfig({});
+        el.hass = window.mkHass({});
+        const before = el.shadowRoot.querySelectorAll(".bar.fuel").length;
+        el.hass = window.mkHass({ fuel: {} });
+        const after = el.shadowRoot.querySelectorAll(".bar.fuel").length;
+        el.hass = window.mkHass({ fuel: { pct: "9" } });
+        const moved = [...el.shadowRoot.querySelectorAll(".micro, .pct")]
+                        .some((n) => n.textContent.includes("9% fuel"));
+        return { before, after, moved };
+    }"""
+    got = _evaluate(script)
+    assert got == {"before": 0, "after": 1, "moved": True}, got
+
+
+def test_the_mini_card_says_it_with_the_number_because_it_has_nothing_else():
+    """It shows no bar and no percentage on any car by design. So the whole
+    propulsion difference has to land in the one number it does show - and it
+    must not silently keep showing the electric range on a car with a tank."""
+    ev = _mount("geely-card-mini", _energy_probe())
+    hy = _mount("geely-card-mini", _energy_probe(), fuel={})
+    assert ev["headline"].strip() == "256", ev
+    assert hy["headline"].strip() == "736", hy
+    assert ev["bars"] == 0 and hy["bars"] == 0, (ev, hy)
+
+
+def test_the_fuel_section_reports_the_engine_and_not_the_headline_twice():
+    """The headline already is the combined figure, so repeating it in the fuel
+    section wastes a row. Whether the engine is running is the one hybrid fact
+    these cards could not show anywhere else."""
+    probe = """[...el.shadowRoot.querySelectorAll(".row")]
+                 .map((r) => r.textContent.replace(/\s+/g, " ").trim())"""
+    rows = _mount("geely-card", probe, fuel={}, engine="Running")
+    assert any(r.startswith("Fuel level") for r in rows), rows
+    assert any(r.startswith("Fuel range") for r in rows), rows
+    # The label and value are adjacent elements, so the text runs together.
+    assert any(r.startswith("Engine") and "Running" in r for r in rows), rows
+    assert not any(r.startswith("Combined range") for r in rows), (
+        "the combined range is the headline here and should not repeat", rows)
+    # A trim that reports the halves but not the sum still gets it spelled out.
+    rows = _mount("geely-card", probe, fuel={"combined": None})
+    assert any(r.startswith("Fuel range") for r in rows), rows

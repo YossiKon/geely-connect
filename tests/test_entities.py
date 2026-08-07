@@ -402,3 +402,26 @@ def test_the_steering_wheel_sensor_exists_and_is_read_only():
     assert not any("steer" in k for k in keys if k.startswith(("sw_", "select_"))), (
         "a pressable steering-wheel control appeared, with no verified command"
     )
+
+
+def test_the_documented_entity_counts_are_the_real_ones():
+    """The README promises specific numbers on the first screen, and a new entity
+    silently makes them wrong - which is a small lie in the most-read paragraph
+    in the repository."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    import io
+    import os
+    import types
+    prop = load("propulsion")
+    bev = sum(len(v) for v in _build_all().values())
+    hybrid_verdict = types.SimpleNamespace(
+        has_tank=True, has_plug=True, charges=True,
+        kind=prop.Propulsion.HYBRID, source="declared", declared_raw="phev")
+    hybrid = sum(len(v) for v in _build_all(propulsion=hybrid_verdict).values())
+    readme = io.open(os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "README.md"), encoding="utf-8").read()
+    assert f"all {bev} entities are on from the start ({hybrid} on a" in readme, (
+        f"the README's counts are stale: a battery-only car builds {bev} entities "
+        f"and a hybrid {hybrid}")
+    assert f"{bev} entities and a PHEV gets {hybrid}." in readme

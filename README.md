@@ -23,7 +23,7 @@ polished setup on top.
 ## ✨ Highlights
 
 - 🔒 **Security-first** - verified TLS plus public-key pinning.
-- 📊 **Everything enabled** - all 66 entities are on from the start (79 on a
+- 📊 **Everything enabled** - all 67 entities are on from the start (80 on a
   hybrid), no duplicates, nothing to switch on by hand.
 - 🧮 **Computed extras** - charging power, charge completion time, range at full
   charge and efficiency, none of which the car reports itself.
@@ -158,6 +158,20 @@ everything else.
 ---
 
 ## 🖥️ Dashboards & cards
+
+> **The cards read a car with a tank differently from a battery-only one.** The
+> integration only creates the fuel entities when it has decided the car has a
+> tank, so their presence is what the cards go by - no configuration. On a hybrid
+> or plug-in hybrid the headline becomes the **combined** range, because the
+> electric range alone understates how far the car can go by hundreds of
+> kilometres, with the two halves spelled out under it (*"256 EV · 480 fuel"*).
+> There is a second bar for the tank - one bar cannot say which tank it means -
+> both percentages in the header, and a Fuel section carrying the level, the fuel
+> range and whether the engine is running. A trim that reports only some of those
+> figures falls back through them rather than showing a dash, and a car with a
+> tank but no traction battery gets the fuel bar on its own instead of an empty
+> battery bar implying it cannot move. The mini card shows no bar or percentage on
+> any car by design, so there the difference is the number itself.
 
 > **While the car is being driven, every card locks itself.** The three larger
 > cards show a banner - *"Driving · remote actions are unavailable until the car
@@ -819,7 +833,7 @@ enabling. Everything the car reports, plus the computed extras above.
 
 The one thing that varies by car is propulsion: the thirteen fuel and engine
 entities are created only for a car with a tank, so a battery-electric EX5 gets
-66 entities and a PHEV gets 79. That's a decision made once at startup from your
+67 entities and a PHEV gets 80. That's a decision made once at startup from your
 account's `powerType` plus the car's own telemetry - there is no option to set.
 
 The only thing not created is the raw full-exposure pass (see below), because

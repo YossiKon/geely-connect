@@ -39,6 +39,7 @@
     "charge_voltage", "electric_range", "charge_current", "door_passenger",
     "charger_plug", "total_mileage", "refresh_data", "unlock_trunk",
     "door_driver", "12v_battery", "trip_meter", "fuel_level", "fuel_range",
+    "fuel_level_pct",
     "pack_power", "efficiency", "find_car", "connected", "defrost", "sunroof",
     // Average Speed and Engine Speed both produce ids ending in "_speed", and
     // Engine State is read for the driving lock, so all three are listed: the
@@ -79,7 +80,14 @@
 
   /* Folded into every card's change signature on top of its own list, because
    * the driving banner is drawn for all of them by the base class. */
-  const ALWAYS_WATCHED = ["sensor.speed", "sensor.engine_state"];
+  const ALWAYS_WATCHED = [
+    "sensor.speed", "sensor.engine_state",
+    // The propulsion split: _carState() reads these for every card, so a
+    // card that did not watch them would freeze a hybrid's fuel bar and
+    // headline exactly the way the door count froze once.
+    "sensor.fuel_level", "sensor.fuel_level_pct", "sensor.fuel_range",
+    "sensor.combined_range",
+  ];
 
   const ACCENT = "var(--geely-accent, #2fd6a4)";
   const AMBER = "var(--geely-warn, #e8a13a)";
@@ -454,6 +462,11 @@
     .act.armed { color: ${AMBER}; border-color: ${AMBER}; animation: geely-arm 1s ease infinite; }
     .act.armed span { color: ${AMBER}; }
     .act[disabled] { opacity: .35; pointer-events: none; }
+
+    /* The second bar, on a car with a tank. Deliberately not the accent
+     * colour: the two bars must not be mistaken for one another at a glance. */
+    .bar.fuel { margin-top: 4px; }
+    .bar.fuel i { background: var(--geely-fuel, #8b93a1); }
 
     /* While the car is moving. Amber rather than red: nothing is wrong, the
      * controls are simply not available yet. */
@@ -1017,13 +1030,81 @@
       const charging = (conn && conn.state === "Charging") ||
         (chargePower != null && chargePower > 0.3);
       const battery = NUM(this._st("sensor.battery"));
-      const range = this._st("sensor.electric_range");
+      const electric = this._st("sensor.electric_range");
+      const fuelLevel = this._st("sensor.fuel_level");
+      const fuelPct = this._st("sensor.fuel_level_pct");
+      const fuelRange = this._st("sensor.fuel_range");
+      const combined = this._st("sensor.combined_range");
+      // A car with a tank is a different car to read, and the integration only
+      // creates these entities when the propulsion verdict says the tank is
+      // there - so their presence *is* the verdict, and the card needs no second
+      // guess at what it is looking at.
+      const hybrid = !!(fuelLevel || fuelPct || fuelRange);
+      // The headline has to be the number this driver plans a journey with. On a
+      // car with a tank the electric range alone understates how far it can go
+      // by hundreds of kilometres; on a battery-only car it is the whole story.
+      // Falling back through the three keeps a trim that reports only some of
+      // them readable instead of showing a dash.
+      const range = !hybrid ? electric
+        : OK(combined) ? combined
+        : OK(electric) ? electric
+        : fuelRange;
+      const rangeKind = !hybrid ? "electric"
+        : OK(combined) ? "combined"
+        : OK(electric) ? "electric"
+        : "fuel";
       const locked = this._st("lock.doors");
       const climate = this._st("climate.climate");
       const doorsOpen = ["door_driver", "door_passenger", "door_rear_left",
         "door_rear_right", "trunk", "hood"]
         .filter((d) => { const st = this._st(`binary_sensor.${d}`); return st && st.state === "on"; });
-      return { conn, charging, battery, range, locked, climate, doorsOpen };
+      return { conn, charging, battery, range, rangeKind, hybrid, electric,
+               fuelLevel, fuelPct, fuelRange, combined, locked, climate, doorsOpen };
+    }
+
+    /* "61% · 48% fuel" - the percentage line. On a car with a tank a lone
+     * battery percentage reads as the whole story and is not: 8% battery with a
+     * full tank is a car that will happily drive you home. */
+    _levels(s, batt) {
+      if (!s.hybrid || !OK(s.fuelPct)) return `${batt}%`;
+      return `${batt}% · ${Math.round(NUM(s.fuelPct))}% fuel`;
+    }
+
+    /* What to call the headline number, so it never means two things. */
+    _rangeLabel(s) {
+      if (s.rangeKind === "combined") return "Combined range";
+      if (s.rangeKind === "fuel") return "Fuel range";
+      return s.hybrid ? "Electric range" : "Range";
+    }
+
+    /* "212 EV · 480 fuel" - the two halves behind a combined figure. Without it
+     * the headline is a number a hybrid driver cannot act on, because it does
+     * not say how far the car gets before the engine has to start. */
+    _rangeSplit(s) {
+      if (!s.hybrid) return "";
+      const parts = [];
+      if (OK(s.electric)) parts.push(`${Math.round(NUM(s.electric))} EV`);
+      if (OK(s.fuelRange)) parts.push(`${Math.round(NUM(s.fuelRange))} fuel`);
+      return parts.length > 1 ? parts.join(" · ") : "";
+    }
+
+    /* The energy bars: one on a battery-only car, two on a car with a tank.
+     * A hybrid driver reading a single bar cannot tell which tank it means, and
+     * a plug-in on an empty battery with a full tank is not "nearly out".
+     * Drawn here rather than in each card so all five agree. */
+    _bars(s, style = "") {
+      const clamp = (v) => Math.max(0, Math.min(100, v));
+      const bar = (pct, cls) => `<div class="bar ${cls}" style="${style}">
+            <i style="width:${pct == null ? 0 : clamp(pct)}%"></i>
+          </div>`;
+      const batt = s.battery == null ? null : Math.round(s.battery);
+      const fuel = NUM(s.fuelPct);
+      const low = batt != null && batt <= 20;
+      // A hybrid with no traction battery to speak of gets the fuel bar alone,
+      // rather than an empty battery bar implying it cannot move.
+      if (batt == null && fuel != null) return bar(fuel, "fuel");
+      const first = bar(batt, `${low ? "low" : ""} ${s.charging ? "charging" : ""}`);
+      return s.hybrid && fuel != null ? first + bar(fuel, "fuel") : first;
     }
 
     _title() {
@@ -1064,7 +1145,7 @@
       const power = NUM(this._st("sensor.charging_power"));
       const range = OK(s.range) ? Math.round(NUM(s.range)) : "—";
       const batt = s.battery == null ? "—" : Math.round(s.battery);
-      const low = s.battery != null && s.battery <= 20;
+      const split = this._rangeSplit(s);
       const climateOn = s.climate && s.climate.state !== "off";
       const defrost = this._st("switch.defrost");
       const online = this._st("binary_sensor.connected");
@@ -1096,18 +1177,17 @@
               <i class="dot ${online && online.state === "off" ? "off" : ""}"></i>
               ${esc(this._title())}
             </div>
-            <span class="micro">${batt}%</span>
+            <span class="micro">${this._levels(s, batt)}</span>
           </div>
           <div class="hero">
             <div>
               <div class="num n ${OK(s.range) ? "" : "unavail"}">${range}<span class="u">km</span></div>
-              <div class="micro sub">Range</div>
+              <div class="micro sub">${esc(this._rangeLabel(s))}</div>
+              ${split ? `<div class="micro sub">${esc(split)}</div>` : ""}
             </div>
             <div class="carwrap">${CAR_SVG(s.charging ? "charging" : "", this._openMap())}</div>
           </div>
-          <div class="bar ${low ? "low" : ""} ${s.charging ? "charging" : ""}" style="margin:2px 0 10px">
-            <i style="width:${batt === "—" ? 0 : batt}%"></i>
-          </div>
+          <div style="margin:2px 0 10px">${this._bars(s)}</div>
           <div class="chips" style="margin-bottom:12px">${chips || '<span class="chip">Parked</span>'}</div>
           <div class="actions">
             ${this._actBtn("lock", "Lock", "lock", { on: s.locked && s.locked.state === "locked" })}
@@ -1155,7 +1235,7 @@
       if (!this._prefix) return this._missing();
       const s = this._carState();
       const batt = s.battery == null ? "—" : Math.round(s.battery);
-      const low = s.battery != null && s.battery <= 20;
+      const split = this._rangeSplit(s);
       const range = OK(s.range) ? Math.round(NUM(s.range)) : "—";
       const climateOn = s.climate && s.climate.state !== "off";
       const defrost = this._st("switch.defrost");
@@ -1170,7 +1250,6 @@
       const schedB = this._st("time.scheduled_charging_end");
       const fuelRange = this._st("sensor.fuel_range");
       const combined = this._st("sensor.combined_range");
-      const hybrid = !!this._st("sensor.fuel_level");
       const speed = NUM(this._st("sensor.speed"));
 
       const tire = (suffix) => {
@@ -1230,22 +1309,21 @@
               </div>
               <div class="status ${s.charging ? "charging" : ""}">${esc(statusLine)}</div>
             </div>
-            <span class="micro">${batt}%</span>
+            <span class="micro">${this._levels(s, batt)}</span>
           </div>
 
           <div class="hero">
             <div>
               <div class="num n ${OK(s.range) ? "" : "unavail"}">${range}<span class="u">km</span></div>
-              <div class="micro" style="margin-top:5px">${hybrid ? "Electric range" : "Range"}</div>
+              <div class="micro" style="margin-top:5px">${esc(this._rangeLabel(s))}</div>
+              ${split ? `<div class="micro" style="margin-top:3px">${esc(split)}</div>` : ""}
             </div>
             <div class="side">
               ${OK(interior) ? `<div class="num">${Math.round(NUM(interior))}°</div>
                 <div class="u2">inside${OK(exterior) ? ` · ${Math.round(NUM(exterior))}° out` : ""}</div>` : ""}
             </div>
           </div>
-          <div class="bar ${low ? "low" : ""} ${s.charging ? "charging" : ""}">
-            <i style="width:${batt === "—" ? 0 : batt}%"></i>
-          </div>
+          ${this._bars(s)}
 
           <div class="carwrap">${CAR_SVG(s.charging ? "charging" : "", this._openMap())}</div>
 
@@ -1279,13 +1357,21 @@
             ${this._row("Pack power", this._st("sensor.pack_power"))}
           </div>
 
-          ${hybrid ? `
+          ${s.hybrid ? `
           <hr class="hairline">
           <p class="micro">${icon("fuel")} Fuel</p>
           <div class="grid sec">
             ${this._row("Fuel level", this._st("sensor.fuel_level"))}
             ${this._row("Fuel range", fuelRange)}
-            ${this._row("Combined range", combined, { accent: true })}
+            ${/* The headline already IS the combined figure whenever the car
+                  reports one, so repeating it here wastes the row. On a trim
+                  that only reports the two halves it is worth showing. */""}
+            ${s.rangeKind === "combined" ? "" :
+              this._row("Combined range", combined, { accent: true })}
+            ${/* Only a car with an engine has an engine to report, and whether
+                  it is running is the fact a hybrid owner cannot get anywhere
+                  else on these cards. */""}
+            ${this._row("Engine", this._st("sensor.engine_state"))}
           </div>` : ""}
 
           <hr class="hairline">
@@ -1393,7 +1479,7 @@
       const s = this._carState();
       const range = OK(s.range) ? Math.round(NUM(s.range)) : "—";
       const batt = s.battery == null ? "—" : Math.round(s.battery);
-      const low = s.battery != null && s.battery <= 20;
+      const split = this._rangeSplit(s);
       const power = NUM(this._st("sensor.charging_power"));
       const locked = s.locked && s.locked.state === "locked";
       const online = this._st("binary_sensor.connected");
@@ -1437,7 +1523,7 @@
               <div class="topline">
                 <i class="dot ${online && online.state === "off" ? "off" : ""}"></i>
                 <span class="num rng ${OK(s.range) ? "" : "unavail"}">${range}<span class="u">km</span></span>
-                <span class="pct">${batt}%</span>
+                <span class="pct">${this._levels(s, batt)}</span>
               </div>
               <div class="status ${driving ? "warn" : s.charging ? "charging" : s.doorsOpen.length ? "warn" : ""}">${esc(statusLine)}</div>
             </div>
@@ -1451,9 +1537,7 @@
               ${this._actBtn("find", "Find", "find")}
             </div>
           </div>
-          <div class="bar ${low ? "low" : ""} ${s.charging ? "charging" : ""}">
-            <i style="width:${batt === "—" ? 0 : batt}%"></i>
-          </div>
+          ${this._bars(s)}
         </div>`;
       this._wire();
     }
@@ -1578,7 +1662,7 @@
       if (!this._prefix) return this._missing();
       const s = this._carState();
       const batt = s.battery == null ? "—" : Math.round(s.battery);
-      const low = s.battery != null && s.battery <= 20;
+      const split = this._rangeSplit(s);
       const range = OK(s.range) ? Math.round(NUM(s.range)) : "—";
       const climateOn = s.climate && s.climate.state !== "off";
       const defrost = this._st("switch.defrost");
@@ -1593,7 +1677,6 @@
       const schedB = this._st("time.scheduled_charging_end");
       const fuelRange = this._st("sensor.fuel_range");
       const combined = this._st("sensor.combined_range");
-      const hybrid = !!this._st("sensor.fuel_level");
       const speed = NUM(this._st("sensor.speed"));
 
       const isOpen = (suffix) => {
@@ -1674,22 +1757,21 @@
               </div>
               <div class="status ${s.charging ? "charging" : ""}">${esc(statusLine)}</div>
             </div>
-            <span class="micro">${batt}%</span>
+            <span class="micro">${this._levels(s, batt)}</span>
           </div>
 
           <div class="hero">
             <div>
               <div class="num n ${OK(s.range) ? "" : "unavail"}">${range}<span class="u">km</span></div>
-              <div class="micro" style="margin-top:5px">${hybrid ? "Electric range" : "Range"}</div>
+              <div class="micro" style="margin-top:5px">${esc(this._rangeLabel(s))}</div>
+              ${split ? `<div class="micro" style="margin-top:3px">${esc(split)}</div>` : ""}
             </div>
             <div class="side">
               ${OK(interior) ? `<div class="num">${Math.round(NUM(interior))}°</div>
                 <div class="u2">inside${OK(exterior) ? ` · ${Math.round(NUM(exterior))}° out` : ""}</div>` : ""}
             </div>
           </div>
-          <div class="bar ${low ? "low" : ""} ${s.charging ? "charging" : ""}">
-            <i style="width:${batt === "—" ? 0 : batt}%"></i>
-          </div>
+          ${this._bars(s)}
 
           <div class="actions">
             ${this._actBtn("lock", "Lock", "lock", { on: s.locked && s.locked.state === "locked" })}
@@ -1723,13 +1805,21 @@
             ${this._row("Pack power", this._st("sensor.pack_power"))}
           </div>
 
-          ${hybrid ? `
+          ${s.hybrid ? `
           <hr class="hairline">
           <p class="micro">${icon("fuel")} Fuel</p>
           <div class="grid sec">
             ${this._row("Fuel level", this._st("sensor.fuel_level"))}
             ${this._row("Fuel range", fuelRange)}
-            ${this._row("Combined range", combined, { accent: true })}
+            ${/* The headline already IS the combined figure whenever the car
+                  reports one, so repeating it here wastes the row. On a trim
+                  that only reports the two halves it is worth showing. */""}
+            ${s.rangeKind === "combined" ? "" :
+              this._row("Combined range", combined, { accent: true })}
+            ${/* Only a car with an engine has an engine to report, and whether
+                  it is running is the fact a hybrid owner cannot get anywhere
+                  else on these cards. */""}
+            ${this._row("Engine", this._st("sensor.engine_state"))}
           </div>` : ""}
 
           <hr class="hairline">
