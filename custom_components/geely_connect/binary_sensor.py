@@ -53,10 +53,14 @@ SPECS: tuple[tuple[str, str, tuple[str, ...], BinarySensorDeviceClass | None, tu
     ("driver_seatbelt",      "Driver Seatbelt",   (*_SAFE, "seatBeltStatusDriver"),         None,                            ("true", True)),
     # `statusOfChargerConnection` - values:
     #   0 = unplugged
-    #   1 / 2 = plugged but idle
-    #   3 = actively drawing current
-    # We only expose "plugged in" here (1/2/3). Active-charging state is
-    # surfaced by switch.charging.
+    #   1 / 2 / 3 = a cable is present
+    # This entity answers only "is a cable present", which is why every
+    # non-zero code counts. The codes do NOT reliably say more than that: 3
+    # is often called "charging", but a 41-minute DC fast charge at ~92 kW
+    # held the field at 1 from plug to unplug (#10). Whether the car is
+    # actually charging is sensor._is_charging - the composite that also
+    # reads the DC contactor and the sign of the pack current - and that is
+    # what switch.charging follows.
     ("charger_plugged_in",   "Charger Plug",      (*_EV,   "statusOfChargerConnection"),    BinarySensorDeviceClass.PLUG,    ("1", 1, "2", 2, "3", 3)),
 )
 

@@ -1,8 +1,11 @@
 """Geely one-shot action buttons.
 
-AVD-verified 2026-05-01:
-  Find car        → RHL / [{rhl: "horn-light-flash"}]
-  Unlock Trunk    → RDU_2 / [{target: "trunk"}]
+  Find car        → RHL / [{rhl: "horn-light-flash"}]     verified live
+  Unlock Trunk    → RDU_2 / [{target: "trunk"}]           see const.py: what
+      this achieves differs by car, and no capture of a powered-open command
+      exists. The label "AVD-verified 2026-05-01" used to appear here; it
+      predates this repository's public history and nobody can produce the
+      capture, so it is gone rather than left to lend false confidence.
 
 Rapid warming / cooling are exposed as climate.preset_modes - see
 climate.py - because they're a "set the climate to a mode" action, not

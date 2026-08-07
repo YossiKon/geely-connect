@@ -920,12 +920,16 @@ def _charge_leg(data: dict) -> tuple[float, float] | None:
       52.4 A - so the product rule published 17.7 kW of "charging" on a car
       running on a 233 V 8 A lead, and put that in long-term statistics.
 
-    Only the car can say whether it is charging, and it already does, in the
-    field behind the Charger Connection label. So gate on that first: not
-    charging reads 0 kW, because a gap in a power graph is indistinguishable
-    from a failed poll. Then, and only then, pick between the legs by product -
-    still needed, because an AC sense current and a live DC fast charge can be
-    present at the same moment. None only when the fields are absent.
+    Nor, it turned out, can the larger product be trusted even once the car
+    says it is charging: one EX5 reports `dcChargeUAct` climbing through 1575,
+    1580, 1586 while AC charging, and 1586 x 16.1 beats an honest 236.7 x 28.4
+    every time (#17). Picking the leg by apparent power published 25.5 kW on a
+    6.7 kW wallbox.
+
+    So the gate comes first - not charging reads 0 kW, because a gap in a power
+    graph is indistinguishable from a failed poll - and the leg is then chosen
+    by the DC contactor rather than by comparing the two pairs. See the rule
+    below. None only when the fields are absent.
 
     One resolver for all three charge sensors: split across them, power could
     report the DC leg while current reported the AC one.

@@ -254,6 +254,15 @@ SERIES_TO_FRIENDLY_NAME: dict[str, str] = {
 # === serviceId catalog ===
 # Most controls fire `PUT /remote-control/vehicle/telematics/{VIN}` with
 # `{serviceId, command, serviceParameters: [{key, value}, ...]}`.
+#
+# On the "AVD-verified" labels below: they mark commands taken from an Android
+# app capture that predates this repository's public history, so the capture
+# itself cannot be produced. Treat the label as "worked when someone tried it",
+# not as proof. Where owners have since confirmed the behaviour - the climate
+# and seat commands, G-Clean, the charge-server family - it has earned its
+# keep. Where owners contradict it, it has been removed: the tailgate entry
+# below carried the same label and two owners report the app only unlocking
+# and the key fob doing the opening.
 # Rapid warm/cool is the exception - see SERVICE_RAPID_*_PATH below.
 
 # --- Lock (verified live) ---
@@ -265,9 +274,17 @@ SERVICE_LOCK_PARAMS  = [{"key": "door", "value": "all"}]
 SERVICE_FIND_CAR        = "RHL"
 SERVICE_FIND_CAR_PARAMS = [{"key": "rhl", "value": "horn-light-flash"}]
 
-# --- Tailgate UNLOCK (AVD-verified 2026-05-01) ---
+# --- Tailgate UNLOCK ---
 # Uses RDU_2 (door-unlock service) with target=trunk - NOT a separate RTB
-# service. Auto-relocks ~45s if not physically opened.
+# service. What that achieves depends on the car, and owner reports disagree:
+# on a P145 PHEV it releases the tailgate latch, which then re-locks itself
+# after a short window if nobody lifts the gate (#14); on an Australian EX5
+# Inspire - one that advertises tailgate.enabled - it flashes the indicators
+# and the latch does not release (#20). Two owners also report that the
+# official app only ever unlocks, never opens, and that opening comes from
+# the key fob, which suggests the powered open is not exposed by this cloud
+# API at all. No capture backs a separate open command, and none backs the
+# "~45s" figure that used to be stated here as fact either.
 SERVICE_TAILGATE        = "RDU_2"
 SERVICE_TAILGATE_PARAMS  = [{"key": "target", "value": "trunk"}]
 
