@@ -289,15 +289,30 @@ SERVICE_FIND_CAR_PARAMS = [{"key": "rhl", "value": "horn-light-flash"}]
 
 # --- Tailgate UNLOCK ---
 # Uses RDU_2 (door-unlock service) with target=trunk - NOT a separate RTB
-# service. What that achieves depends on the car, and owner reports disagree:
-# on a P145 PHEV it releases the tailgate latch, which then re-locks itself
-# after a short window if nobody lifts the gate (#14); on an Australian EX5
-# Inspire - one that advertises tailgate.enabled - it flashes the indicators
-# and the latch does not release (#20). Two owners also report that the
-# official app only ever unlocks, never opens, and that opening comes from
-# the key fob, which suggests the powered open is not exposed by this cloud
-# API at all. No capture backs a separate open command, and none backs the
-# "~45s" figure that used to be stated here as fact either.
+# service.
+#
+# FOUR owners now report that the official app only ever *unlocks* the tailgate
+# and never opens it, across three trims - EX5 Inspire, EX5 Tech and P145 PHEV -
+# with the powered open coming from the key fob long-press or the car's own
+# screen (#14, #20). One owner reports otherwise; his is the single dissenting
+# account and his issue stays open for it.
+#
+# So this is very probably not a missing feature but the same action the app
+# performs: the powered open appears not to be exposed by this cloud API at all,
+# and the fob talks to the car over a channel nothing here can reach. What it
+# *looks* like still differs by car - some latches release, one owner's car only
+# flashes its indicators - and drivingSafetyStatus.trunkLockStatus (exposed as
+# binary_sensor.<vin>_bs_trunk_unlocked) is the way to tell which happened.
+#
+# Worth knowing before anyone probes again: the capability catalogue advertises
+# `remote_control_open_2` as its own entry, separate from
+# `remote_control_unlock_2`, and by the RDL_2 / RDU_2 naming pattern a "Remote
+# Door Open" service would be RDO_2. Nobody has tried it. Given four owners
+# whose app cannot open the gate either, the likeliest outcome is that it does
+# not exist - but it is one fire_control call for whoever wants to be certain.
+#
+# No capture backs a separate open command, and none backs the "~45s" figure that
+# used to be stated here as fact either.
 SERVICE_TAILGATE        = "RDU_2"
 SERVICE_TAILGATE_PARAMS  = [{"key": "target", "value": "trunk"}]
 
