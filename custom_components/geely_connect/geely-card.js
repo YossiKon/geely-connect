@@ -140,6 +140,8 @@
 
   const ACCENT = "var(--geely-accent, #2fd6a4)";
   const AMBER = "var(--geely-warn, #e8a13a)";
+  const ON_TEXT = `color-mix(in srgb, ${ACCENT} 76%, var(--primary-text-color, #1c1c1e))`;
+  const WARN_TEXT = `color-mix(in srgb, ${AMBER} 76%, var(--primary-text-color, #1c1c1e))`;
 
   /* ------------------------------------------------------------ helpers -- */
 
@@ -493,8 +495,18 @@
       color: var(--secondary-text-color, #7a7f87); white-space: nowrap;
     }
     .chip svg { width: 12px; height: 12px; }
-    .chip.on { color: ${ACCENT}; border-color: color-mix(in srgb, ${ACCENT} 45%, transparent); }
-    .chip.warn { color: ${AMBER}; border-color: color-mix(in srgb, ${AMBER} 45%, transparent); }
+    .chip.on {
+      color: ${ON_TEXT};
+      border-color: color-mix(in srgb, ${ACCENT} 55%, transparent);
+      background: color-mix(in srgb, ${ACCENT} 15%, transparent);
+      font-weight: 600;
+    }
+    .chip.warn {
+      color: ${WARN_TEXT};
+      border-color: color-mix(in srgb, ${AMBER} 55%, transparent);
+      background: color-mix(in srgb, ${AMBER} 15%, transparent);
+      font-weight: 600;
+    }
     .actions { display: flex; gap: 8px; justify-content: space-between; }
     .act {
       flex: 1; display: flex; flex-direction: column; align-items: center; gap: 5px;
@@ -508,9 +520,30 @@
                 color: var(--secondary-text-color); }
     .act:active { transform: scale(.94); }
     .act:hover { border-color: color-mix(in srgb, currentColor 35%, transparent); }
-    .act.on { color: ${ACCENT}; border-color: color-mix(in srgb, ${ACCENT} 45%, transparent); }
-    .act.armed { color: ${AMBER}; border-color: ${AMBER}; animation: geely-arm 1s ease infinite; }
-    .act.armed span { color: ${AMBER}; }
+    /* Active state. It used to be a 45%-tinted outline and a coloured icon,
+     * which on the mini and strip cards - where the labels are hidden - left an
+     * "on" button almost indistinguishable from an off one. A state worth
+     * showing is worth showing properly: a filled tint so it reads as solid, a
+     * firmer edge, a soft lift, and the label joining in rather than staying
+     * grey. Same language for amber, so "active" and "needs a look" are told
+     * apart by hue and never by intensity. */
+    .act.on {
+      color: ${ON_TEXT};
+      border-color: color-mix(in srgb, ${ACCENT} 60%, transparent);
+      background: color-mix(in srgb, ${ACCENT} 16%, transparent);
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, ${ACCENT} 22%, transparent),
+                  0 3px 14px -8px color-mix(in srgb, ${ACCENT} 90%, transparent);
+    }
+    .act.on span { color: ${ON_TEXT}; }
+    .act.on svg { opacity: 1; }
+    .act.on:hover { background: color-mix(in srgb, ${ACCENT} 24%, transparent); }
+    .act.armed {
+      color: ${WARN_TEXT};
+      border-color: ${AMBER};
+      background: color-mix(in srgb, ${AMBER} 18%, transparent);
+      animation: geely-arm 1s ease infinite;
+    }
+    .act.armed span { color: ${WARN_TEXT}; }
     .act[disabled] { opacity: .35; pointer-events: none; }
 
     /* Navigation links. Deliberately quieter than the command buttons beside
@@ -563,7 +596,11 @@
     .temp { display:flex; align-items:center; gap:2px; flex:none;
             border:1px solid var(--divider-color, rgba(120,130,140,.25));
             border-radius:14px; padding:2px; }
-    .temp.on { border-color: color-mix(in srgb, ${ACCENT} 45%, transparent); }
+    .temp.on {
+      border-color: color-mix(in srgb, ${ACCENT} 60%, transparent);
+      background: color-mix(in srgb, ${ACCENT} 12%, transparent);
+    }
+    .temp.on .tval { color: ${ON_TEXT}; }
     .temp .tval { min-width:52px; text-align:center; font-size:16px; font-weight:600;
                   font-variant-numeric: tabular-nums; }
     .csub { margin-top:10px; }
@@ -582,8 +619,15 @@
     .cbtn:active { transform: scale(.95); }
     .cbtn svg { width:17px; height:17px; }
     .cbtn b { font-weight:600; font-size:11px; color: var(--secondary-text-color); }
-    .cbtn.on { color:${ACCENT}; border-color: color-mix(in srgb, ${ACCENT} 45%, transparent); }
-    .cbtn.on b { color: var(--primary-text-color); }
+    .cbtn.on {
+      color:${ON_TEXT};
+      border-color: color-mix(in srgb, ${ACCENT} 60%, transparent);
+      background: color-mix(in srgb, ${ACCENT} 16%, transparent);
+      box-shadow: 0 3px 14px -8px color-mix(in srgb, ${ACCENT} 90%, transparent);
+    }
+    /* The level - Low / Medium / High - is the whole point of a seat button, so
+     * it gets the strongest treatment on the card. */
+    .cbtn.on b { color:${ON_TEXT}; font-weight: 700; }
     @media (hover: hover) {
       .cstep:hover, .cmini:hover { background: rgba(120,130,140,.15); }
     }
@@ -591,7 +635,11 @@
              border:1px solid var(--divider-color, rgba(120,130,140,.25));
              border-radius:14px; font-size:12px; }
     .cpair svg { width:17px; height:17px; }
-    .cpair.on { color:${ACCENT}; border-color: color-mix(in srgb, ${ACCENT} 45%, transparent); }
+    .cpair.on {
+      color:${ON_TEXT};
+      border-color: color-mix(in srgb, ${ACCENT} 60%, transparent);
+      background: color-mix(in srgb, ${ACCENT} 14%, transparent);
+    }
     .ctime { display:flex; align-items:center; gap:7px; padding:0 6px 0 12px;
              border:1px solid var(--divider-color, rgba(120,130,140,.25));
              border-radius:14px; font-size:12px; color: var(--secondary-text-color); }

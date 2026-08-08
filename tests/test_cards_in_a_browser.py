@@ -1149,3 +1149,70 @@ def test_a_module_load_still_finds_its_own_version():
     finally:
         browser.close()
         pw.stop()
+
+
+def _rgb(value):
+    """Chromium reports a resolved color-mix() as `color(srgb f f f)` rather than
+    `rgb(r, g, b)`, so accept both and return 0-255 triples either way."""
+    import re
+    inner = value[value.index("(") + 1:value.rindex(")")].strip()
+    if inner.startswith("srgb"):
+        parts = inner.split()[1:4]
+        return [round(float(x) * 255) for x in parts]
+    parts = re.split(r"[,\s/]+", inner)[:3]
+    return [round(float(x)) for x in parts]
+
+
+def test_an_active_control_is_filled_not_merely_outlined():
+    """The active state used to be a tinted outline and a coloured icon. On the
+    mini and strip cards the labels are hidden, so an "on" button differed from an
+    off one by a barely-visible edge. A state worth showing is worth showing:
+    assert the fill, the firmer border and the lift, on the computed style rather
+    than on the stylesheet text."""
+    script = """() => {
+        const el = document.createElement("geely-card");
+        document.body.appendChild(el);
+        el.setConfig({});
+        el.hass = window.mkHass({});   // doors locked -> LOCK is the active one
+        const of = (sel) => {
+            const n = el.shadowRoot.querySelector(sel);
+            const s = getComputedStyle(n);
+            return { bg: s.backgroundColor, border: s.borderTopColor,
+                     shadow: s.boxShadow };
+        };
+        return { on: of('[data-act="lock"]'), off: of('[data-act="find"]') };
+    }"""
+    got = _evaluate(script)
+    transparent = ("rgba(0, 0, 0, 0)", "transparent")
+    assert got["off"]["bg"] in transparent, got["off"]
+    assert got["on"]["bg"] not in transparent, (
+        "an active control still has no fill", got["on"])
+    assert got["on"]["border"] != got["off"]["border"], got
+    assert got["on"]["shadow"] not in ("none", ""), (
+        "the lift that separates it from the card is gone", got["on"])
+
+
+def test_the_active_label_darkens_on_a_light_theme_and_stays_bright_on_a_dark_one():
+    """The label sits on a tinted fill, so a colour picked for a dark theme is
+    washed out on a light one. It is mixed with the theme's OWN text colour rather
+    than branched on a media query - a Home Assistant theme is not tied to the OS
+    colour scheme, so a query would be answering the wrong question."""
+    def label_rgb(text_colour):
+        script = """(textColour) => {
+            const el = document.createElement("geely-card");
+            el.style.setProperty("--primary-text-color", textColour);
+            document.body.appendChild(el);
+            el.setConfig({});
+            el.hass = window.mkHass({});
+            const n = el.shadowRoot.querySelector('[data-act="lock"] span');
+            return getComputedStyle(n).color;
+        }"""
+        return _rgb(_evaluate(script, arg=text_colour))
+
+    on_dark = label_rgb("#e8eaed")
+    on_light = label_rgb("#1c1c1e")
+    assert sum(on_light) < sum(on_dark), (
+        "the active label must darken against a light theme", on_dark, on_light)
+    # And it has to stay recognisably the accent, not collapse to plain text.
+    assert on_dark[1] > on_dark[0] and on_dark[1] > on_dark[2], on_dark
+    assert on_light[1] > on_light[0] and on_light[1] > on_light[2], on_light
