@@ -1037,6 +1037,21 @@
       }
     }
 
+    /* What the trunk button actually does, spelled out where it is pressed.
+     *
+     * The button says BOOT or TRUNK next to a tailgate icon, so anyone would
+     * expect it to open one. It does not: it releases the latch, and the gate
+     * still has to be lifted by hand. Four owners across three trims have now
+     * confirmed the official app does exactly the same - there is no powered
+     * open anywhere in this API - so the honest place to set that expectation is
+     * on the control itself, not only in the README nobody reads first.
+     */
+    _bootTitle() {
+      return `Unlocks the ${this._bootWord().toLowerCase()} latch - it does not `
+        + `open the ${this._bootWord().toLowerCase()} electrically. Lift it by hand, `
+        + `or use the key fob, within a few seconds before it re-locks itself.`;
+    }
+
     /* "Boot" or "Trunk"? Home Assistant's country setting decides, and
      * `boot: true/false` in the card config overrides it. Asked for by an
      * Australian owner (#14), and it costs nothing: the label is ours. */
@@ -1434,7 +1449,7 @@
             ${this._actBtn("rapidheat", "Heat", "heat", { on: this._preset() === "Rapid Warming" })}
             ${this._actBtn("rapidcool", "Cool", "cool", { on: this._preset() === "Rapid Cooling" })}
             ${this._actBtn("defrost", "Defrost", "defrost", { on: defrost && defrost.state === "on" })}
-            ${this._actBtn("trunk", this._bootWord(), "trunk")}
+            ${this._actBtn("trunk", this._bootWord(), "trunk", { title: this._bootTitle() })}
           </div>
         </div>`;
       this._wire();
@@ -1580,7 +1595,7 @@
             ${this._actBtn("climate", "Climate", "climate", { on: climateOn })}
             ${this._actBtn("defrost", "Defrost", "defrost", { on: defrost && defrost.state === "on" })}
             ${this._actBtn("vent", "Vent", "vent", { on: vent && vent.state === "on" })}
-            ${this._actBtn("trunk", this._bootWord(), "trunk")}
+            ${this._actBtn("trunk", this._bootWord(), "trunk", { title: this._bootTitle() })}
             ${this._actBtn("find", "Find", "find")}
             ${this._actBtn("refresh", "Sync", "refresh")}
           </div>
@@ -1781,7 +1796,7 @@
                 : this._actBtn("lock", "Lock", "lock")}
               ${this._actBtn("rapidheat", "Heat", "heat", { on: this._preset() === "Rapid Warming" })}
               ${this._actBtn("rapidcool", "Cool", "cool", { on: this._preset() === "Rapid Cooling" })}
-              ${this._actBtn("trunk", this._bootWord(), "trunk")}
+              ${this._actBtn("trunk", this._bootWord(), "trunk", { title: this._bootTitle() })}
               ${this._actBtn("find", "Find", "find")}
             </div>
           </div>
@@ -2035,7 +2050,7 @@
             ${this._actBtn("climate", "Climate", "climate", { on: climateOn })}
             ${this._actBtn("defrost", "Defrost", "defrost", { on: defrost && defrost.state === "on" })}
             ${this._actBtn("vent", "Vent", "vent", { on: vent && vent.state === "on" })}
-            ${this._actBtn("trunk", this._bootWord(), "trunk")}
+            ${this._actBtn("trunk", this._bootWord(), "trunk", { title: this._bootTitle() })}
             ${this._actBtn("find", "Find", "find")}
             ${this._actBtn("refresh", "Sync", "refresh")}
           </div>

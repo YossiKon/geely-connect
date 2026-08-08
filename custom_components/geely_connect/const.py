@@ -297,12 +297,16 @@ SERVICE_FIND_CAR_PARAMS = [{"key": "rhl", "value": "horn-light-flash"}]
 # screen (#14, #20). One owner reports otherwise; his is the single dissenting
 # account and his issue stays open for it.
 #
-# So this is very probably not a missing feature but the same action the app
-# performs: the powered open appears not to be exposed by this cloud API at all,
-# and the fob talks to the car over a channel nothing here can reach. What it
-# *looks* like still differs by car - some latches release, one owner's car only
-# flashes its indicators - and drivingSafetyStatus.trunkLockStatus (exposed as
-# binary_sensor.<vin>_bs_trunk_unlocked) is the way to tell which happened.
+# So this is not a missing feature but the same action the app performs: the
+# powered open appears not to be exposed by this cloud API at all, and the fob
+# talks to the car over a channel nothing here can reach.
+#
+# Separately, and still open: the latch is confirmed RELEASING on three of those
+# four cars (EX5 Tech, EX5 Inspire standard range, P145 PHEV). On the fourth the
+# indicators flash and the latch does not move. That is a different fault from
+# the powered-open question - the command not reaching the latch at all - and
+# drivingSafetyStatus.trunkLockStatus (binary_sensor.<vin>_bs_trunk_unlocked) is
+# what distinguishes the two.
 #
 # Worth knowing before anyone probes again: the capability catalogue advertises
 # `remote_control_open_2` as its own entry, separate from

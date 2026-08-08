@@ -1,11 +1,15 @@
 """Geely one-shot action buttons.
 
   Find car        → RHL / [{rhl: "horn-light-flash"}]     verified live
-  Unlock Trunk    → RDU_2 / [{target: "trunk"}]           see const.py: what
-      this achieves differs by car, and no capture of a powered-open command
-      exists. The label "AVD-verified 2026-05-01" used to appear here; it
-      predates this repository's public history and nobody can produce the
-      capture, so it is gone rather than left to lend false confidence.
+  Unlock Trunk    → RDU_2 / [{target: "trunk"}]
+      Unlocks the tailgate LATCH. It does not open the tailgate electrically -
+      the gate still has to be lifted by hand, and it re-locks itself after a
+      short window if nobody does. Four owners across three trims have confirmed
+      the official app does the same, so this is the whole of the feature rather
+      than an approximation of it; see const.py. The label "AVD-verified
+      2026-05-01" used to appear here; it predates this repository's public
+      history and nobody can produce the capture, so it is gone rather than left
+      to lend false confidence.
 
 Rapid warming / cooling are exposed as climate.preset_modes - see
 climate.py - because they're a "set the climate to a mode" action, not

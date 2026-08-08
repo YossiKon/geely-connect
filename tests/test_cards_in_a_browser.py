@@ -1036,3 +1036,28 @@ def test_refresh_is_held_by_the_wait_though_not_by_the_driving_lock():
         return !b.hasAttribute("disabled");
     }"""
     assert _evaluate(script) is False, "refresh stayed live during the wait"
+
+
+def test_the_trunk_button_says_it_only_unlocks():
+    """The button reads BOOT or TRUNK beside a tailgate icon, so anyone would
+    expect it to open one. It releases the latch and the gate still has to be
+    lifted - four owners across three trims have confirmed the official app does
+    the same - so the control itself has to say so, not only the README."""
+    probe = """(() => {
+        const b = el.shadowRoot.querySelector('[data-act="trunk"]');
+        return b ? { label: b.textContent.trim(), title: b.getAttribute("title") } : null;
+    })()"""
+    for tag, word in (("geely-card", "trunk"), ("geely-card-top", "trunk"),
+                      ("geely-card-compact", "trunk"), ("geely-card-strip", "trunk")):
+        got = _mount(tag, probe, country="US")
+        assert got is not None, tag
+        assert got["label"] == "Trunk", (tag, got)
+        t = got["title"].lower()
+        assert "does not open" in t and "electrically" in t, (tag, got["title"])
+        assert "by hand" in t and "re-locks" in t, (tag, got["title"])
+    # And it follows the local word, so an Australian owner is not told about a
+    # trunk their car does not have.
+    got = _mount("geely-card", probe, country="AU")
+    assert got["label"] == "Boot", got
+    assert "boot latch" in got["title"].lower(), got["title"]
+    assert "trunk" not in got["title"].lower(), got["title"]
