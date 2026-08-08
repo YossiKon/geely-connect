@@ -913,3 +913,126 @@ def test_the_driving_lock_can_be_switched_off_when_a_flag_sticks():
     assert freed["live"] > 1, freed
     # And the line goes back to describing the car rather than the lock.
     assert "Driving" not in freed["status"], freed
+
+
+# ------------------------------------- the wait must not make the card jump
+
+def test_a_command_does_not_rebuild_the_card():
+    """The gate used to be applied by re-rendering, which replaces the whole
+    shadow root - the car drawing included. One press cost two full renders and
+    the card visibly jumped. Toggling attributes in place costs none."""
+    script = """() => new Promise((done) => {
+        const el = document.createElement("geely-card");
+        document.body.appendChild(el);
+        el.setConfig({});
+        el.hass = window.mkHass({});
+        let renders = 0;
+        const orig = el._render.bind(el);
+        el._render = () => { renders += 1; return orig(); };
+        const disabled = () => [...el.shadowRoot.querySelectorAll("[data-act]")]
+            .filter((b) => b.hasAttribute("disabled")).length;
+        el._onAction("find");
+        const held = disabled();
+        setTimeout(() => done({ renders, held, freed: disabled() }), 4200);
+    })"""
+    got = _evaluate(script, timeout=12000)
+    assert got["renders"] == 0, f"the card rebuilt itself {got['renders']} times"
+    assert got["held"] > 0, got
+    assert got["freed"] == 0, "the controls never came back"
+
+
+def test_the_stepper_never_shows_a_number_going_backwards():
+    """Clearing the pending value when the command fired made the display fall
+    back to the entity's old target for the length of the round trip - so the
+    number the user had just dialled in jumped backwards, then forwards again."""
+    script = """() => new Promise((done) => {
+        const el = document.createElement("geely-card");
+        document.body.appendChild(el);
+        el.setConfig({});
+        const hass = window.mkHass({});
+        el.hass = hass;
+        let renders = 0;
+        const orig = el._render.bind(el);
+        el._render = () => { renders += 1; return orig(); };
+        const seen = [];
+        const watch = setInterval(() => {
+            const t = el.shadowRoot.querySelector(".tval");
+            if (t) { const v = t.textContent.trim();
+                     if (seen[seen.length - 1] !== v) seen.push(v); }
+        }, 40);
+        el._onAction("tempup"); el._onAction("tempup"); el._onAction("tempup");
+        setTimeout(() => {
+            clearInterval(watch);
+            done({ seen, renders,
+                   sent: hass.serviceCalls.map((c) => c[2].temperature) });
+        }, 2600);
+    })"""
+    got = _evaluate(script, timeout=12000)
+    numbers = [float(v.replace("\u00b0", "")) for v in got["seen"]]
+    assert numbers == sorted(numbers), f"the number went backwards: {got['seen']}"
+    assert numbers[-1] == 23.5, got
+    assert got["sent"] == [23.5], got
+    assert got["renders"] == 0, f"three taps rebuilt the card {got['renders']} times"
+
+
+def test_the_pending_number_is_released_once_the_car_reports_it():
+    """Otherwise the card would keep preferring a value that is no longer
+    pending, and a later change made elsewhere would not show."""
+    script = """() => new Promise((done) => {
+        const el = document.createElement("geely-card");
+        document.body.appendChild(el);
+        el.setConfig({ cooldown: 0 });
+        el.hass = window.mkHass({});
+        el._onAction("tempup");
+        setTimeout(() => {
+            const before = el._pendingTemp;
+            const hass = window.mkHass({});
+            hass.states["climate.car_climate"].attributes.temperature = 22.5;
+            el.hass = hass;
+            done({ before, after: el._pendingTemp,
+                   shown: el.shadowRoot.querySelector(".tval").textContent.trim() });
+        }, 1500);
+    })"""
+    got = _evaluate(script, timeout=12000)
+    assert got["before"] == 22.5 and got["after"] is None, got
+    assert got["shown"] == "22.5\u00b0", got
+
+
+def test_a_refused_temperature_does_not_stay_on_screen():
+    """A number the car rejected must not sit there looking accepted."""
+    script = """() => new Promise((done) => {
+        const el = document.createElement("geely-card");
+        document.body.appendChild(el);
+        el.setConfig({ cooldown: 0.05 });
+        const hass = window.mkHass({});
+        hass.callService = () => Promise.reject({ message: "no" });
+        el.hass = hass;
+        addEventListener("unhandledrejection", (e) => e.preventDefault());
+        el._onAction("tempup");
+        setTimeout(() => done({ pending: el._pendingTemp,
+            shown: el.shadowRoot.querySelector(".tval").textContent.trim() }), 1800);
+    })"""
+    got = _evaluate(script, timeout=12000)
+    assert got["pending"] is None, got
+    assert got["shown"] == "22\u00b0", got
+
+
+def test_refresh_is_held_by_the_wait_though_not_by_the_driving_lock():
+    """It reads rather than commands, so a moving car may still be polled - but
+    the wait blocks every command including that one, and a button that looks
+    live while being silently dropped is worse than one that looks held."""
+    probe = """(() => {
+        const b = el.shadowRoot.querySelector('[data-act="refresh"]');
+        return b ? !b.hasAttribute("disabled") : null;
+    })()"""
+    assert _mount("geely-card", probe, speed="63", engine="Running") is True
+    script = """() => {
+        const el = document.createElement("geely-card");
+        document.body.appendChild(el);
+        el.setConfig({});
+        el.hass = window.mkHass({});
+        el._onAction("find");
+        const b = el.shadowRoot.querySelector('[data-act="refresh"]');
+        return !b.hasAttribute("disabled");
+    }"""
+    assert _evaluate(script) is False, "refresh stayed live during the wait"

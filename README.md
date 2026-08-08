@@ -168,13 +168,17 @@ everything else.
 > **One command at a time.** The car refuses a command that arrives while it is
 > still executing the last one, and the refused command is *dropped, not queued* -
 > so the tap is lost and Home Assistant raises "the last request has not yet been
-> executed". The cards now hold the controls for three seconds after each command
-> and grey them out while they wait; the temperature stepper does not send per tap
-> at all, it moves the number instantly and tells the car once you stop tapping.
-> A command refused because the car was busy is retried once, quietly, since it
-> never ran. `cooldown:` in the card config changes the wait (seconds; 0 turns it
-> off). Nothing can report when the car has actually *finished* - the gateway
-> acknowledges receipt, not execution - so this is a spacing, not a status.
+> executed". The cards hold every control for three seconds after each command and
+> grey them out while they wait, then hand them all back at once. The greying is
+> done on the buttons themselves, not by redrawing the card, so nothing moves on
+> screen. The temperature stepper does not send per tap at all: it writes the new
+> number straight into the display and tells the car once you stop tapping, and it
+> keeps showing your number until the car confirms it - so it never flicks back to
+> the old target while the command is in flight. A command refused because the car
+> was busy is retried once, quietly, since it never ran. `cooldown:` in the card
+> config changes the wait (seconds; 0 turns it off). Nothing can report when the
+> car has actually *finished* - the gateway acknowledges receipt, not execution -
+> so this is a spacing, not a status.
 
 > **The cards read a car with a tank differently from a battery-only one.** The
 > integration only creates the fuel entities when it has decided the car has a
@@ -249,7 +253,7 @@ Everything else is optional:
 |---|---|---|
 | `nav:` | `[maps, waze]` | Which navigate-to-the-car links to show, in this order. Any of **`maps`** (Google Maps), **`waze`**, **`apple`** (Apple Maps), **`here`** (HERE WeGo). An empty list hides the row |
 | `nav_travel:` | *the app's own default* | `walking`, `driving`, `transit` or `bicycling`, passed to the apps that accept it. Left unset on purpose: you walk to a car parked round the corner and drive to one left at the airport, and the app guesses better than the card can |
-| `cooldown:` | `3` | Seconds to hold the controls after a command, so the next one does not arrive while the car is still executing the last. `0` turns the wait off |
+| `cooldown:` | `3` | Seconds to hold the controls after a command, so the next one does not arrive while the car is still executing the last. Everything is handed back in one go, and the card is not redrawn to do it. `0` turns the wait off |
 | `driving_lock:` | `true` | Set `false` to keep the controls live while the car reports itself moving. Worth knowing about: the engine flag can stick on, and this is how you get the buttons back if it does |
 | `boot:` | by country | `true` labels the tailgate *Boot*, `false` *Trunk* |
 | `rhd:` | by country | `true` draws the driver on the right in the top view, `false` on the left |

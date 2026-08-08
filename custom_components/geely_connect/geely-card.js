@@ -674,6 +674,12 @@
 
     set hass(hass) {
       this._hass = hass;
+      // Let go of a dialled-in temperature once the entity reports it, so the
+      // card stops preferring a value that is no longer pending.
+      if (this._pendingTemp != null) {
+        const a = ((this._st("climate.climate") || {}).attributes) || {};
+        if (Number(a.temperature) === this._pendingTemp) this._pendingTemp = null;
+      }
       // Nothing in this setter may throw: an exception here happens outside
       // the render safety net and leaves the card picker's preview spinning.
       try {
@@ -818,6 +824,16 @@
         undefined, false));
     }
 
+    /* Write the stepper's number without rebuilding the card. */
+    _showPendingTemp() {
+      const el = this.shadowRoot && this.shadowRoot.querySelector(".tval");
+      if (!el) return;
+      const shown = this._pendingTemp != null ? this._pendingTemp
+        : Number(((this._st("climate.climate") || {}).attributes || {}).temperature);
+      el.textContent = isFinite(shown)
+        ? `${String(shown).replace(/\.0$/, "")}°` : "—°";
+    }
+
     /* Tell the user, the way Home Assistant's own cards do. */
     _toast(message) {
       this.dispatchEvent(new CustomEvent("hass-notification", {
@@ -852,13 +868,11 @@
         clearTimeout(this._holdTimer);
         this._holdTimer = setTimeout(() => {
           this._holdUntil = 0;
-          this._sig = "";
-          this._safeRender();
+          this._applyGate();
         }, hold);
       };
       this._holdUntil = Date.now() + hold;
-      this._sig = "";
-      this._safeRender();
+      this._applyGate();
       // Fired now rather than on a microtask: a command should leave the moment
       // the button is pressed, and only its *result* is handled asynchronously.
       let sent;
@@ -970,16 +984,24 @@
             Math.max(Number(a.min_temp) || 16,
               base + (key === "tempup" ? step : -step)));
           this._pendingTemp = Math.round(next * 10) / 10;
-          this._sig = "";
-          this._safeRender();
+          // The number is written straight into the element rather than
+          // re-rendering the card, so a run of taps does not make it jump.
+          this._showPendingTemp();
           clearTimeout(this._tempTimer);
           this._tempTimer = setTimeout(() => {
             const target = this._pendingTemp;
-            this._pendingTemp = null;
-            if (target != null) {
-              this._call("climate", "set_temperature", "climate",
-                         { temperature: target });
-            }
+            if (target == null) return;
+            // Held, NOT cleared on firing. Clearing it here made the display
+            // fall back to the entity's old target for as long as the round
+            // trip took - so the number the user had just dialled in visibly
+            // jumped backwards and then forwards again. It is released when the
+            // entity catches up, or if the command fails.
+            this._call("climate", "set_temperature", "climate",
+                       { temperature: target })
+              .catch(() => {
+                this._pendingTemp = null;
+                this._showPendingTemp();
+              });
           }, TEMP_SETTLE_MS);
           break;
         }
@@ -1047,26 +1069,38 @@
         }));
       // Two reasons the controls stand down, and they read the same: the car is
       // moving, or it is still working through the last command.
-      if (this._isDriving() || this._waiting()) this._lockActions();
+      this._applyGate();
     }
 
-    /* Grey out and disable every control while the car is moving.
+    /* Grey out or restore every control, on the DOM that is already there.
      *
-     * Applied after wiring rather than woven through each card's markup: the
-     * five cards build their buttons in five different places, and a rule
-     * expressed once here cannot be forgotten by the sixth. Refresh Data is
-     * left alone - it reads, and it is the one thing worth pressing mid-drive.
+     * Two reasons the controls stand down - the car is moving, or it is still
+     * working through the last command - and they read the same.
+     *
+     * Deliberately NOT a re-render. Rebuilding the shadow root replaces
+     * everything including the car drawing, and doing that on every tap made the
+     * card visibly jump: one press cost two full renders and three taps on the
+     * temperature stepper cost five. Toggling attributes in place costs none.
+     *
+     * Refresh survives the driving lock, because it reads the car rather than
+     * commanding it. It does not survive the wait, because the wait blocks every
+     * command including that one, and a button that looks live while being
+     * silently dropped is worse than one that looks held.
      */
-    _lockActions() {
+    _applyGate() {
+      const driving = this._isDriving();
+      const waiting = this._waiting();
       this.shadowRoot.querySelectorAll("[data-act]").forEach((el) => {
-        if (el.dataset.act === "refresh") return;
-        el.setAttribute("disabled", "");
-        el.setAttribute("aria-disabled", "true");
-        el.classList.add("blocked");
+        const off = waiting || (driving && el.dataset.act !== "refresh");
+        el.toggleAttribute("disabled", off);
+        el.classList.toggle("blocked", off);
+        if (off) el.setAttribute("aria-disabled", "true");
+        else el.removeAttribute("aria-disabled");
       });
       this.shadowRoot.querySelectorAll("input[data-time]").forEach((el) => {
-        el.setAttribute("disabled", "");
-        el.classList.add("blocked");
+        const off = driving || waiting;
+        el.toggleAttribute("disabled", off);
+        el.classList.toggle("blocked", off);
       });
     }
 
