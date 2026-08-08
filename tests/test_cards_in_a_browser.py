@@ -800,3 +800,116 @@ def test_a_real_refusal_is_not_retried_and_still_reaches_the_user():
     got = _evaluate(script, timeout=8000)
     assert got["attempts"] == 1, got
     assert got["surfaced"] == "Geely: feature not available on this vehicle", got
+
+
+def test_no_card_says_parked_while_it_says_driving():
+    """#25: the banner said Driving and the buttons were greyed out while the
+    status line two lines above still read "Parked". The line was keyed on raw
+    speed and the lock on the composite - and #21 showed how often those differ:
+    that owner's speed field read 0 for twenty-five minutes of a drive."""
+    probe = """[...el.shadowRoot.querySelectorAll(".status, .chip, .driving span")]
+                 .map((n) => n.textContent.replace(/\s+/g, " ").trim()).join(" | ")"""
+    for tag in CARD_TAGS:
+        # Moving, and the speed field says 0 - the #21 backend behaviour.
+        text = _mount(tag, probe, speed="0", engine="Running")
+        assert "Parked" not in text, (tag, text)
+        assert "Driving" in text, (tag, text)
+        # And with a real speed the number is still worth showing.
+        text = _mount(tag, probe, speed="63", engine="Running")
+        assert "Parked" not in text, (tag, text)
+    for tag in CARD_TAGS:
+        text = _mount(tag, probe, speed="0", engine="Off")
+        assert "Driving" not in text, (tag, text)
+
+
+def test_the_speed_is_shown_when_the_car_reports_one():
+    probe = 'el.shadowRoot.querySelector(".status").textContent.trim()'
+    for tag in ("geely-card", "geely-card-top"):
+        assert _mount(tag, probe, speed="63", engine="Running") == "Driving · 63 km/h"
+        # No speed to show is not a reason to withhold the fact of driving.
+        assert _mount(tag, probe, speed="0", engine="Running") == "Driving"
+
+
+# --------------------------------- #26, #27: whichever map app the owner uses
+
+def _nav_probe():
+    return """[...el.shadowRoot.querySelectorAll("a.nav")]
+                .map((a) => [a.textContent.trim(), a.getAttribute("href")])"""
+
+
+def test_the_default_pair_is_unchanged_for_anyone_who_has_not_asked():
+    got = _mount("geely-card", _nav_probe(), at=[32.0853, 34.7818])
+    assert [g[0] for g in got] == ["Maps", "Waze"], got
+
+
+def test_apple_maps_and_here_can_be_chosen():
+    """#26 asked for Apple Maps, #27 for HERE WeGo - and supplied the URL its own
+    user had already worked out, `share.here.com/r/lat,lon`."""
+    got = _mount("geely-card", _nav_probe(), cfg={"nav": ["apple", "here"]},
+                 at=[32.0853, 34.7818])
+    labels = [g[0] for g in got]
+    hrefs = dict(got)
+    assert labels == ["Apple Maps", "HERE"], got
+    assert hrefs["Apple Maps"] == "https://maps.apple.com/?daddr=32.085300,34.781800"
+    assert hrefs["HERE"] == "https://share.here.com/r/32.085300,34.781800"
+
+
+def test_all_four_at_once_and_in_the_order_asked_for():
+    got = _mount("geely-card", _nav_probe(),
+                 cfg={"nav": ["here", "apple", "waze", "maps"]}, at=[1.5, 2.5])
+    assert [g[0] for g in got] == ["HERE", "Apple Maps", "Waze", "Maps"], got
+
+
+def test_no_travel_mode_is_imposed_unless_it_is_asked_for():
+    """Guessing is wrong both ways: you walk to a car parked round the corner and
+    drive to one left at the airport. The app's own default is the better guess."""
+    plain = dict(_mount("geely-card", _nav_probe(),
+                        cfg={"nav": ["maps", "apple", "here"]}, at=[1.5, 2.5]))
+    assert "travelmode" not in plain["Maps"], plain
+    assert "dirflg" not in plain["Apple Maps"], plain
+    assert "?" not in plain["HERE"].split("/r/")[1], plain
+
+    walk = dict(_mount("geely-card", _nav_probe(),
+                       cfg={"nav": ["maps", "apple", "here"],
+                            "nav_travel": "walking"}, at=[1.5, 2.5]))
+    assert "travelmode=walking" in walk["Maps"], walk
+    assert "dirflg=w" in walk["Apple Maps"], walk
+    assert walk["HERE"].endswith("?m=w"), walk
+
+
+def test_an_unknown_app_name_is_skipped_rather_than_breaking_the_card():
+    got = _mount("geely-card", _nav_probe(),
+                 cfg={"nav": ["maps", "tomtom", "", 7]}, at=[1.5, 2.5])
+    assert [g[0] for g in got] == ["Maps"], got
+
+
+def test_an_empty_list_hides_the_row_entirely():
+    """Someone who does not want the links should be able to say so."""
+    got = _mount("geely-card", """{
+        links: el.shadowRoot.querySelectorAll("a.nav").length,
+        heading: [...el.shadowRoot.querySelectorAll(".csub")]
+                   .some((n) => /Navigate/.test(n.textContent)),
+    }""", cfg={"nav": []}, at=[1.5, 2.5])
+    assert got == {"links": 0, "heading": False}, got
+
+
+def test_the_driving_lock_can_be_switched_off_when_a_flag_sticks():
+    """The failure mode is total - every control on every card, with no way back -
+    and this integration already knows the engine flag can stick: the poller
+    carries a guard for "a stuck flag, a driver sitting in the car with the
+    ignition on for an hour". So there is a way out."""
+    probe = """{
+        banner: !!el.shadowRoot.querySelector(".driving"),
+        live: [...el.shadowRoot.querySelectorAll("[data-act]")]
+                .filter((b) => !b.hasAttribute("disabled")).length,
+        status: (el.shadowRoot.querySelector(".status") || {}).textContent || "",
+    }"""
+    locked = _mount("geely-card", probe, speed="0", engine="Running")
+    assert locked["banner"] is True and locked["live"] == 1, locked
+
+    freed = _mount("geely-card", probe, cfg={"driving_lock": False},
+                   speed="0", engine="Running")
+    assert freed["banner"] is False, freed
+    assert freed["live"] > 1, freed
+    # And the line goes back to describing the car rather than the lock.
+    assert "Driving" not in freed["status"], freed

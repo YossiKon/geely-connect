@@ -159,10 +159,11 @@ everything else.
 
 ## 🖥️ Dashboards & cards
 
-> **The big cards link straight to the car in Maps or Waze.** Two links under
-> the actions, from the position the car reported - not commands, so they keep
-> working while the car is being driven, which is exactly when someone wants
-> them. They appear only once the car has actually reported where it is.
+> **The big cards link straight to the car in your map app.** Google Maps and
+> Waze by default, with Apple Maps and HERE WeGo available through `nav:` -
+> links under the actions, from the position the car reported. Not commands, so
+> they keep working while the car is being driven, which is exactly when someone
+> wants them, and absent until the car has actually reported where it is.
 
 > **One command at a time.** The car refuses a command that arrives while it is
 > still executing the last one, and the refused command is *dropped, not queued* -
@@ -240,6 +241,24 @@ even after you rename them. With several cars, point each card at one:
 ```yaml
 type: custom:geely-card
 prefix: my_geely_ex5      # the slug in sensor.my_geely_ex5_battery
+```
+
+Everything else is optional:
+
+| Option | Default | What it does |
+|---|---|---|
+| `nav:` | `[maps, waze]` | Which navigate-to-the-car links to show, in this order. Any of **`maps`** (Google Maps), **`waze`**, **`apple`** (Apple Maps), **`here`** (HERE WeGo). An empty list hides the row |
+| `nav_travel:` | *the app's own default* | `walking`, `driving`, `transit` or `bicycling`, passed to the apps that accept it. Left unset on purpose: you walk to a car parked round the corner and drive to one left at the airport, and the app guesses better than the card can |
+| `cooldown:` | `3` | Seconds to hold the controls after a command, so the next one does not arrive while the car is still executing the last. `0` turns the wait off |
+| `driving_lock:` | `true` | Set `false` to keep the controls live while the car reports itself moving. Worth knowing about: the engine flag can stick on, and this is how you get the buttons back if it does |
+| `boot:` | by country | `true` labels the tailgate *Boot*, `false` *Trunk* |
+| `rhd:` | by country | `true` draws the driver on the right in the top view, `false` on the left |
+| `name:` | the device name | A different title for this card |
+
+```yaml
+type: custom:geely-card
+nav: [apple, here]        # an iPhone with HERE WeGo on it
+nav_travel: walking       # you are walking to the car
 ```
 
 #### The climate panel

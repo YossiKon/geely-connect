@@ -85,6 +85,46 @@
    * that a second tap does not arrive while the car is still executing the
    * first, short enough that the card does not feel broken. `cooldown:` in the
    * card config overrides it, and 0 turns the wait off. */
+  /* Where "navigate to the car" can send you. Requested per app - Apple Maps on
+   * #26, HERE WeGo on #27, the latter with the URL its own user had already
+   * worked out - so it is a list rather than a fixed pair, and asking for a
+   * fifth is a one-line change.
+   *
+   * No travel mode is sent unless `nav_travel:` asks for one: each app then uses
+   * its own default. Guessing is wrong in both directions - you walk to a car
+   * parked round the corner and drive to one left at the airport - and the app
+   * knows better than the card does.
+   */
+  const NAV_APPS = {
+    maps: {
+      label: "Maps",
+      url: (at, mode) => "https://www.google.com/maps/dir/?api=1&destination=" + at
+        + (mode ? "&travelmode=" + mode : ""),
+    },
+    waze: {
+      // Waze navigates by car by definition; it has no walking mode to pass.
+      label: "Waze",
+      url: (at) => "https://www.waze.com/ul?ll=" + at + "&navigate=yes",
+    },
+    apple: {
+      label: "Apple Maps",
+      url: (at, mode) => "https://maps.apple.com/?daddr=" + at
+        + (mode === "walking" ? "&dirflg=w"
+          : mode === "transit" ? "&dirflg=r"
+          : mode ? "&dirflg=d" : ""),
+    },
+    here: {
+      // share.here.com opens the HERE WeGo app when it is installed and the web
+      // map when it is not. `m=w` is its walking flag.
+      label: "HERE",
+      url: (at, mode) => "https://share.here.com/r/" + at
+        + (mode === "walking" ? "?m=w" : mode ? "?m=d" : ""),
+    },
+  };
+
+  /* Unchanged for anyone who has not asked: two links, not four. */
+  const DEFAULT_NAV = ["maps", "waze"];
+
   const DEFAULT_COOLDOWN_S = 3;
   /* How long the temperature stepper waits for the tapping to stop. */
   const TEMP_SETTLE_MS = 1100;
@@ -875,6 +915,12 @@
      * spellings count.
      */
     _isDriving() {
+      // An escape hatch, because the failure mode is total: this integration
+      // already knows the engine flag can stick - `_STUCK_POLLS` in the poller
+      // exists for "a stuck flag, a driver sitting in the car with the ignition
+      // on for an hour" - and a stuck flag here would grey out every control on
+      // every card with no way back. `driving_lock: false` gives that back.
+      if (this._config.driving_lock === false) return false;
       const speed = NUM(this._st("sensor.speed"));
       if (speed != null && speed > 0) return true;
       const eng = this._st("sensor.engine_state");
@@ -1208,14 +1254,20 @@
       const lon = Number(a.longitude);
       if (!isFinite(lat) || !isFinite(lon) || (lat === 0 && lon === 0)) return "";
       const at = `${lat.toFixed(6)},${lon.toFixed(6)}`;
-      const link = (href, label) =>
-        `<a class="cbtn nav" href="${esc(href)}" target="_blank" rel="noopener noreferrer"
-            title="Navigate to the car with ${esc(label)}">${icon("nav")}<span>${esc(label)}</span></a>`;
+      const want = Array.isArray(this._config.nav) ? this._config.nav
+        : DEFAULT_NAV;
+      const chosen = want
+        .map((k) => NAV_APPS[String(k).toLowerCase()])
+        .filter(Boolean);
+      if (!chosen.length) return "";
+      const mode = this._config.nav_travel
+        ? String(this._config.nav_travel).toLowerCase() : "";
+      const link = (app) =>
+        `<a class="cbtn nav" href="${esc(app.url(at, mode))}" target="_blank"
+            rel="noopener noreferrer"
+            title="Navigate to the car with ${esc(app.label)}">${icon("nav")}<span>${esc(app.label)}</span></a>`;
       return `<p class="micro csub" style="margin-top:12px">${icon("nav")} Navigate to the car</p>
-        <div class="crow wrap">
-          ${link(`https://www.google.com/maps/dir/?api=1&destination=${at}&travelmode=driving`, "Maps")}
-          ${link(`https://www.waze.com/ul?ll=${at}&navigate=yes`, "Waze")}
-        </div>`;
+        <div class="crow wrap">${chosen.map(link).join("")}</div>`;
     }
 
     /* What to call the headline number, so it never means two things. */
@@ -1294,11 +1346,16 @@
       const range = OK(s.range) ? Math.round(NUM(s.range)) : "—";
       const batt = s.battery == null ? "—" : Math.round(s.battery);
       const split = this._rangeSplit(s);
+      const driving = this._isDriving();
       const climateOn = s.climate && s.climate.state !== "off";
       const defrost = this._st("switch.defrost");
       const online = this._st("binary_sensor.connected");
 
       const chips = [
+        // First, and only while it is true: the compact card falls back to a
+        // "Parked" chip when nothing else applies, which on a moving car was the
+        // same contradiction as #25 on its bigger siblings.
+        driving && `<span class="chip warn">Driving</span>`,
         s.locked && `<span class="chip ${s.locked.state === "locked" ? "" : "warn"}">
             ${s.locked.state === "locked" ? "Locked" : "Unlocked"}</span>`,
         s.charging && `<span class="chip on">${iconFilled("bolt")} ${power != null ? power.toFixed(1) + " kW" : "Charging"}</span>`,
@@ -1336,7 +1393,7 @@
             <div class="carwrap">${CAR_SVG(s.charging ? "charging" : "", this._openMap())}</div>
           </div>
           <div style="margin:2px 0 10px">${this._bars(s)}</div>
-          <div class="chips" style="margin-bottom:12px">${chips || '<span class="chip">Parked</span>'}</div>
+          <div class="chips" style="margin-bottom:12px">${chips || `<span class="chip">${driving ? "Driving" : "Parked"}</span>`}</div>
           <div class="actions">
             ${this._actBtn("lock", "Lock", "lock", { on: s.locked && s.locked.state === "locked" })}
             ${this._actBtn("unlock", "Unlock", "unlock")}
@@ -1384,6 +1441,7 @@
       const s = this._carState();
       const batt = s.battery == null ? "—" : Math.round(s.battery);
       const split = this._rangeSplit(s);
+      const driving = this._isDriving();
       const range = OK(s.range) ? Math.round(NUM(s.range)) : "—";
       const climateOn = s.climate && s.climate.state !== "off";
       const defrost = this._st("switch.defrost");
@@ -1404,9 +1462,16 @@
         const st = this._st(`sensor.tire_${suffix}`);
         return OK(st) ? `${Math.round(NUM(st))}<i>${esc(UNIT(st))}</i>` : "—";
       };
+      // Driving comes from the same composite as the banner and the action lock,
+      // not from the raw speed. Keyed on speed, this line said "Parked" on a car
+      // whose banner two lines above said Driving and whose buttons were greyed
+      // out (#25) - and #21 showed why it happens so often: that owner's speed
+      // field read 0 for twenty-five minutes of a drive. The speed is still
+      // shown when the car actually reports one.
       const statusLine = s.charging
         ? `Charging${OK(power) ? " · " + power.state + " kW" : ""}`
-        : speed != null && speed > 0 ? `Driving · ${Math.round(speed)} km/h`
+        : driving
+        ? `Driving${speed != null && speed > 0 ? ` · ${Math.round(speed)} km/h` : ""}`
         : s.doorsOpen.length ? `${s.doorsOpen.length} opening${s.doorsOpen.length > 1 ? "s" : ""} open`
         : s.locked && s.locked.state === "locked" ? "Parked · Locked" : "Parked";
 
@@ -1812,6 +1877,7 @@
       const s = this._carState();
       const batt = s.battery == null ? "—" : Math.round(s.battery);
       const split = this._rangeSplit(s);
+      const driving = this._isDriving();
       const range = OK(s.range) ? Math.round(NUM(s.range)) : "—";
       const climateOn = s.climate && s.climate.state !== "off";
       const defrost = this._st("switch.defrost");
@@ -1837,9 +1903,16 @@
         const st = this._st(`sensor.tire_${suffix}`);
         return OK(st) ? `${Math.round(NUM(st))} ${UNIT(st)}`.trim() : "—";
       };
+      // Driving comes from the same composite as the banner and the action lock,
+      // not from the raw speed. Keyed on speed, this line said "Parked" on a car
+      // whose banner two lines above said Driving and whose buttons were greyed
+      // out (#25) - and #21 showed why it happens so often: that owner's speed
+      // field read 0 for twenty-five minutes of a drive. The speed is still
+      // shown when the car actually reports one.
       const statusLine = s.charging
         ? `Charging${OK(power) ? " · " + power.state + " kW" : ""}`
-        : speed != null && speed > 0 ? `Driving · ${Math.round(speed)} km/h`
+        : driving
+        ? `Driving${speed != null && speed > 0 ? ` · ${Math.round(speed)} km/h` : ""}`
         : s.doorsOpen.length ? `${s.doorsOpen.length} opening${s.doorsOpen.length > 1 ? "s" : ""} open`
         : s.locked && s.locked.state === "locked" ? "Parked · Locked" : "Parked";
       const sched = schedA && schedB && OK(schedA) && OK(schedB)

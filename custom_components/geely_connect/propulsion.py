@@ -134,24 +134,55 @@ def declared(power_type: str | None) -> Propulsion:
     return Propulsion.UNKNOWN
 
 
+def _is_evidence(value: Any) -> bool:
+    """Is this value a measurement, or just the schema being filled in?
+
+    None and "" were already excluded; **zero has to go too**. An Australian EX5
+    - a battery-only car - reports `aveFuelConsumption: 0` in `runningStatus`,
+    which read as "this car has a tank" and warned its owner on every restart
+    that the integration disagreed with his car about what it was (#28).
+
+    Zero litres in a tank that has burned zero fuel is indistinguishable from a
+    field that exists because the backend sends the whole schema. The cost of
+    reading it the strict way is confined to one narrow case - a hybrid whose
+    `powerType` we do not recognise *and* which has never burned a drop - and
+    there the raw string is logged so the mapping gets fixed. The cost of reading
+    it the loose way was a permanent warning on cars that are perfectly fine.
+    """
+    if value is None or value == "":
+        return False
+    try:
+        return float(value) != 0.0
+    except (TypeError, ValueError):
+        return True        # a non-numeric value is still something the car said
+
+
 def _observed_tank(status: dict[str, Any]) -> bool:
     """True if the car reports anything only a fuel tank can report.
 
     An empty `fuelStatus` block does not count: presence of the container says
     nothing, and treating it as a tank would put fuel entities on a BEV whose
     payload happens to carry the key. The same goes for a container holding
-    only nulls - backends commonly send the full schema with every value
-    blank, which is a shape, not a tank.
+    only nulls or zeros - backends commonly send the full schema with every
+    value blank, which is a shape, not a tank.
     """
     fuel = walk(status, _FUEL)
-    if isinstance(fuel, dict) and any(v not in (None, "") for v in fuel.values()):
+    if isinstance(fuel, dict) and any(_is_evidence(v) for v in fuel.values()):
         return True
-    return any(walk(status, (*_RUN, k)) not in (None, "")
+    return any(_is_evidence(walk(status, (*_RUN, k)))
                for k in ("fuelLevel", "fuelLevelPct", "aveFuelConsumption"))
 
 
 def _observed_plug(status: dict[str, Any]) -> bool:
-    """True if the car reports a traction battery it can charge."""
+    """True if the car reports a traction battery it can charge.
+
+    Deliberately still counts a zero, unlike the tank test above: a BEV sitting
+    at 0% charge, unplugged, with no range left reports exactly zeros, and
+    reading that as "no battery" would strip the charging entities off the car
+    that needs them most. The asymmetry is the point - a zero here is a car
+    telling us where it is, and a zero there is a field that only exists because
+    the backend sends the whole schema.
+    """
     return any(walk(status, (*_EV, k)) not in (None, "")
                for k in ("chargeLevel", "statusOfChargerConnection",
                          "distanceToEmptyOnBatteryOnly"))
@@ -204,6 +235,13 @@ def classify(power_type: str | None, status: dict[str, Any] | None) -> Verdict:
         _LOGGER.debug("Declared hybrid, telemetry reports %s (tank=%s plug=%s)",
                       seen, has_tank, has_plug)
     elif seen is not Propulsion.UNKNOWN and seen is not said:
+        # Left as a warning on purpose. The tempting fix for #28 was to demote
+        # this, and the suite caught why that is wrong: a declared petrol car
+        # that reports charge telemetry loses its charging entities to the
+        # declaration, and an owner needs to know. What actually caused #28 was
+        # a zero being read as tank evidence, which _is_evidence now rejects -
+        # so that car reaches this branch no longer, and the cars that do reach
+        # it are the ones whose entity set may really be wrong.
         _LOGGER.warning(
             "powerType %r says %s but the car reports %s (tank=%s plug=%s); "
             "trusting %s. Please report this vehicle so the mapping can be "
