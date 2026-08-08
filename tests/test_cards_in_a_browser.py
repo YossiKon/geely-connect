@@ -99,6 +99,22 @@ def _source(path):
     return io.open(path, encoding="utf-8").read()
 
 
+def _load_as_module(page):
+    """Load the card the way Home Assistant actually loads it.
+
+    Every other case here injects it as a classic script, and module semantics
+    are not the same: top-level `this` is undefined rather than window, and
+    `document.currentScript` is null. Home Assistant registers this file as a
+    Lovelace resource of `res_type: module` - so a fault that only appears under
+    module semantics would have shipped invisibly, with the symptom being every
+    card gone from the picker and "Configuration error" on the dashboard.
+    """
+    page.set_content("<!DOCTYPE html><html><head><meta charset='utf-8'>"
+                     "</head><body></body></html>")
+    page.add_script_tag(content=_HASS_FACTORY)
+    page.add_script_tag(content=_source(CARD), type="module")
+
+
 def _load(page, with_polyfill):
     """Put the card into the page, and the polyfill after it if asked - that
     order being the one that used to break everything.
@@ -1061,3 +1077,75 @@ def test_the_trunk_button_says_it_only_unlocks():
     assert got["label"] == "Boot", got
     assert "boot latch" in got["title"].lower(), got["title"]
     assert "trunk" not in got["title"].lower(), got["title"]
+
+
+def test_the_card_works_when_loaded_as_a_module():
+    """Home Assistant registers it as `res_type: module`, and every other test
+    here loads it as a classic script. Under module semantics top-level `this` is
+    undefined and `document.currentScript` is null, so this is a genuinely
+    different execution - and the failure mode is total: no element defined, every
+    card gone from the picker, "Configuration error" on the dashboard."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        skip("playwright not installed")
+    pw = sync_playwright().start()
+    try:
+        browser = pw.chromium.launch(headless=True)
+    except Exception as e:
+        pw.stop()
+        skip(f"chromium unavailable: {str(e)[:60]}")
+    try:
+        page = browser.new_page()
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        _load_as_module(page)
+        page.wait_for_function(
+            "() => !!customElements.get('geely-card')", timeout=4000)
+        got = page.evaluate("""(tags) => ({
+            missing: tags.filter((n) => !customElements.get(n)),
+            picker: (window.customCards || []).map((c) => c.type),
+        })""", list(CARD_TAGS) + ["geely-card-status"])
+        assert not errors, f"the module threw: {errors}"
+        assert got["missing"] == [], f"never defined as a module: {got['missing']}"
+        for tag in CARD_TAGS:
+            assert tag in got["picker"], (tag, got["picker"])
+    finally:
+        browser.close()
+        pw.stop()
+
+
+def test_a_module_load_still_finds_its_own_version():
+    """The version banner reads it off the script tag's `src`, because
+    `import.meta` is a syntax error in a classic script and
+    `document.currentScript` is null in a module. Injected without a src there is
+    nothing to read, and the honest answer is "?" rather than a crash."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        skip("playwright not installed")
+    pw = sync_playwright().start()
+    try:
+        browser = pw.chromium.launch(headless=True)
+    except Exception as e:
+        pw.stop()
+        skip(f"chromium unavailable: {str(e)[:60]}")
+    try:
+        page = browser.new_page()
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        _load_as_module(page)
+        page.wait_for_function("() => !!customElements.get('geely-card-status')",
+                               timeout=4000)
+        line = page.evaluate("""() => {
+            const el = document.createElement("geely-card-status");
+            document.body.appendChild(el);
+            el.setConfig({});
+            el.hass = {};
+            return el.textContent.trim();
+        }""")
+        assert not errors, errors
+        assert "Geely card status" in line, line
+    finally:
+        browser.close()
+        pw.stop()
