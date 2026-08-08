@@ -449,3 +449,51 @@ def test_a_nonsense_pack_size_in_the_options_does_not_break_setup():
         assert full._capacity_kwh == 0.0, junk
         # And it still reports, by the other method.
         assert full.extra_state_attributes["method"] == "car estimate scaled to 100%"
+
+
+def test_a_car_without_a_heated_wheel_does_not_claim_to_have_one():
+    """v1.27.0 shipped this reading 1=on / 2=off, from an EX5 that has the
+    feature. Three Starray payloads then showed a THIRD value: 0, on cars whose
+    capability catalogue does not advertise a heated wheel at all. Reported as
+    Off, that told most owners their car had one, switched off."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    assert _steering("1").is_on is True, "heating at any level"
+    assert _steering("2").is_on is False, "fitted and off"
+    assert _steering("0").is_on is None, "0 means not fitted, not off"
+    assert _steering(0).is_on is None
+    assert _steering(None).is_on is None, "absent means not fitted either"
+
+
+def test_the_trunk_lock_is_readable_at_all():
+    """`trunkLockStatus` sat beside the open/closed sensor in every payload,
+    unread. It is the only observable signal that the Unlock Trunk button did
+    anything on the cars in #20, where the latch releases without the gate
+    moving - "the indicators flashed" was all anyone had to go on."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    import copy
+    bs = load("binary_sensor")
+    spec = next(s for s in bs.SPECS if s[0] == "trunk_unlocked")
+
+    def lock(value):
+        data = copy.deepcopy(STATUS)
+        safe = data["vehicleStatus"]["additionalVehicleStatus"]["drivingSafetyStatus"]
+        if value is None:
+            safe.pop("trunkLockStatus", None)
+        else:
+            safe["trunkLockStatus"] = value
+
+        class C(_Coord):
+            pass
+        C.data = data
+        return bs.GeelyBinarySensor(C(), FAKE_VIN, "Geely", *spec)
+
+    # device_class lock: is_on True means UNLOCKED. 0 is the unlocked code, and
+    # that is measured rather than assumed: across three real payloads this field
+    # matched centralLockingStatus exactly - both 1 on a locked car, both 0 on an
+    # unlocked one - and lock.py documents that field as 1/2 locked, 0 unlocked.
+    assert lock("0").is_on is True
+    assert lock("1").is_on is False
+    assert lock("2").is_on is False, "double-locked is still locked"
+    assert lock(None).is_on is None

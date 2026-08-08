@@ -64,18 +64,30 @@ SPECS: tuple[tuple[str, str, tuple[str, ...], BinarySensorDeviceClass | None, tu
     # what switch.charging follows.
     ("charger_plugged_in",   "Charger Plug",      (*_EV,   "statusOfChargerConnection"),    BinarySensorDeviceClass.PLUG,    ("1", 1, "2", 2, "3", 3)),
     # Steering-wheel heat, READ ONLY. There is still no verified command for it
-    # (#4) - every candidate fired at a real car came back "operation succeed"
-    # and moved nothing - but the reading is now known, measured on an
-    # Australian EX5 Inspire by the owner who tested those candidates:
+    # (#4): every candidate fired at a real car came back "operation succeed"
+    # and moved nothing.
+    # Measured on a real car by the owner who falsified every command candidate:
+    # 1 while the wheel is heating at ANY level, 2 while it is off. Inverted from
+    # every other flag here, and the same 1=on / 2=off convention the seat
+    # ventilation fields use.
     #
-    #   steerWhlHeatingSts = 1  while the wheel is heating, at ANY level
-    #                      = 2  while it is off
+    # 0 is a THIRD state, and it is why this line has a sixth element: three
+    # Starray payloads read 0 while their capability catalogue does not advertise
+    # a heated wheel at all. So 0 means "not fitted", and reporting it as Off -
+    # which is what shipped in v1.27.0 - told most owners their car had a heated
+    # steering wheel that happened to be switched off.
+    ("steering_wheel_heating", "Steering Wheel Heating", (*_CLIM, "steerWhlHeatingSts"), None, ("1", 1), ("0", 0)),
+    # `trunkLockStatus`, beside the open/closed sensor and read by nothing until
+    # now. It is the only observable signal that the Unlock Trunk button did
+    # anything: on the cars in #20 the command releases the latch without the
+    # gate moving, so "the indicators flashed" was all anyone had to go on.
     #
-    # Inverted relative to every other flag in this table, and the same 1=on /
-    # 2=off convention the seat-ventilation status fields use. A car without the
-    # feature sends nothing and the entity stays unknown, which is the honest
-    # answer rather than a confident "off".
-    ("steering_wheel_heating", "Steering Wheel Heating", (*_CLIM, "steerWhlHeatingSts"), None, ("1", 1)),
+    # The polarity is not a guess. In three real payloads the field tracks
+    # `centralLockingStatus` exactly - both 1 while the car was locked, both 0
+    # while it was not - and that field is documented in lock.py as 1/2 locked,
+    # 0 unlocked. So 0 is the unlocked code here too, which with device_class
+    # LOCK is what "on" has to mean.
+    ("trunk_unlocked",       "Trunk Lock",        (*_SAFE, "trunkLockStatus"),              BinarySensorDeviceClass.LOCK,    ("0", 0)),
 )
 
 # Removed (redundant with proper entities):
@@ -147,10 +159,15 @@ class GeelyBinarySensor(CoordinatorEntity, BinarySensorEntity):
     def __init__(self, coordinator, vin: str, device_name: str, key: str,
                  friendly_name: str, path: tuple[str, ...],
                  device_class: BinarySensorDeviceClass | None,
-                 on_values: tuple[Any, ...]) -> None:
+                 on_values: tuple[Any, ...],
+                 absent_values: tuple[Any, ...] = ()) -> None:
         super().__init__(coordinator)
         self._path = path
         self._on_values = on_values
+        # Values that mean "this car does not have the feature" rather than
+        # "the feature is off". Without this the entity reads a confident Off on
+        # hardware that is not fitted.
+        self._absent_values = absent_values
         self._attr_unique_id = f"geely_{vin}_bs_{key}"
         self._attr_name = friendly_name
         if device_class is not None:
@@ -167,6 +184,6 @@ class GeelyBinarySensor(CoordinatorEntity, BinarySensorEntity):
     @property
     def is_on(self) -> bool | None:
         v = _walk(self.coordinator.data or {}, self._path)
-        if v is None:
+        if v is None or v in self._absent_values:
             return None
         return v in self._on_values
