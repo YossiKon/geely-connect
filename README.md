@@ -37,6 +37,18 @@ polished setup on top.
   Arabic, Russian and French. Entity names follow Home Assistant's own
   language.
 - 🖥️ **Five built-in dashboard cards** - a full cockpit with a complete climate panel, a top-down status view, a compact tile, a mini square and a one-row strip - registered automatically, plus ready-made automations and Blueprints
+- 🚗 **The cards stand down while you drive** - a banner instead of buttons the
+  car would refuse, keyed on the ignition rather than a speed field that reads
+  zero at every red light.
+- 🧭 **Navigate to the car** in Google Maps, Waze, Apple Maps or HERE WeGo,
+  straight from the card.
+- ⛽ **A car with a tank reads differently** - combined range as the headline
+  with the two halves under it, a second bar for the tank, and the engine state.
+- ⏱️ **One command at a time** - the car drops a command that arrives while it
+  is still working, so the cards space them out and the temperature stepper
+  sends once you stop tapping instead of once per tap.
+- 🩺 **A diagnostics report worth reading** - poll health, the last 25 commands
+  with their outcomes, and the raw capability catalogue, all redacted.
 - 📈 **Long-term statistics** on every numeric entity, so history survives the
   recorder's purge window.
 
@@ -214,7 +226,7 @@ dashboard, **Add card**, and search "Geely":
 
 | Card | What it is |
 |---|---|
-| **Geely Card** (`custom:geely-card`) | The full cockpit: range and battery up top, the EX5 silhouette that glows while charging and flags every opening, one-tap Lock / Unlock / Climate / Defrost / Vent / Trunk / Find / Sync, a full climate panel (temperature, rapid heat / cool, seat heating and cooling, fresh air, sunroof and shade), charging and schedule toggles with editable start / end times, then charging, tires, trip and service health - each block hides itself when the car doesn't report it |
+| **Geely Card** (`custom:geely-card`) | The full cockpit: range and battery up top, the EX5 silhouette that glows while charging and flags every opening, one-tap Lock / Unlock / Climate / Defrost / Vent / Trunk / Find / Sync, a full climate panel (temperature, rapid heat / cool, seat heating and cooling, fresh air, sunroof and shade), charging and schedule toggles with editable start / end times, links that navigate you to wherever the car is parked, then charging, tires, trip and service health - each block hides itself when the car doesn't report it |
 | **Geely Card (top view)** (`custom:geely-card-top`) | The car from above: tire pressure beside each wheel, bold live status on every door, the hood, the sunroof and the trunk - with the same header, actions and climate panel. The driver's door follows your market automatically (right-hand-drive countries show it on the right; `rhd: true/false` in the card config overrides) |
 | **Geely Card (compact)** (`custom:geely-card-compact`) | The essentials in one tile: battery, range, status chips - and Lock, Unlock, rapid Heat / Cool, Defrost and Trunk |
 | **Geely Card (mini)** (`custom:geely-card-mini`) | A small square: range, cabin temperature, status, a lock button that follows the car (locked offers Unlock, unlocked offers Lock), and one-tap quick heat / quick cool |
@@ -229,6 +241,13 @@ dashboard, **Add card**, and search "Geely":
 | ![Geely Card compact](docs/images/card-compact.png) | ![Geely Card mini](docs/images/card-mini.png) |
 
 ![Geely Card strip](docs/images/card-strip.png)
+
+**And the same card while the car is being driven.** The banner replaces the
+guesswork, every control is greyed out, and Sync stays live because it reads the
+car rather than commanding it. The navigation links keep working too - they open
+a map, they do not touch the car.
+
+![The full card while the car is being driven](docs/images/card-driving.png)
 
 **The same card, two different cars.** Nothing is configured: the integration only
 creates the fuel entities once it has decided the car has a tank, so the cards go
