@@ -46,6 +46,7 @@ from homeassistant.util.unit_conversion import DistanceConverter
 
 from .const import (
     CONF_BATTERY_KWH,
+    CONF_EXTERIOR_TEMP_OFFSET,
     CONF_FULL_EXPOSURE,
     CONF_PRESSURE_UNIT,
     DEFAULT_PRESSURE_UNIT,
@@ -90,6 +91,7 @@ _MEASUREMENT_KEYS = {
     "battery", "range", "interior_temp", "exterior_temp", "speed",
     "12v_battery", "12v_voltage", "avg_consumption", "avg_speed",
     "tire_pressure_fl", "tire_pressure_fr", "tire_pressure_rl", "tire_pressure_rr",
+    "tire_temp_fl", "tire_temp_fr", "tire_temp_rl", "tire_temp_rr",
     "time_to_full_min",
     # Both count DOWN towards the next service, so they are measurements -
     # total_increasing would read every service reset as a counter rollover.
@@ -161,6 +163,10 @@ _SENSOR_ICONS: dict[str, str] = {
     "avg_speed":         "mdi:speedometer-medium",
     "engine_state":      "mdi:engine",
     "park_brake":        "mdi:car-brake-parking",
+    "tire_temp_fl":      "mdi:thermometer",
+    "tire_temp_fr":      "mdi:thermometer",
+    "tire_temp_rl":      "mdi:thermometer",
+    "tire_temp_rr":      "mdi:thermometer",
     "tire_pressure_fl":  "mdi:car-tire-alert",
     "tire_pressure_fr":  "mdi:car-tire-alert",
     "tire_pressure_rl":  "mdi:car-tire-alert",
@@ -199,6 +205,16 @@ SENSOR_SPECS: tuple[tuple, ...] = (
     ("avg_consumption",     "Average Consumption",  (*_EV,    "averPowerConsumption"),                 "kWh/100km",                      None,                          "float", None),
     ("trip_meter",          "Trip Meter",           (*_RUN,   "tripMeter1"),                           UnitOfLength.KILOMETERS,          SensorDeviceClass.DISTANCE,    "float", None),
     ("avg_speed",           "Average Speed",        (*_RUN,   "avgSpeed"),                             UnitOfSpeed.KILOMETERS_PER_HOUR,  SensorDeviceClass.SPEED,       "float", None),
+    # Tyre temperatures, from the same TPMS sensors as the pressures below.
+    # Present in every payload and read by nothing until now. Worth having on
+    # their own account - and worth more than that here: on a car that has
+    # stood a while they are the closest thing to an ambient measurement this
+    # payload contains, and unlike exteriorTemp they are not ten degrees out.
+    # Same corner naming as the pressures, so a card can pair them.
+    ("tire_temp_fl",        "Tire Temperature FL",  (*_MAINT, "tyreTempDriver"),                       UnitOfTemperature.CELSIUS,        SensorDeviceClass.TEMPERATURE, "float", None),
+    ("tire_temp_fr",        "Tire Temperature FR",  (*_MAINT, "tyreTempPassenger"),                    UnitOfTemperature.CELSIUS,        SensorDeviceClass.TEMPERATURE, "float", None),
+    ("tire_temp_rl",        "Tire Temperature RL",  (*_MAINT, "tyreTempDriverRear"),                   UnitOfTemperature.CELSIUS,        SensorDeviceClass.TEMPERATURE, "float", None),
+    ("tire_temp_rr",        "Tire Temperature RR",  (*_MAINT, "tyreTempPassengerRear"),                UnitOfTemperature.CELSIUS,        SensorDeviceClass.TEMPERATURE, "float", None),
     ("tire_pressure_fl",    "Tire Pressure FL",     (*_MAINT, "tyreStatusDriver"),                     "kPa",                            SensorDeviceClass.PRESSURE,    "float", None),
     ("tire_pressure_fr",    "Tire Pressure FR",     (*_MAINT, "tyreStatusPassenger"),                  "kPa",                            SensorDeviceClass.PRESSURE,    "float", None),
     ("tire_pressure_rl",    "Tire Pressure RL",     (*_MAINT, "tyreStatusDriverRear"),                 "kPa",                            SensorDeviceClass.PRESSURE,    "float", None),
@@ -437,6 +453,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
     except (TypeError, ValueError):
         battery_kwh = 0.0
 
+    # Opt-in, and 0 for everyone who has not measured their own car. Applied to
+    # one entity only - see CONF_EXTERIOR_TEMP_OFFSET for why it is not shipped
+    # as a constant.
+    try:
+        ext_offset = float(entry.options.get(CONF_EXTERIOR_TEMP_OFFSET)
+                           or entry.data.get(CONF_EXTERIOR_TEMP_OFFSET) or 0.0)
+    except (TypeError, ValueError):
+        ext_offset = 0.0
+
     # The verdict is decided once in __init__ so every platform agrees; a BEV
     # (or a missing verdict) takes every gate the permissive way and is
     # exactly as it was before hybrids were supported.
@@ -448,7 +473,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
     #    hybrid or a petrol car - skips the charging rows rather than carrying
     #    tiles that can only ever read unavailable.
     add_entities(GeelySensor(coordinator, vin, device_name, *spec,
-                             pressure_unit=pressure_unit)
+                             pressure_unit=pressure_unit,
+                             value_offset=(ext_offset if spec[0] == "exterior_temp"
+                                           else 0.0))
                  for spec in SENSOR_SPECS
                  if charges or spec[0] not in _PLUG_ONLY_KEYS)
 

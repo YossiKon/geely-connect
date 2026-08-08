@@ -15,14 +15,16 @@ def _status(**over):
              "tyreStatusDriver": "240", "tyreStatusPassenger": "252",
              "tyreStatusDriverRear": "235", "tyreStatusPassengerRear": "238"}
     basic = {"speed": "0", "engineStatus": "engine_off"}
+    clim = {}
     ev.update(over.pop("ev", {}))
     maint.update(over.pop("maint", {}))
     basic.update(over.pop("basic", {}))
+    clim.update(over.pop("clim", {}))
     return {"vehicleStatus": {
         "basicVehicleStatus": basic,
         "additionalVehicleStatus": {"electricVehicleStatus": ev,
                                     "maintenanceStatus": maint,
-                                    "climateStatus": {}, "drivingSafetyStatus": {},
+                                    "climateStatus": clim, "drivingSafetyStatus": {},
                                     "runningStatus": {}}},
         "_state": {}, "_scheduled_charging": {}}
 
@@ -315,3 +317,85 @@ def test_the_measured_figure_stands_alone_when_the_car_estimate_is_unusable():
                           "averPowerConsumption": "22.7"}), 60.22)
     assert s.native_value == 265
     assert s.extra_state_attributes["car_estimate_scaled_km"] is None
+
+
+# ---------------------- the exterior temperature, and why it is opt-in --------
+# Every synchronised sample anyone produced reads exactly +10.0 against the car's
+# own cluster: three on a Starray (15->25, 15->25, 24->34), one on an EX5
+# (22->32), one after a drive (19->29). A sixth, on a car parked for hours, read
+# 19.7 real against 10 reported - ten the other way. A shipped constant was
+# retracted for that reason (v1.21.5); this is the owner's own measurement.
+
+def test_the_offset_moves_only_the_exterior_temperature():
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    import asyncio
+    import types
+    sensor = load("sensor")
+
+    class Hass:
+        def __init__(self):
+            self.data = {"geely_connect": {"e1": {
+                "api": object(), "coordinator": _Coord(_status(
+                    clim={"exteriorTemp": "25.0", "interiorTemp": "21.1"})),
+                "vin": FAKE_VIN, "device_name": "Geely", "capabilities": {}}}}
+
+    entry = types.SimpleNamespace(entry_id="e1",
+                                  data={"vin": FAKE_VIN},
+                                  options={"exterior_temp_offset": -10})
+    got = []
+    asyncio.run(sensor.async_setup_entry(Hass(), entry,
+                                         lambda e, *a, **k: got.extend(list(e))))
+    by_key = {e._attr_unique_id.rsplit(f"{FAKE_VIN}_", 1)[-1]: e
+              for e in got if hasattr(e, "_attr_unique_id")}
+    # The Starray pair from #11: cluster said 15, the cloud said 25.
+    assert by_key["exterior_temp"].native_value == 15.0
+    # Nothing else moves - the interior reading was never in question.
+    assert by_key["interior_temp"].native_value == 21.1
+
+
+def test_no_offset_is_applied_unless_someone_asks():
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    import asyncio
+    import types
+    sensor = load("sensor")
+
+    class Hass:
+        def __init__(self):
+            self.data = {"geely_connect": {"e1": {
+                "api": object(), "coordinator": _Coord(_status(
+                    clim={"exteriorTemp": "25.0"})),
+                "vin": FAKE_VIN, "device_name": "Geely", "capabilities": {}}}}
+
+    for options in ({}, {"exterior_temp_offset": 0},
+                    {"exterior_temp_offset": "not a number"}):
+        entry = types.SimpleNamespace(entry_id="e1", data={"vin": FAKE_VIN},
+                                      options=options)
+        got = []
+        asyncio.run(sensor.async_setup_entry(Hass(), entry,
+                                            lambda e, *a, **k: got.extend(list(e))))
+        ext = next(e for e in got if getattr(e, "_attr_unique_id", "")
+                   .endswith("_exterior_temp"))
+        assert ext.native_value == 25.0, options
+
+
+def test_the_tyre_temperatures_are_read_at_last():
+    """In every payload the whole time, exposed by nothing. On a car that has
+    stood a while they are the only ambient measurement in the payload that is
+    not ten degrees out - #11's own diagnostics had them at 19-21 while
+    exteriorTemp said 25 and the cluster said 15."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    data = _status(maint={"tyreTempDriver": "21.0", "tyreTempPassenger": "21.0",
+                          "tyreTempDriverRear": "19.0",
+                          "tyreTempPassengerRear": "19.0"})
+    sensor = load("sensor")
+    got = {}
+    for key, want in (("tire_temp_fl", 21.0), ("tire_temp_fr", 21.0),
+                      ("tire_temp_rl", 19.0), ("tire_temp_rr", 19.0)):
+        spec = next(x for x in sensor.SENSOR_SPECS if x[0] == key)
+        e = sensor.GeelySensor(_Coord(data), FAKE_VIN, "Geely", *spec)
+        got[key] = e.native_value
+        assert e.native_value == want, (key, e.native_value)
+    assert len(got) == 4

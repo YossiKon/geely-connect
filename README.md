@@ -23,7 +23,7 @@ polished setup on top.
 ## ✨ Highlights
 
 - 🔒 **Security-first** - verified TLS plus public-key pinning.
-- 📊 **Everything enabled** - all 67 entities are on from the start (80 on a
+- 📊 **Everything enabled** - all 71 entities are on from the start (84 on a
   hybrid), no duplicates, nothing to switch on by hand.
 - 🧮 **Computed extras** - charging power, charge completion time, range at full
   charge and efficiency, none of which the car reports itself.
@@ -390,12 +390,13 @@ always be compared instead of one of them looking like a bug.
 | Steering Wheel Heating | On / off, on the trims that have it. Read-only: the reading was measured on a real car (1 means heating at any level, 2 means off) but no command for it has ever been verified, so there is deliberately no switch. Unknown on a car that does not report the field |
 
 ### Tires
-Two sets of four, one reading each corner:
+Three sets of four, one reading each corner:
 
 | Entity | Unit |
 |---|---|
 | **Tire Front-Left / Front-Right / Rear-Left / Rear-Right** | Always the unit you picked at setup |
 | Tire Pressure FL / FR / RL / RR | Whatever Home Assistant decides |
+| Tire Temperature FL / FR / RL / RR | °C, from the same TPMS sensors - and the closest thing to an ambient reading this payload has on a car that has stood a while, see [Outside temperature](#outside-temperature) |
 
 Use the first set. The second carries `device_class: pressure`, which hands the
 display unit to Home Assistant: it reads `suggested_unit_of_measurement` only
@@ -926,6 +927,11 @@ Switching to **Manual** stops the timer immediately, and switching away from it
 starts polling again - no entity is created or removed either way, so history
 and automations are untouched.
 
+**Exterior temperature offset** lives here too - degrees added to that one
+entity, 0 by default. Only worth setting if you have compared your own car
+against its own cluster; see [Outside
+temperature](#outside-temperature).
+
 **Usable battery capacity (kWh)** lives here too. It is optional and 0 by
 default; a real figure switches *Range At Full Charge* from the car's own
 optimistic estimate to the range at this car's measured consumption. See
@@ -939,7 +945,7 @@ enabling. Everything the car reports, plus the computed extras above.
 
 The one thing that varies by car is propulsion: the thirteen fuel and engine
 entities are created only for a car with a tank, so a battery-electric EX5 gets
-67 entities and a PHEV gets 80. That's a decision made once at startup from your
+71 entities and a PHEV gets 84. That's a decision made once at startup from your
 account's `powerType` plus the car's own telemetry - there is no option to set.
 
 The only thing not created is the raw full-exposure pass (see below), because
@@ -961,19 +967,54 @@ happens, HA shows a **Reconfigure** prompt - request a fresh code and
 re-authenticate. Tip: run the first setup on a network you trust.
 
 ### Outside temperature
-The cloud's outside-temperature field cannot be trusted, and no correction
-fixes it. Measured against the cars' own clusters: parked, one car sat about ten
-degrees **below** the real air temperature and returned to the same value every
-time; after a drive it read about ten degrees **above** it, with the real
-temperature unmoved. So the field reports two different things rather than one
-thing with an offset, and a -10 correction shipped on the first evidence was
-retracted in v1.21.5 for exactly that reason.
+The cloud's `exteriorTemp` field is wrong on every car anyone has measured, and
+the shape of the error is now well characterised. Six synchronised readings -
+a photograph of the car's own cluster beside the same minute's payload:
 
-Reported so far on the Starray / EX5 EM-i (P145) **and** on an EX5 (E245), so
-this is not one platform's quirk - assume the reading is suspect on any car
-until yours proves otherwise against its own cluster. It is passed through
-untouched; for automations that need real outside air, use one of Home
-Assistant's [weather integrations](https://www.home-assistant.io/integrations/#weather).
+| Car | Situation | Cluster / real | Reported | Delta |
+|---|---|---|---|---|
+| Starray (P145) | after driving | 15 °C | 25.0 | **+10.0** |
+| Starray (P145) | after driving | 15 °C | 25.0 | **+10.0** |
+| Starray (P145) | after driving | 24 °C | 34.0 | **+10.0** |
+| Starray (P145) | after a short trip | 19 °C | 29 | **+10** |
+| EX5 (E245) | after driving | 22 °C | 32.0 | **+10.0** |
+| Starray (P145) | **parked for hours** | 19.7 °C | 10 | **−9.7** |
+
+Five of the six are *exactly* +10.0, on two different platforms. The sixth is the
+reason there is still no automatic correction: on a car that had stood for hours
+the field read ten degrees the **other** way, and it returned to the same 10
+every time that car was parked. A blanket −10 would have turned that reading into
+0 °C - which is why the one shipped in v1.21.4 was retracted a day later.
+
+The likeliest reading of all six is that the field is live only while the car is
+awake, and holds some other value once it has been sitting - but nobody has
+proved that, and the integration does not guess. **It is passed through
+untouched.**
+
+**What you can do about it**
+
+- **If you have measured your own car** against its cluster and the offset is
+  consistent, set **exterior temperature offset** in Configure (see [Changing
+  settings later](#%EF%B8%8F-changing-settings-later)). It is yours, not ours:
+  0 for everyone who has not measured, applied to that one entity and nothing
+  else.
+- **The tyre temperatures are a better ambient proxy on a car that has stood a
+  while.** All four are now real entities - they come from the same TPMS sensors
+  as the pressures and were sitting in the payload unread. In the diagnostics
+  behind the table above they read 19-21 °C while `exteriorTemp` said 25 and the
+  cluster said 15. They are not an air thermometer, and a drive warms them - but
+  on a cold car they are the closest thing this payload has.
+- **For automations that need real outside air**, use one of Home Assistant's
+  [weather integrations](https://www.home-assistant.io/integrations/#weather).
+  That is still the honest answer.
+
+### Inside temperature
+Worth stating plainly, because it gets mentioned in the same breath: **nobody has
+reported the cabin reading being wrong**, and it holds up in the same diagnostics
+that condemn the outside one - 21.1 °C and 26.5 °C in cars whose real ambient was
+15 °C and 24 °C, which is what a closed cabin does. It updates on the same poll
+as everything else, so a parked car's cabin reading ages with the rest of the
+payload rather than freezing on its own.
 
 ---
 

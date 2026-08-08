@@ -28,6 +28,7 @@ from homeassistant.helpers import entity_registry as er
 from . import api as geely_api
 from .const import (
     CONF_BATTERY_KWH,
+    CONF_EXTERIOR_TEMP_OFFSET,
     CONF_FULL_EXPOSURE,
     CONF_REGION,
     DEFAULT_COUNTRY_CODE,
@@ -464,6 +465,15 @@ class GeelyIntlOptionsFlow(config_entries.OptionsFlow):
                     CONF_BATTERY_KWH,
                     default=float(current.get(CONF_BATTERY_KWH) or 0),
                 ): vol.All(vol.Coerce(float), vol.Range(min=0, max=250)),
+                # Degrees to add to Exterior Temperature, for an owner who has
+                # measured their own car against its cluster. 0 for everyone
+                # else, and deliberately not a shipped constant: five
+                # synchronised samples read exactly +10, and a sixth, on a car
+                # parked for hours, read ten the other way.
+                vol.Optional(
+                    CONF_EXTERIOR_TEMP_OFFSET,
+                    default=float(current.get(CONF_EXTERIOR_TEMP_OFFSET) or 0),
+                ): vol.All(vol.Coerce(float), vol.Range(min=-30, max=30)),
             }),
         )
 

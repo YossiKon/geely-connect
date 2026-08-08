@@ -95,6 +95,14 @@ CONF_FULL_EXPOSURE = "full_exposure"
 # figure moves again with the trim's wheels and weight. 0 means "not told", and
 # the sensor then extrapolates the car's own estimate as it always did.
 CONF_BATTERY_KWH = "battery_capacity_kwh"
+# Degrees to add to Exterior Temperature. 0 by default and it must stay that
+# way: every synchronised sample anyone has produced reads exactly +10.0 against
+# the car's own cluster - three on a Starray, one on an EX5, one after a drive -
+# but a sixth, taken on a car parked for hours, read ten degrees the other way.
+# So the field is not one thing with an offset, and a constant shipped for
+# everyone had to be retracted once already (v1.21.5). This lets an owner who has
+# measured their own car against its cluster apply what they measured.
+CONF_EXTERIOR_TEMP_OFFSET = "exterior_temp_offset"
 
 # Polling profiles. The Geely backend allows one session per account, so each
 # poll briefly logs the phone app out - the mode lets the user trade freshness
