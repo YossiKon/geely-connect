@@ -489,6 +489,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
         GeelyEfficiencySensor(coordinator, vin, device_name),
         GeelyLastUpdatedSensor(coordinator, vin, device_name),
         GeelyFullRangeSensor(coordinator, vin, device_name, battery_kwh),
+        GeelyCarReportedAtSensor(coordinator, vin, device_name),
         GeelyLastTripSensor(coordinator, vin, device_name),
         GeelyTripInProgressSensor(coordinator, vin, device_name),
         # Charging: the car sends volts and amps but never their product, so
@@ -602,6 +603,26 @@ class GeelySensor(CoordinatorEntity, _AutoPrecision):
             manufacturer="Geely",
             name=device_name,
         )
+
+    @property
+    def extra_state_attributes(self):
+        """How old this reading is, on the two entities people check by hand.
+
+        A parked Geely stops reporting and the cloud keeps serving its last
+        snapshot, so a temperature can be hours stale while the entity looks
+        live - an owner graphed both of his sitting flat for fourteen hours
+        against two real sensors (#24). Every field in the payload ages together,
+        but these are the two anyone compares against a thermometer, so the age
+        belongs where they will see it.
+        """
+        if self._key not in ("interior_temp", "exterior_temp"):
+            return None
+        at = _reported_at(self.coordinator.data or {})
+        if at is None:
+            return None
+        age = (_dt_util.utcnow() - at).total_seconds() / 60.0
+        return {"car_reported_at": at.isoformat(),
+                "age_minutes": round(max(age, 0.0), 1)}
 
     @property
     def native_value(self) -> Any:
@@ -749,6 +770,56 @@ class GeelyLastUpdatedSensor(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self):
         return self._ts
+
+
+class GeelyCarReportedAtSensor(CoordinatorEntity, SensorEntity):
+    """When the CAR last reported, as opposed to when we last asked.
+
+    `Last Updated` above is our own clock: it advances on every successful poll,
+    including the polls that bring back a snapshot the car has not refreshed. The
+    difference matters more than it sounds, and #24 is why it exists.
+
+    An owner graphed his EX5's exterior and interior temperatures against two
+    real sensors over 24 hours. Both Geely lines sat perfectly flat - the outside
+    one at 35 C - from midnight until 14:00, while the real air went from 13 down
+    to 9 and back up to 19. They moved only when he shifted the car a couple of
+    metres. A parked Geely stops reporting, the cloud keeps serving the last
+    snapshot, and a poll every thirty seconds republishes it - which the recorder
+    draws as a confident flat line and any owner reads as a live measurement.
+
+    `vehicleStatus.updateTime` is the car's own stamp on that snapshot, in epoch
+    milliseconds, and nothing read it until now. When it stops advancing, every
+    value in the payload is history.
+    """
+
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_icon = "mdi:car-clock"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator, vin: str, device_name: str) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"geely_{vin}_car_reported_at"
+        self._attr_name = "Car Reported At"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, vin)}, manufacturer="Geely", name=device_name)
+
+    @property
+    def native_value(self):
+        return _reported_at(self.coordinator.data or {})
+
+
+def _reported_at(data: dict):
+    """The car's own snapshot time, or None if it did not send one."""
+    raw = _walk(data, ("vehicleStatus", "updateTime"))
+    try:
+        ms = float(raw)
+    except (TypeError, ValueError):
+        return None
+    # Epoch milliseconds. A zero or a negative is a placeholder, not a moment.
+    if ms <= 0:
+        return None
+    return _dt_util.utc_from_timestamp(ms / 1000.0)
 
 
 class GeelyChargeCompleteSensor(CoordinatorEntity, SensorEntity):

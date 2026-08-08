@@ -23,7 +23,7 @@ polished setup on top.
 ## ✨ Highlights
 
 - 🔒 **Security-first** - verified TLS plus public-key pinning.
-- 📊 **Everything enabled** - all 72 entities are on from the start (85 on a
+- 📊 **Everything enabled** - all 73 entities are on from the start (86 on a
   hybrid), no duplicates, nothing to switch on by hand.
 - 🧮 **Computed extras** - charging power, charge completion time, range at full
   charge and efficiency, none of which the car reports itself.
@@ -947,7 +947,7 @@ enabling. Everything the car reports, plus the computed extras above.
 
 The one thing that varies by car is propulsion: the thirteen fuel and engine
 entities are created only for a car with a tank, so a battery-electric EX5 gets
-72 entities and a PHEV gets 85. That's a decision made once at startup from your
+73 entities and a PHEV gets 86. That's a decision made once at startup from your
 account's `powerType` plus the car's own telemetry - there is no option to set.
 
 The only thing not created is the raw full-exposure pass (see below), because
@@ -968,9 +968,35 @@ When Home Assistant logs in, the phone app is signed out, and vice-versa. If it
 happens, HA shows a **Reconfigure** prompt - request a fresh code and
 re-authenticate. Tip: run the first setup on a network you trust.
 
+### Temperature: the car stops reporting when it sleeps
+
+This is the mechanism behind every temperature complaint, and it is worth reading
+before the numbers below. An owner graphed his EX5's **exterior and interior**
+temperatures against two real sensors over 24 hours. Both Geely lines sat
+perfectly flat - the outside one at 35 °C - from midnight until 14:00, while the
+real air went from 13 down to 9 and back up to 19. They moved only when he shifted
+the car a couple of metres.
+
+**A parked Geely stops reporting.** The cloud keeps serving its last snapshot, a
+poll every thirty seconds faithfully republishes it, and Home Assistant's recorder
+draws that as a confident flat line which reads exactly like a live measurement.
+It is history.
+
+Two entities exist so you can see this rather than guess at it:
+
+- **Car Reported At** - the car's own timestamp on the snapshot, from a field
+  nothing read until v1.32.0. `Last Updated` is *our* clock and advances on every
+  poll; this one only advances when the car actually says something.
+- **Interior / Exterior Temperature** carry `car_reported_at` and `age_minutes`
+  attributes, because those are the two readings people hold a thermometer
+  against.
+
+If a temperature looks wrong, check its age first. Fourteen hours old explains
+most of it.
+
 ### Outside temperature
-The cloud's `exteriorTemp` field is wrong on every car anyone has measured, and
-the shape of the error is now well characterised. Six synchronised readings -
+On top of the staleness, the `exteriorTemp` field is *also* offset on every car
+anyone has measured, and the shape of that error is now well characterised. Six synchronised readings -
 a photograph of the car's own cluster beside the same minute's payload:
 
 | Car | Situation | Cluster / real | Reported | Delta |

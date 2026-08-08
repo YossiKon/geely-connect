@@ -399,3 +399,68 @@ def test_the_tyre_temperatures_are_read_at_last():
         got[key] = e.native_value
         assert e.native_value == want, (key, e.native_value)
     assert len(got) == 4
+
+
+# ------------------ #24: the car stops reporting when it sleeps ---------------
+# An owner graphed his exterior AND interior temperatures against two real
+# sensors over 24 hours. Both Geely lines sat flat - the outside one at 35 C -
+# from midnight to 14:00 while the real air went 13 -> 9 -> 19, and moved only
+# when he shifted the car. A poll every thirty seconds republishes a snapshot the
+# car has not refreshed, and the recorder draws that as a live measurement.
+
+def _with_update_time(ms):
+    data = _status(clim={"exteriorTemp": "35.0", "interiorTemp": "17.3"})
+    data["vehicleStatus"]["updateTime"] = ms
+    return data
+
+
+def test_the_car_reported_at_sensor_reads_the_cars_own_stamp():
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    import datetime as dt
+    s = _make("GeelyCarReportedAtSensor", _with_update_time("1785990368223"))
+    got = s.native_value
+    assert got is not None
+    assert got.tzinfo is not None, "a timestamp entity needs an aware datetime"
+    assert got == dt.datetime.fromtimestamp(1785990368.223, dt.timezone.utc)
+
+
+def test_a_car_that_sent_no_stamp_says_nothing_rather_than_1970():
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    for junk in (None, "", "0", 0, "-1", "abc", {}):
+        s = _make("GeelyCarReportedAtSensor", _with_update_time(junk))
+        assert s.native_value is None, junk
+
+
+def test_the_two_temperatures_carry_their_own_age():
+    """So that a fourteen-hour-old reading does not have to be inferred from a
+    flat line on a graph."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    import datetime as dt
+    sensor = load("sensor")
+    fourteen_hours_ago = (dt.datetime.now(dt.timezone.utc)
+                          - dt.timedelta(hours=14)).timestamp() * 1000
+    data = _with_update_time(str(int(fourteen_hours_ago)))
+    for key in ("exterior_temp", "interior_temp"):
+        spec = next(x for x in sensor.SENSOR_SPECS if x[0] == key)
+        e = sensor.GeelySensor(_Coord(data), FAKE_VIN, "Geely", *spec)
+        a = e.extra_state_attributes
+        assert a is not None, key
+        assert 835 < a["age_minutes"] < 845, (key, a)
+        assert a["car_reported_at"].endswith("+00:00"), a
+
+
+def test_nothing_else_is_cluttered_with_an_age():
+    """Every field in the payload ages together; these are the two anyone holds a
+    thermometer against, and 70-odd entities carrying the same attribute would be
+    noise."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    sensor = load("sensor")
+    data = _with_update_time("1785990368223")
+    for key in ("battery", "range", "speed", "total_mileage", "12v_battery"):
+        spec = next(x for x in sensor.SENSOR_SPECS if x[0] == key)
+        e = sensor.GeelySensor(_Coord(data), FAKE_VIN, "Geely", *spec)
+        assert e.extra_state_attributes is None, key
