@@ -627,3 +627,79 @@ def test_every_card_class_leaves_the_driving_lock_to_the_base():
             assert "_drivingNotice()" in body, f"{cls} has no driving banner"
         else:
             assert "actions locked" in body, f"{cls} never says actions are locked"
+
+
+# ------------------------------------- the one layer nothing was testing ------
+# Fifty-eight browser tests drive geely-card.js and every one of them injects the
+# file's contents. Nothing exercised the HTTP route that puts it in front of a
+# browser - and if that route fails, the symptom is total and confusing: no
+# element defined, every card missing from the picker, and "Configuration error"
+# on the dashboard, with the file sitting correctly on disk the whole time.
+
+class _FakeRequest:
+    """Enough of an aiohttp request for the view: an app that resolves hass."""
+
+    def __init__(self, hass, key=None):
+        self.app = {"hass": hass} if key is None else {key: hass, "hass": hass}
+
+
+class _ExecutorHass:
+    def __init__(self):
+        self.data = {}
+
+    async def async_add_executor_job(self, fn, *args):
+        return fn(*args)
+
+
+def test_the_route_serves_the_card_file_itself():
+    """Not a static path: the view re-reads the file on every request, so a HACS
+    update that replaces it reaches browsers without a restart."""
+    cards = _cards()
+    import asyncio
+    import os
+    view = cards.GeelyCardView()
+    resp = asyncio.run(view.get(_FakeRequest(_ExecutorHass())))
+    on_disk = open(os.path.join(PKG, "geely-card.js"), "rb").read()
+    assert resp.status == 200
+    assert resp.body == on_disk, "the route served something other than the file"
+    assert "javascript" in resp.content_type
+    # The frontend's service worker keeps a 24-hour CacheFirst copy of every
+    # unmatched path, so the header is not decoration.
+    assert resp.headers.get("Cache-Control") == "no-cache"
+
+
+def test_the_route_still_finds_hass_the_way_home_assistant_stores_it():
+    """Home Assistant keeps hass on the aiohttp app under a typed AppKey *and*
+    under the plain string "hass", the latter explicitly "for backwards
+    compatibility". This view uses the string. If that compatibility shim is ever
+    dropped, every request here becomes a 500 and every card vanishes with nothing
+    in the log tying it to the frontend - so pin it."""
+    cards = _cards()
+    import asyncio
+    from homeassistant.components.http import KEY_HASS
+    view = cards.GeelyCardView()
+    # Exactly as the real app is populated.
+    resp = asyncio.run(view.get(_FakeRequest(_ExecutorHass(), key=KEY_HASS)))
+    assert resp.status == 200 and resp.body
+
+
+def test_a_missing_file_gives_an_honest_404_rather_than_a_500():
+    """Whoever hits the URL by hand while chasing a missing card deserves to be
+    told what is wrong, not handed a stack trace."""
+    cards = _cards()
+    import asyncio
+    view = cards.GeelyCardView()
+    orig = cards._card_path
+    cards._card_path = lambda: "/nowhere/geely-card.js"
+    try:
+        resp = asyncio.run(view.get(_FakeRequest(_ExecutorHass())))
+    finally:
+        cards._card_path = orig
+    assert resp.status == 404
+    assert "missing" in resp.text.lower()
+
+
+def test_the_route_is_public_because_a_script_tag_carries_no_token():
+    cards = _cards()
+    assert cards.GeelyCardView.requires_auth is False
+    assert cards.GeelyCardView.url == cards.CARD_URL
