@@ -72,10 +72,20 @@ SPECS: tuple[tuple[str, str, tuple[str, ...], BinarySensorDeviceClass | None, tu
     # ventilation fields use.
     #
     # 0 is a THIRD state, and it is why this line has a sixth element: three
-    # Starray payloads read 0 while their capability catalogue does not advertise
-    # a heated wheel at all. So 0 means "not fitted", and reporting it as Off -
-    # which is what shipped in v1.27.0 - told most owners their car had a heated
-    # steering wheel that happened to be switched off.
+    # Starray payloads read 0. Reporting that as Off - which is what shipped in
+    # v1.27.0 - told most owners their car had a heated steering wheel that
+    # happened to be switched off, so 0 now reads "not fitted".
+    #
+    # The reason first given here was that those cars' capability catalogue did
+    # not advertise a heated wheel. That was wrong, and wrong in our favour:
+    # `steering_wheel_heat.enabled` could not be derived on ANY car until v1.35.1,
+    # because parse() read only one of the two catalogue entries the car splits
+    # its climate declaration across. No Starray raw catalogue exists to check.
+    #
+    # What holds it up instead is a comparison across models: the EX5 whose raw
+    # catalogue DOES advertise `steel_wheel_heating` reads 2 with the wheel off,
+    # while three Starrays read 0. A car with the feature reports the 1/2
+    # convention; 0 is a different case.
     ("steering_wheel_heating", "Steering Wheel Heating", (*_CLIM, "steerWhlHeatingSts"), None, ("1", 1), ("0", 0)),
     # `trunkLockStatus`, beside the open/closed sensor and read by nothing until
     # now. It is the only observable signal that the Unlock Trunk button did

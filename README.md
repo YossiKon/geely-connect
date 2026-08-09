@@ -392,7 +392,7 @@ always be compared instead of one of them looking like a bug.
 |---|---|
 | Interior Temperature | Cabin temp (°C) |
 | Exterior Temperature | Outside temp (°C) - **treat with suspicion**, see [Known limitations](#%EF%B8%8F-known-limitations). Owners of both the Starray and the EX5 have measured it ten degrees out |
-| Steering Wheel Heating | On / off, on the trims that have it. Read-only: the reading was measured on a real car (1 means heating at any level, 2 means off) but no command for it has ever been verified, so there is deliberately no switch. A car that reports **0** does not have the feature and the entity says unknown rather than a confident "off" - three Starray payloads read 0 while their capability catalogue advertised no heated wheel at all |
+| Steering Wheel Heating | On / off, on the trims that have it. Read-only: the reading was measured on a real car (1 means heating at any level, 2 means off) but no command for it has ever been verified, so there is deliberately no switch. A car that reports **0** does not have the feature and the entity says unknown rather than a confident "off". The evidence is a comparison across models: an EX5 whose capability catalogue does advertise a heated wheel reads **2** with it switched off, while three Starrays read **0** |
 
 ### Tires
 Three sets of four, one reading each corner:
