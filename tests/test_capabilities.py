@@ -53,6 +53,77 @@ def test_combined_climate_control_is_the_fallback_source():
     assert out["ac.enabled"] is True and out["ac.min"] == 16.0
 
 
+def test_both_climate_entries_are_read_because_the_car_splits_them():
+    """A real EX5 catalogue (#20) declares climate across two entries, and reading
+    only the preferred one lost three flags on every car.
+
+    `remote_climate_control_2` is enabled on every car seen so far, so it was
+    always the chosen source - and `steel_wheel_heating`, `AC_step` and
+    `window_ventilation_duration` all live in `combined_climate_control`. The
+    consequence was that `steering_wheel_heat.enabled` could not be derived
+    anywhere, which then got quoted on #4 as evidence that a car did not have the
+    feature. The shapes below are that car's, trimmed to the fields at issue."""
+    out = cap.parse([
+        _entry("remote_climate_control_2", True, valueRange="15.5|28.5",
+               showType="support",
+               paramsJson=[{"nameKey": "climate_devices", "name": "d",
+                            "config": "AC,seat_heat,seat_ventilation,steer_wheel,defrost"}]),
+        _entry("combined_climate_control", True, showType="0.5",
+               paramsJson=[
+                   {"nameKey": "steel_wheel_heating", "name": "w", "config": "true"},
+                   {"nameKey": "AC_step", "name": "s", "config": "0.5"},
+                   {"nameKey": "window_ventilation", "name": "v", "config": "true"},
+                   {"nameKey": "window_ventilation_duration", "name": "t", "config": "60"}]),
+    ])
+    assert out["steering_wheel_heat.enabled"] is True
+    assert out["ac.step"] == 0.5
+    assert out["window_vent.duration_s"] == 60
+    # And the preferred entry still supplies the range and the device list.
+    assert out["ac.min"] == 15.5 and out["ac.max"] == 28.5
+    assert out["defrost.enabled"] is True
+
+
+def test_the_preferred_entry_wins_where_the_two_disagree():
+    """Merging must not let the fallback overwrite the entry we chose, or a stale
+    duplicate in the other block would quietly change the temperature step."""
+    out = cap.parse([
+        _entry("remote_climate_control_2", True,
+               paramsJson=[{"nameKey": "AC_step", "name": "s", "config": "1.0"}]),
+        _entry("combined_climate_control", True,
+               paramsJson=[{"nameKey": "AC_step", "name": "s", "config": "0.5"}]),
+    ])
+    assert out["ac.step"] == 1.0
+
+
+def test_the_fallback_source_still_supplies_its_own_params():
+    """With the preferred entry disabled the fallback is the only source, and it
+    must still be read - the merge above must not have made it conditional."""
+    out = cap.parse([
+        _entry("remote_climate_control_2", False),
+        _entry("combined_climate_control", True,
+               paramsJson=[{"nameKey": "steel_wheel_heating", "name": "w", "config": "true"},
+                           {"nameKey": "ad_temp_range", "name": "r", "config": "16|30"}]),
+    ])
+    assert out["steering_wheel_heat.enabled"] is True
+    assert out["ac.min"] == 16.0 and out["ac.max"] == 30.0
+
+
+def test_a_starray_catalogue_declares_no_trunk_open_command():
+    """The evidence behind #20, pinned so it cannot rot.
+
+    `tailgate.enabled` comes from `remote_control_open_2` alone. Three real
+    Starray dumps (#11) lack the flag while a real EX5 carries it, which is how
+    we know the two models differ - so this derivation must stay keyed to that
+    one entry, and must not start accepting the unlock entry as a substitute."""
+    starray = cap.parse([_entry("remote_control_unlock_2", True,
+                                valueEnum="door,trunk")])
+    assert starray.get("tailgate.enabled") is None
+    assert starray["unlock.enabled"] is True
+    ex5 = cap.parse([_entry("remote_control_unlock_2", True, valueEnum="door,trunk"),
+                     _entry("remote_control_open_2", True, valueEnum="trunk")])
+    assert ex5["tailgate.enabled"] is True
+
+
 def test_ac_range_can_come_from_the_params_block():
     out = cap.parse([_entry(
         "remote_climate_control_2", True,

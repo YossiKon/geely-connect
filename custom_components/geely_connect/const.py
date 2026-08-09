@@ -308,14 +308,38 @@ SERVICE_FIND_CAR_PARAMS = [{"key": "rhl", "value": "horn-light-flash"}]
 # drivingSafetyStatus.trunkLockStatus (binary_sensor.<vin>_bs_trunk_unlocked) is
 # what distinguishes the two.
 #
-# Worth knowing before anyone probes again: the capability catalogue advertises
-# `remote_control_open_2` as its own entry, separate from
-# `remote_control_unlock_2`, and by the RDL_2 / RDU_2 naming pattern a "Remote
-# Door Open" service would be RDO_2. Nobody has tried it. Given four owners
-# whose app cannot open the gate either, the likeliest outcome is that it does
-# not exist - but it is one fire_control call for whoever wants to be certain.
+# AND THE CATALOGUE SAYS AN OPEN COMMAND EXISTS, at least on the EX5. A real
+# E245-J1 catalogue read in full for the first time (#20, 2026-08-09) declares an
+# internally consistent triple:
 #
-# No capture backs a separate open command, and none backs the "~45s" figure that
+#     remote_control_lock_2     valueEnum: door
+#     remote_control_unlock_2   valueEnum: door,trunk
+#     remote_control_open_2     valueEnum: trunk        <- valueEnable true
+#
+# A command named *open* whose only target is the trunk is a powered tailgate
+# release, and that car advertises it as enabled. The three Starray (P145-J1)
+# dumps on #11 do NOT carry it: `tailgate.enabled` is derived from that entry
+# alone (capabilities.py) and is absent in all three, on integration versions
+# 1.16.1 / 1.17.2 / 1.21.3 which all contained the derivation. So the two models
+# genuinely differ, and it is the only capability flag that differs between them.
+#
+# Which leaves this integration in an odd position worth stating plainly: the
+# button below is ENABLED BY the open capability and SENDS the unlock command.
+# "It unlocks but does not open" is a description of our own code, not only of
+# the car. By the RDL_2 / RDU_2 pattern the open service would be RDO_2, and
+# nobody has fired it yet - no code change is needed to try, since fire_control
+# takes any serviceId:
+#
+#     service_id: RDO_2
+#     params: [{key: target, value: trunk}]
+#
+# Judge it by the gate, never by the response: RDU_2 answers code 1000 too.
+#
+# A powered tailgate is also usually an option rather than standard, which would
+# let every account here be true at once - but that part is unproven and should
+# stay labelled as such.
+#
+# No capture backs the serviceId spelling, and none backs the "~45s" figure that
 # used to be stated here as fact either.
 SERVICE_TAILGATE        = "RDU_2"
 SERVICE_TAILGATE_PARAMS  = [{"key": "target", "value": "trunk"}]

@@ -80,7 +80,24 @@ def parse(items: list[dict]) -> dict[str, Any]:
                 out["ac.max"] = float(hi)
             except ValueError:
                 pass
-        ps = _params_to_dict(ac_source)
+        # Params from BOTH climate entries, the chosen source winning on a clash.
+        #
+        # These two entries split the climate declaration between them, and
+        # reading only the chosen one silently dropped whatever lived in the
+        # other. Verified on a real EX5 catalogue (#20): with
+        # remote_climate_control_2 enabled - true on every car seen so far - the
+        # combined_climate_control params were never read, so `steel_wheel_heating:
+        # "true"`, `AC_step: "0.5"` and `window_ventilation_duration: "60"` were
+        # all invisible, and `steering_wheel_heat.enabled` could not be derived on
+        # ANY car. The comment below this block always said combined_climate_control
+        # was where those live; the code only ever looked at one entry.
+        #
+        # Deliberately NOT merging remote_centra_lockstatus, which carries a copy
+        # of this same param list in that car's catalogue: it is a central-lock
+        # status entry, and params describing seat heating in it are a vendor data
+        # error rather than a third source of truth.
+        ps = {**_params_to_dict(ccc), **_params_to_dict(rcc2)} if ac_source is rcc2 \
+            else _params_to_dict(ccc)
         # fallback to ad_temp_range param
         if "ac.min" not in out and "ad_temp_range" in ps and "|" in ps["ad_temp_range"]:
             try:
