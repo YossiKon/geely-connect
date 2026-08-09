@@ -1262,10 +1262,12 @@
       /* Parking Comfort keeps the cabin liveable while the car sits, so it belongs
        * beside the cabin-air controls rather than among the one-shot actions.
        *
-       * It carries no "on" class on purpose. This car does not report the
-       * feature's state: the field that looks like its flag reads 1 on a car with
-       * it switched off (#13), so the switch itself reports unknown. A control
-       * that lights up would be inventing a state - the tooltip says so instead. */
+       * It is wired to the state like every other button here, and in practice it
+       * cannot light up: this car does not report the feature's state - the field
+       * that looks like its flag reads 1 on a car with it switched off (#13) - so
+       * the switch reports unknown and the class never applies. Left as a normal
+       * comparison rather than hard-coded off, so a car that does report it would
+       * light up correctly; the tooltip covers the ones that do not. */
       const airRow = (gclean ? `<button class="cbtn ${gclean.state === "on" ? "on" : ""}"
             data-act="gclean" title="Fresh air (G-Clean)">${icon("fresh")}<span>Fresh air</span></button>` : "") +
         (pcomfort ? `<button class="cbtn ${pcomfort.state === "on" ? "on" : ""}"
