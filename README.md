@@ -291,12 +291,17 @@ The full and top-view cards carry a complete **Climate** section:
 - **Temperature stepper** - bound to the climate entity's own min / max / step
   (15.5-28.5 °C in 0.5° steps on the EX5), so it can never send a value the
   car refuses.
-- **Heat / Cool** - the car's real *Rapid Warming* / *Rapid Cooling* presets,
-  which also run the seats and ventilation, exactly as the official app does.
+- **Rapid heat / Rapid cool** - the car's own *Rapid Warming* / *Rapid Cooling*
+  presets, which drive the setpoint to its maximum or minimum and run the seats
+  too, exactly as the official app does. They are labelled *rapid* because they
+  are not a plain "start heating", and an owner reasonably read the old labels
+  that way.
 - **Seat heating / Seat cooling** per front seat - each tap steps
   Off → Low → Medium → High → Off.
-- **Fresh air** (G-Clean), and **Open / Close** for the sunroof and the
-  sunshade.
+- **Fresh air** (G-Clean), **Parking comfort**, and **Open / Close** for the
+  sunroof and the sunshade. Parking comfort never lights up, deliberately: the car
+  does not report whether it is on - the field that looks like its flag reads 1
+  with the feature off - so the button toggles it without claiming a state.
 - Every block hides itself on a trim that lacks the entity - and there is no
   fan-speed control because the car's cloud API simply has none.
 

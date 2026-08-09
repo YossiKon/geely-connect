@@ -58,6 +58,9 @@ window.mkHass = (opts) => {
   // only when the climate entity exists, which is what the seat tests need.
   put(`climate.${P}_climate`, "off", { temperature: 22, min_temp: 15.5,
       max_temp: 28.5, target_temp_step: 0.5, preset_mode: "none" });
+  if (opts.parkingComfort !== undefined) {
+    put(`switch.${P}_parking_comfort`, opts.parkingComfort);
+  }
   put(`sensor.${P}_speed`, opts.speed === undefined ? "0" : opts.speed,
       { unit_of_measurement: "km/h" });
   // A car with a tank. The integration only creates these when the propulsion
@@ -1216,3 +1219,60 @@ def test_the_active_label_darkens_on_a_light_theme_and_stays_bright_on_a_dark_on
     # And it has to stay recognisably the accent, not collapse to plain text.
     assert on_dark[1] > on_dark[0] and on_dark[1] > on_dark[2], on_dark
     assert on_light[1] > on_light[0] and on_light[1] > on_light[2], on_light
+
+
+# ------------------------------------ #29, #30: say what the buttons really do
+
+def test_the_rapid_buttons_say_rapid():
+    """They fire the car's own Rapid Warming / Rapid Cooling presets, not a plain
+    "start heating" - and labelled Heat and Cool they read as the latter. An owner
+    said exactly that: "I initially thought heat just turned on heating, not rapid
+    heating" (#29)."""
+    probe = """[...el.shadowRoot.querySelectorAll('[data-act^="rapid"]')]
+                 .map((b) => [b.dataset.act, b.textContent.replace(/\s+/g, " ").trim(),
+                              b.getAttribute("title")])"""
+    for tag in CARD_TAGS:
+        got = _mount(tag, probe)
+        assert got, tag
+        by = {a: (label, title) for a, label, title in got}
+        assert by["rapidheat"][0] == "Rapid heat", (tag, by)
+        assert by["rapidcool"][0] == "Rapid cool", (tag, by)
+        # And the tooltip says what the preset actually does to the car.
+        assert "maximum" in by["rapidheat"][1] and "seats" in by["rapidheat"][1], by
+        assert "minimum" in by["rapidcool"][1] and "windows" in by["rapidcool"][1], by
+
+
+def test_parking_comfort_appears_on_the_big_cards_when_the_car_has_it():
+    """Asked for on #30. It belongs beside the cabin-air controls rather than the
+    one-shot actions, because it keeps the cabin liveable while the car sits."""
+    probe = """(() => {
+        const b = el.shadowRoot.querySelector('[data-act="pcomfort"]');
+        return b ? { text: b.textContent.replace(/\s+/g, " ").trim(),
+                     title: b.getAttribute("title"),
+                     lit: b.classList.contains("on") } : null;
+    })()"""
+    for tag in ("geely-card", "geely-card-top"):
+        got = _mount(tag, probe, parkingComfort="unknown")
+        assert got is not None, f"{tag} has no parking comfort button"
+        assert "Parking comfort" in got["text"], (tag, got)
+        # The car does not report the state, so the control must not invent one.
+        assert got["lit"] is False, (tag, got)
+        assert "does not report" in got["title"], (tag, got["title"])
+
+
+def test_no_parking_comfort_button_on_a_car_without_the_feature():
+    probe = 'el.shadowRoot.querySelectorAll(\'[data-act="pcomfort"]\').length'
+    assert _mount("geely-card", probe) == 0
+
+
+def test_pressing_parking_comfort_toggles_the_switch():
+    script = """() => {
+        const el = document.createElement("geely-card");
+        document.body.appendChild(el);
+        el.setConfig({});
+        const hass = window.mkHass({ parkingComfort: "unknown" });
+        el.hass = hass;
+        el._onAction("pcomfort");
+        return hass.serviceCalls.map((c) => [c[0], c[1], c[2].entity_id]);
+    }"""
+    assert _evaluate(script) == [["switch", "toggle", "switch.car_parking_comfort"]]

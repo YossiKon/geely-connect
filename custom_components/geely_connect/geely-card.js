@@ -34,7 +34,7 @@
     "scheduled_charging", "charger_connection", "tire_front_right",
     "tire_front_left", "tire_rear_right", "door_rear_right", "charging_power",
     "seat_heat_passenger", "seat_vent_passenger", "seat_heat_driver",
-    "seat_vent_driver", "sunshade", "g_clean",
+    "seat_vent_driver", "sunshade", "g_clean", "parking_comfort",
     "tire_rear_left", "door_rear_left", "combined_range", "charge_complete",
     "charge_voltage", "electric_range", "charge_current", "door_passenger",
     "charger_plug", "total_mileage", "refresh_data", "unlock_trunk",
@@ -125,6 +125,23 @@
   /* Unchanged for anyone who has not asked: two links, not four. */
   const DEFAULT_NAV = ["maps", "waze"];
 
+  /* The car does not report this feature's state - the field that looks like its
+   * flag reads 1 with the feature off (#13) - so the switch reads unknown and the
+   * button cannot honestly light up. Say that on the control. */
+  const PCOMFORT_HINT = "Parking Comfort: keeps the cabin comfortable while the "
+    + "car is parked. Your car does not report whether it is on, so this button "
+    + "toggles it without showing a state.";
+
+  /* These two buttons fire the car's own Rapid Warming / Rapid Cooling presets,
+   * not a plain "start heating". Labelled Heat and Cool they read as the latter -
+   * an owner said so: "I initially thought heat just turned on heating, not rapid
+   * heating" (#29). So the label says rapid and the tooltip says what that
+   * actually does to the car. */
+  const RAPID_HEAT_HINT = "Rapid warming: the car's own preset - drives the "
+    + "setpoint to its maximum and heats both front seats";
+  const RAPID_COOL_HINT = "Rapid cooling: the car's own preset - drives the "
+    + "setpoint to its minimum, ventilates both front seats and cracks the windows";
+
   const DEFAULT_COOLDOWN_S = 3;
   /* How long the temperature stepper waits for the tapping to stop. */
   const TEMP_SETTLE_MS = 1100;
@@ -134,6 +151,7 @@
     // The propulsion split: _carState() reads these for every card, so a
     // card that did not watch them would freeze a hybrid's fuel bar and
     // headline exactly the way the door count froze once.
+    "switch.parking_comfort",
     "sensor.fuel_level", "sensor.fuel_level_pct", "sensor.fuel_range",
     "sensor.combined_range",
   ];
@@ -378,6 +396,10 @@
 
   const ICONS = {
     nav: `<path d="M20 4 10.5 20l-1.2-6.3L3 12.5z"/>`,
+    // Parking Comfort keeps the cabin liveable while the car sits, which is
+    // what mdi:sleep says on the switch itself - so a crescent, not the
+    // climate fan it was borrowing.
+    sleep: `<path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a7.5 7.5 0 1 0 10.5 10.5z"/>`,
     driving: `<path d="M3.5 14.5h17M5 14.5l1.7-4.6A2 2 0 0 1 8.6 8.5h6.8a2 2 0 0 1 1.9 1.4l1.7 4.6"/>
               <path d="M4.5 14.5v3h3v-3M16.5 14.5v3h3v-3"/>
               <circle cx="7.5" cy="15.6" r="1.1"/><circle cx="16.5" cy="15.6" r="1.1"/>`,
@@ -1076,6 +1098,7 @@
         case "shade_open": this._call("cover", "open_cover", "sunshade"); break;
         case "shade_close": this._call("cover", "close_cover", "sunshade"); break;
         case "gclean": this._call("switch", "toggle", "g_clean"); break;
+        case "pcomfort": this._call("switch", "toggle", "parking_comfort"); break;
         case "charging_sw": this._call("switch", "toggle", "charging"); break;
         case "sched_sw": this._call("switch", "toggle", "scheduled_charging"); break;
         case "defrost": this._call("switch", "toggle", "defrost"); break;
@@ -1231,12 +1254,22 @@
           </div>`;
       };
       const gclean = this._st("switch.g_clean");
+      const pcomfort = this._st("switch.parking_comfort");
       const heatRow = seat("seat_heat_driver", "Driver", "seatheat", "Seat heat") +
         seat("seat_heat_passenger", "Passenger", "seatheat", "Seat heat");
       const ventRow = seat("seat_vent_driver", "Driver", "seatvent", "Seat cooling") +
         seat("seat_vent_passenger", "Passenger", "seatvent", "Seat cooling");
+      /* Parking Comfort keeps the cabin liveable while the car sits, so it belongs
+       * beside the cabin-air controls rather than among the one-shot actions.
+       *
+       * It carries no "on" class on purpose. This car does not report the
+       * feature's state: the field that looks like its flag reads 1 on a car with
+       * it switched off (#13), so the switch itself reports unknown. A control
+       * that lights up would be inventing a state - the tooltip says so instead. */
       const airRow = (gclean ? `<button class="cbtn ${gclean.state === "on" ? "on" : ""}"
             data-act="gclean" title="Fresh air (G-Clean)">${icon("fresh")}<span>Fresh air</span></button>` : "") +
+        (pcomfort ? `<button class="cbtn ${pcomfort.state === "on" ? "on" : ""}"
+            data-act="pcomfort" title="${esc(PCOMFORT_HINT)}">${icon("sleep")}<span>Parking comfort</span></button>` : "") +
         cover("sunroof", "sunroof_open", "sunroof_close", "Sunroof", "roof") +
         cover("sunshade", "shade_open", "shade_close", "Shade", "shade");
       return `
@@ -1249,9 +1282,9 @@
             <button class="cstep" data-act="tempup" title="Warmer">${icon("plus")}</button>
           </div>
           <button class="cbtn ${preset === "Rapid Warming" ? "on" : ""}" data-act="rapidheat"
-            title="Rapid warming">${icon("heat")}<span>Heat</span></button>
+            title="${esc(RAPID_HEAT_HINT)}">${icon("heat")}<span>Rapid heat</span></button>
           <button class="cbtn ${preset === "Rapid Cooling" ? "on" : ""}" data-act="rapidcool"
-            title="Rapid cooling">${icon("cool")}<span>Cool</span></button>
+            title="${esc(RAPID_COOL_HINT)}">${icon("cool")}<span>Rapid cool</span></button>
         </div>
         ${heatRow ? `<p class="micro csub">${icon("seatheat")} Seat heating</p>
         <div class="crow wrap">${heatRow}</div>` : ""}
@@ -1494,8 +1527,8 @@
           <div class="actions">
             ${this._actBtn("lock", "Lock", "lock", { on: s.locked && s.locked.state === "locked" })}
             ${this._actBtn("unlock", "Unlock", "unlock")}
-            ${this._actBtn("rapidheat", "Heat", "heat", { on: this._preset() === "Rapid Warming" })}
-            ${this._actBtn("rapidcool", "Cool", "cool", { on: this._preset() === "Rapid Cooling" })}
+            ${this._actBtn("rapidheat", "Rapid heat", "heat", { title: RAPID_HEAT_HINT, on: this._preset() === "Rapid Warming" })}
+            ${this._actBtn("rapidcool", "Rapid cool", "cool", { title: RAPID_COOL_HINT, on: this._preset() === "Rapid Cooling" })}
             ${this._actBtn("defrost", "Defrost", "defrost", { on: defrost && defrost.state === "on" })}
             ${this._actBtn("trunk", this._bootWord(), "trunk", { title: this._bootTitle() })}
           </div>
@@ -1842,8 +1875,8 @@
               ${locked
                 ? this._actBtn("unlock", "Unlock", "unlock")
                 : this._actBtn("lock", "Lock", "lock")}
-              ${this._actBtn("rapidheat", "Heat", "heat", { on: this._preset() === "Rapid Warming" })}
-              ${this._actBtn("rapidcool", "Cool", "cool", { on: this._preset() === "Rapid Cooling" })}
+              ${this._actBtn("rapidheat", "Rapid heat", "heat", { title: RAPID_HEAT_HINT, on: this._preset() === "Rapid Warming" })}
+              ${this._actBtn("rapidcool", "Rapid cool", "cool", { title: RAPID_COOL_HINT, on: this._preset() === "Rapid Cooling" })}
               ${this._actBtn("trunk", this._bootWord(), "trunk", { title: this._bootTitle() })}
               ${this._actBtn("find", "Find", "find")}
             </div>
@@ -1935,8 +1968,8 @@
             ${locked
               ? this._actBtn("unlock", "Unlock", "unlock")
               : this._actBtn("lock", "Lock", "lock")}
-            ${this._actBtn("rapidheat", "Heat", "heat", { on: preset === "Rapid Warming" })}
-            ${this._actBtn("rapidcool", "Cool", "cool", { on: preset === "Rapid Cooling" })}
+            ${this._actBtn("rapidheat", "Rapid heat", "heat", { title: RAPID_HEAT_HINT, on: preset === "Rapid Warming" })}
+            ${this._actBtn("rapidcool", "Rapid cool", "cool", { title: RAPID_COOL_HINT, on: preset === "Rapid Cooling" })}
           </div>
         </div>`;
       this._wire();

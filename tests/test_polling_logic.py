@@ -88,10 +88,12 @@ def test_the_fast_interval_holds_through_a_red_light():
     interval must still be the profile's fast value rather than base."""
     m = _coordinator_module()
     const = load("const")
-    prof = const.POLL_PROFILES["normal"]
-    stopped = _status(speed="0", engine="engine_running")
-    assert m._adaptive_interval(stopped, 0, prof).total_seconds() == prof["fast"]
-    assert m._adaptive_interval(stopped, 3, prof).total_seconds() == prof["fast"]
+    # Pinned: quiet hours are wall-clock, so this would fail 00:00-05:59.
+    with _at_hour(m, 12):
+        prof = const.POLL_PROFILES["normal"]
+        stopped = _status(speed="0", engine="engine_running")
+        assert m._adaptive_interval(stopped, 0, prof).total_seconds() == prof["fast"]
+        assert m._adaptive_interval(stopped, 3, prof).total_seconds() == prof["fast"]
 
 
 def test_a_stuck_running_flag_eventually_backs_off_anyway():
@@ -100,12 +102,14 @@ def test_a_stuck_running_flag_eventually_backs_off_anyway():
     for ever either."""
     m = _coordinator_module()
     const = load("const")
-    prof = const.POLL_PROFILES["normal"]
-    stuck = _status(speed="0", engine="running")
-    fast = m._adaptive_interval(stuck, m._STUCK_POLLS - 1, prof).total_seconds()
-    slow = m._adaptive_interval(stuck, m._STUCK_POLLS, prof).total_seconds()
-    assert fast == prof["fast"]
-    assert slow > prof["fast"]
+    # Pinned: quiet hours are wall-clock, so this would fail 00:00-05:59.
+    with _at_hour(m, 12):
+        prof = const.POLL_PROFILES["normal"]
+        stuck = _status(speed="0", engine="running")
+        fast = m._adaptive_interval(stuck, m._STUCK_POLLS - 1, prof).total_seconds()
+        slow = m._adaptive_interval(stuck, m._STUCK_POLLS, prof).total_seconds()
+        assert fast == prof["fast"]
+        assert slow > prof["fast"]
 
 
 def test_movement_alone_changes_the_signature():
@@ -201,23 +205,54 @@ def test_quiet_hours_park_the_interval_at_the_cap():
         assert m._adaptive_interval(_status(charger="3"), 0, p).total_seconds() == p["fast"]
 
 
+def test_the_ladder_is_sane_at_every_hour_of_the_day():
+    """Seven tests in this file had to pin the clock because a parked car is
+    handled differently between 00:00 and 05:59, and each one that forgot failed
+    for six hours a day - on CI included. Rather than leave that to memory, this
+    walks all twenty-four hours and pins what must hold in every one of them:
+    the interval is always inside the profile, a moving car is never slowed, and
+    the only thing the hour is allowed to change is how fast a parked car
+    reaches a cap it was going to reach anyway."""
+    m = _coordinator_module()
+    const = load("const")
+    p = const.POLL_PROFILES["normal"]
+    parked = _status(speed="0", charger="0")
+    quiet = set()
+    for hour in range(24):
+        with _at_hour(m, hour):
+            for streak in (0, 3, 9, 99):
+                secs = m._adaptive_interval(parked, streak, p).total_seconds()
+                assert p["fast"] <= secs <= p["cap"], (hour, streak, secs)
+            # Whatever the hour, a car that is moving or charging polls fast.
+            for busy in (_status(speed="60"), _status(charger="3")):
+                assert m._adaptive_interval(busy, 0, p).total_seconds() == p["fast"], hour
+            if m._adaptive_interval(parked, 0, p).total_seconds() == p["cap"]:
+                quiet.add(hour)
+    assert quiet == set(m._QUIET_HOURS), (
+        f"the quiet window moved: {sorted(quiet)} vs {list(m._QUIET_HOURS)}")
+
+
 def test_back_off_stops_growing_so_the_interval_cannot_run_away():
     m = _coordinator_module()
     const = load("const")
-    p = const.POLL_PROFILES["eco"]
-    parked = _status(speed="0")
-    assert (m._adaptive_interval(parked, 100, p)
-            == m._adaptive_interval(parked, 1000, p))
+    # Pinned: quiet hours are wall-clock, so this would fail 00:00-05:59.
+    with _at_hour(m, 12):
+        p = const.POLL_PROFILES["eco"]
+        parked = _status(speed="0")
+        assert (m._adaptive_interval(parked, 100, p)
+                == m._adaptive_interval(parked, 1000, p))
 
 
 def test_eco_is_always_gentler_than_live():
     m = _coordinator_module()
     const = load("const")
-    parked = _status(speed="0")
-    for streak in (0, 1, 3, 8):
-        eco = m._adaptive_interval(parked, streak, const.POLL_PROFILES["eco"])
-        live = m._adaptive_interval(parked, streak, const.POLL_PROFILES["live"])
-        assert eco > live, streak
+    # Pinned: quiet hours are wall-clock, so this would fail 00:00-05:59.
+    with _at_hour(m, 12):
+        parked = _status(speed="0")
+        for streak in (0, 1, 3, 8):
+            eco = m._adaptive_interval(parked, streak, const.POLL_PROFILES["eco"])
+            live = m._adaptive_interval(parked, streak, const.POLL_PROFILES["live"])
+            assert eco > live, streak
 
 
 def test_device_name_ends_with_the_last_four_vin_characters():
@@ -237,12 +272,14 @@ def test_a_frozen_backend_during_a_drive_never_reaches_the_parked_cap():
     exact symptom the issue reported. A claimed trip now holds at base."""
     m = _coordinator_module()
     const = load("const")
-    prof = const.POLL_PROFILES["normal"]
-    driving = _status(speed="0", engine="engine_running")
-    for streak in (m._STUCK_POLLS, m._STUCK_POLLS + 5, 99):
-        secs = m._adaptive_interval(driving, streak, prof).total_seconds()
-        assert secs == prof["base"], (streak, secs)
-        assert secs < prof["cap"], "a moving car must never sit at the parked cap"
+    # Pinned: quiet hours are wall-clock, so this would fail 00:00-05:59.
+    with _at_hour(m, 12):
+        prof = const.POLL_PROFILES["normal"]
+        driving = _status(speed="0", engine="engine_running")
+        for streak in (m._STUCK_POLLS, m._STUCK_POLLS + 5, 99):
+            secs = m._adaptive_interval(driving, streak, prof).total_seconds()
+            assert secs == prof["base"], (streak, secs)
+            assert secs < prof["cap"], "a moving car must never sit at the parked cap"
 
 
 def test_a_parked_car_still_walks_all_the_way_to_the_cap():
@@ -250,10 +287,12 @@ def test_a_parked_car_still_walks_all_the_way_to_the_cap():
     untouched by the fix above."""
     m = _coordinator_module()
     const = load("const")
-    prof = const.POLL_PROFILES["normal"]
-    parked = _status(speed="0", engine="engine_off")
-    assert m._adaptive_interval(parked, 0, prof).total_seconds() == prof["base"]
-    assert m._adaptive_interval(parked, 9, prof).total_seconds() == prof["cap"]
+    # Pinned: quiet hours are wall-clock, so this would fail 00:00-05:59.
+    with _at_hour(m, 12):
+        prof = const.POLL_PROFILES["normal"]
+        parked = _status(speed="0", engine="engine_off")
+        assert m._adaptive_interval(parked, 0, prof).total_seconds() == prof["base"]
+        assert m._adaptive_interval(parked, 9, prof).total_seconds() == prof["cap"]
 
 
 # --------------------------------------------- what the signature must see ---
@@ -293,17 +332,19 @@ def test_a_parked_car_with_wandering_pack_current_still_reaches_the_cap():
     """The end-to-end version of the above, walked through the interval."""
     m = _coordinator_module()
     const = load("const")
-    prof = const.POLL_PROFILES["normal"]
-    sig, idle = None, 0
-    for amps in ("1.6", "1.7", "412.2", "2.0", "1.9", "1.6"):
-        payload = _status(charge="50", speed="0", engine="engine_off")
-        payload["vehicleStatus"]["additionalVehicleStatus"][
-            "electricVehicleStatus"]["dcChargeIAct"] = amps
-        new = m._poll_signature(payload)
-        idle = idle + 1 if new == sig else 0
-        sig = new
-    assert idle >= 4, f"the streak never grew on a parked car (idle={idle})"
-    assert m._adaptive_interval(payload, idle, prof).total_seconds() == prof["cap"]
+    # Pinned: quiet hours are wall-clock, so this would fail 00:00-05:59.
+    with _at_hour(m, 12):
+        prof = const.POLL_PROFILES["normal"]
+        sig, idle = None, 0
+        for amps in ("1.6", "1.7", "412.2", "2.0", "1.9", "1.6"):
+            payload = _status(charge="50", speed="0", engine="engine_off")
+            payload["vehicleStatus"]["additionalVehicleStatus"][
+                "electricVehicleStatus"]["dcChargeIAct"] = amps
+            new = m._poll_signature(payload)
+            idle = idle + 1 if new == sig else 0
+            sig = new
+        assert idle >= 4, f"the streak never grew on a parked car (idle={idle})"
+        assert m._adaptive_interval(payload, idle, prof).total_seconds() == prof["cap"]
 
 
 def test_driving_comes_from_the_composite_not_the_raw_speed_alone():
