@@ -117,6 +117,15 @@ _SECRET_KEYS: set = {
     # The scheduled-charging body sends the VIN in "pin", but the field is a
     # PIN by contract and a future firmware could put a real one there.
     "pin",
+    # New Geely EM (Zeekr) platform, forward-support for the in-progress #33.
+    # These config-entry keys carry the account password and the platform's
+    # session tokens - and the HF JWT alone authorises vehicle control, not
+    # just status - so a diagnostics download must never surface them. Written
+    # in the normalised (lower-cased, separator-free) form redact() compares
+    # against; the code that writes them into the entry may land later, but the
+    # safelist can know the names first. `zeekr_hf_expiry` is a timestamp, not
+    # a secret, and is deliberately absent so it stays readable.
+    "zeekraccesstoken", "zeekrrefreshtoken", "zeekrhftoken", "zeekrpassword",
 }
 
 # "key" is ambiguous: it holds PEM material in provisioning responses, but the

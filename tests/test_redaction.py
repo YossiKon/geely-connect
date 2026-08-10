@@ -42,6 +42,24 @@ def test_pin_field_is_masked_because_it_carries_the_vin():
     assert out["pin"] == "***redacted***"
 
 
+def test_zeekr_platform_secrets_are_masked_but_the_expiry_stays_readable():
+    # Forward-support for the new EM platform (#33): the entry stores the
+    # account password and three session tokens - one of which (the HF JWT)
+    # authorises control, not just status - so a diagnostics download must
+    # never surface them. The HF expiry is a timestamp and must stay visible.
+    out = api.redact({
+        "zeekr_access_token": TOKEN, "zeekr_refresh_token": TOKEN,
+        "zeekr_hf_token": TOKEN, "zeekr_password": "MyReal-Passw0rd!",
+        "zeekr_hf_expiry": 1786000000, "platform": "zeekr",
+    })
+    for k in ("zeekr_access_token", "zeekr_refresh_token", "zeekr_hf_token",
+              "zeekr_password"):
+        assert out[k] == "***redacted***", f"{k} survived as {out[k]!r}"
+    assert TOKEN not in json.dumps(out)
+    assert out["zeekr_hf_expiry"] == 1786000000  # not a secret
+    assert out["platform"] == "zeekr"
+
+
 def test_control_parameter_names_stay_readable():
     # "key" is a secret in provisioning but a parameter NAME in control calls.
     # Masking it made the command logs useless, which is a real regression.

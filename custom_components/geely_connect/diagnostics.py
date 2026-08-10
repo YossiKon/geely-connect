@@ -30,6 +30,13 @@ _REDACT = {
     "cert_path", "key_path", "user_id", "userId", "vin", "device_id",
     "device_idfa", "device_idfv", "email",
     "latitude", "longitude", "lat", "lon", "lng",
+    # New Geely EM (Zeekr) platform, forward-support for #33: the account
+    # password and session tokens the entry stores. redact() (the first pass)
+    # already masks these by their normalised name, so this is the belt to
+    # that pass's braces - the two lists exist precisely so neither is the
+    # single point that has to be right. `zeekr_hf_expiry` is a timestamp and
+    # stays visible on purpose.
+    "zeekr_access_token", "zeekr_refresh_token", "zeekr_hf_token", "zeekr_password",
 }
 
 
