@@ -885,6 +885,34 @@ like a credential path rather than a convenience:
 | **Re-authentication** | Signing in as a different Geely account is refused rather than silently rebinding the entry |
 | **Where data goes** | Only Geely's own servers. No telemetry, no analytics, no third-party host |
 
+### The new Geely EM (Zeekr) platform — a different, experimental model
+
+Geely released a separate new app on a new backend, and the setup form now opens
+with a **platform picker**. The default is the existing backend and nothing
+changes for current installs — an entry with no platform marker stays on the
+legacy path. The new **Geely EM (Zeekr)** option is **experimental**: at the
+time of writing it is live-verified on a single Australian account, with door
+lock/unlock confirmed and climate, windows and non-AU regions still untested.
+
+Its security model is genuinely different from the legacy one above, and it is
+only fair to state that plainly:
+
+- **No per-device mTLS certificate and no SPKI pins.** Connections are validated
+  against the public CAs with hostname checking on, but the private-CA pinning
+  that protects the two legacy control gateways does not apply here — those
+  hosts have not had their leaf keys captured.
+- **It stores your Geely *account* password**, not a device key. The new
+  platform has no OTP-only login, and the session it issues lasts ~2 days; the
+  integration renews it silently from the stored password exactly as the app
+  does. That password is **redacted from logs and from the diagnostics report**,
+  and is **encrypted at rest (AES-256-GCM)** if you add a `geely_password_key`
+  to `secrets.yaml` — otherwise it is stored in plain text in Home Assistant's
+  `.storage`, the same place the legacy mTLS key lives. You can decline to store
+  it and re-authenticate manually every couple of days instead.
+
+If keeping your account password out of `.storage` matters to you, set the
+`secrets.yaml` key before adding the entry, or stay on the legacy backend.
+
 ---
 
 ## 🌍 Supported regions
