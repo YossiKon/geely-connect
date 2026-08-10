@@ -384,6 +384,37 @@ def test_rapid_warming_bundles_heat_and_rapid_cooling_bundles_vent():
     assert kw2["temp"] == f"{e2.min_temp:.1f}" and kw2["vlt"] is True
 
 
+def test_rapid_warming_asks_for_the_wheel_only_on_evidence_of_one():
+    """The app's own rapid-warming body carries sw:"true" (captured, #4).
+    Only a car with evidence of the wheel gets it - every other car keeps
+    the exact body #19 verified - and cooling never heats a wheel."""
+    _ha()
+    c = load("climate")
+    # The capability catalogue advertising the wheel is evidence.
+    e, api, _ = _entity(_status(), caps={"steering_wheel_heat.enabled": True})
+    with _quiet_refresh(c):
+        asyncio.run(e.async_set_preset_mode(c.PRESET_RAPID_WARMING))
+    assert api.calls[0][1]["sw"] is True
+    # So is the status field using the fitted 1/2 convention.
+    data = _status()
+    data["vehicleStatus"]["additionalVehicleStatus"]["climateStatus"][
+        "steerWhlHeatingSts"] = "2"
+    e2, api2, _ = _entity(data)
+    with _quiet_refresh(c):
+        asyncio.run(e2.async_set_preset_mode(c.PRESET_RAPID_WARMING))
+    assert api2.calls[0][1]["sw"] is True
+    # No evidence: None, which rapid_climate omits from the body entirely.
+    e3, api3, _ = _entity(_status())
+    with _quiet_refresh(c):
+        asyncio.run(e3.async_set_preset_mode(c.PRESET_RAPID_WARMING))
+    assert api3.calls[0][1]["sw"] is None
+    # Cooling never carries it, wheel or no wheel.
+    e4, api4, _ = _entity(_status(), caps={"steering_wheel_heat.enabled": True})
+    with _quiet_refresh(c):
+        asyncio.run(e4.async_set_preset_mode(c.PRESET_RAPID_COOLING))
+    assert api4.calls[0][1]["sw"] is None
+
+
 def test_choosing_none_clears_the_optimistic_preset_immediately():
     _ha()
     c = load("climate")

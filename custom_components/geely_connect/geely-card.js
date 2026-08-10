@@ -138,7 +138,8 @@
    * heating" (#29). So the label says rapid and the tooltip says what that
    * actually does to the car. */
   const RAPID_HEAT_HINT = "Rapid warming: the car's own preset - drives the "
-    + "setpoint to its maximum and heats both front seats";
+    + "setpoint to its maximum and heats both front seats, plus the steering "
+    + "wheel where fitted";
   const RAPID_COOL_HINT = "Rapid cooling: the car's own preset - drives the "
     + "setpoint to its minimum, ventilates both front seats and cracks the windows";
 

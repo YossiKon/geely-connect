@@ -410,6 +410,93 @@ def test_defrost_state_reads_climate_defrost():
     assert ent.is_on is False
 
 
+# ------------------------------------------- switch: steering wheel heat ---
+# The command is a capture of the official app's own button (#4, 2026-08-10),
+# not a guess: rce.heat carries "steering_wheel" - an underscore, where every
+# seat name on the same key is hyphenated - with no rce.level, and the app's
+# start uses scheduling duration 48. These tests pin that capture.
+
+def test_steering_wheel_heat_sends_the_captured_command():
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    sw = load("switch")
+    api = _Api()
+    hass, b = _bundle(_status(climate={"steerWhlHeatingSts": "2"}), api=api)
+    ent = sw.GeelySteeringWheelHeatSwitch(hass, b)
+    rec = _RefreshRec()
+    with _patched(sw, schedule_refresh=rec):
+        asyncio.run(ent.async_turn_on())
+        asyncio.run(ent.async_turn_off())
+    params = [{"key": "rce.heat", "value": "steering_wheel"}]
+    assert api.calls == [("control", "RCE_2", params, "start", 48),
+                         ("control", "RCE_2", params, "stop", 0)], api.calls
+    assert rec.calls == [(8,), (8,)]
+
+
+def test_steering_wheel_heat_state_reads_the_measured_convention():
+    """1 = heating at any level, 2 = off, 0 = not fitted (#4). 0 and absence
+    must both read unknown - reporting 0 as "off" is what v1.27.0 got wrong."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    sw = load("switch")
+    climate = {}
+    hass, b = _bundle(_status(climate=climate))
+    ent = sw.GeelySteeringWheelHeatSwitch(hass, b)
+    assert ent.is_on is None                      # field absent
+    for raw, expect in (("1", True), (1, True), ("2", False), (2, False),
+                        ("0", None), (0, None), ("banana", None)):
+        climate["steerWhlHeatingSts"] = raw
+        assert ent.is_on is expect, raw
+
+
+def test_steering_wheel_heat_switch_exists_only_on_evidence():
+    """Not default-permissive like the other gates: the switch appears when
+    the catalogue advertises the wheel OR the status field uses the fitted
+    1/2 convention - never on a car reading 0, and never on no data."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    sw = load("switch")
+
+    def built(data, caps):
+        hass, b = _bundle(data, caps=caps)
+        got = []
+        asyncio.run(sw.async_setup_entry(hass, _Entry(),
+                                         lambda e, *a, **k: got.extend(e)))
+        return [type(e).__name__ for e in got]
+
+    assert "GeelySteeringWheelHeatSwitch" in built(
+        _status(), {"steering_wheel_heat.enabled": True})
+    assert "GeelySteeringWheelHeatSwitch" in built(
+        _status(climate={"steerWhlHeatingSts": "2"}), {})
+    assert "GeelySteeringWheelHeatSwitch" not in built(
+        _status(climate={"steerWhlHeatingSts": "0"}), {})
+    assert "GeelySteeringWheelHeatSwitch" not in built(_status(), {})
+
+
+def test_a_rejected_steering_wheel_command_raises_homeassistanterror():
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    sw = load("switch")
+    gce = load("api").GeelyControlError
+    rec = _RefreshRec()
+
+    boom = gce("8070", "The last request has not yet been executed")
+    hass, b = _bundle(_status(), api=_Api(raise_=boom))
+    ent = sw.GeelySteeringWheelHeatSwitch(hass, b)
+    with _patched(sw, schedule_refresh=rec):
+        e = _expect_error(ent.async_turn_on())
+    assert "Geely Steering Wheel Heat: The last request" in str(e), e
+    assert e.__cause__ is boom
+    assert rec.calls == [], "a failed command must not schedule a refresh"
+
+    hass2, b2 = _bundle(_status(), api=_Api(raise_=RuntimeError("socket closed")))
+    ent2 = sw.GeelySteeringWheelHeatSwitch(hass2, b2)
+    with _patched(sw, schedule_refresh=rec):
+        e2 = _expect_error(ent2.async_turn_off())
+    assert "Geely Steering Wheel Heat failure: socket closed" in str(e2), e2
+    assert rec.calls == []
+
+
 # ------------------------------------------- switch: scheduled charging ---
 
 def test_scheduled_charging_switch_writes_the_full_body():

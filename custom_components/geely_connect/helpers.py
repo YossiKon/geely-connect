@@ -112,6 +112,26 @@ def minutes_or_none(v: Any) -> float | None:
     return m
 
 
+def steering_wheel_fitted(caps: dict | None, data: Any) -> bool:
+    """Whether there is evidence this car has a heated steering wheel.
+
+    Either signal is enough:
+      - the capability catalogue advertises `steel_wheel_heating` (parsed
+        into `steering_wheel_heat.enabled` since v1.35.1), or
+      - `steerWhlHeatingSts` reads the 1/2 on/off convention a fitted wheel
+        uses. Three Starrays without the feature read 0 (#4), so 0 and
+        absence are "no evidence", not "off".
+
+    Deliberately NOT default-permissive like the other capability gates: the
+    catalogue flag was underivable on every car before v1.35.1, so absence
+    of the flag is weak, and a pressable control on a car without the
+    hardware is the failure #13 was about.
+    """
+    if (caps or {}).get("steering_wheel_heat.enabled"):
+        return True
+    return walk(data or {}, (*_CLIMATE_PATH, "steerWhlHeatingSts")) in ("1", 1, "2", 2)
+
+
 def device_info(vin: str, device_name: str | None = None) -> DeviceInfo:
     """The one device every entity of a vehicle belongs to."""
     return DeviceInfo(

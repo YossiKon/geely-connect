@@ -392,7 +392,7 @@ always be compared instead of one of them looking like a bug.
 |---|---|
 | Interior Temperature | Cabin temp (°C) |
 | Exterior Temperature | Outside temp (°C) - **treat with suspicion**, see [Known limitations](#%EF%B8%8F-known-limitations). Owners of both the Starray and the EX5 have measured it ten degrees out |
-| Steering Wheel Heating | On / off, on the trims that have it. Read-only: the reading was measured on a real car (1 means heating at any level, 2 means off) but no command for it has ever been verified, so there is deliberately no switch. A car that reports **0** does not have the feature and the entity says unknown rather than a confident "off". The evidence is a comparison across models: an EX5 whose capability catalogue does advertise a heated wheel reads **2** with it switched off, while three Starrays read **0** |
+| Steering Wheel Heating | On / off, on the trims that have it. The reading was measured on a real car: 1 means heating at any level, 2 means off. A car that reports **0** does not have the feature and the entity says unknown rather than a confident "off" - the evidence is a comparison across models: an EX5 whose capability catalogue does advertise a heated wheel reads **2** with it switched off, while three Starrays read **0**. Since the app's own command was captured ([#4](https://github.com/YossiKon/geely-connect/issues/4)) there is also a **Steering Wheel Heat** switch reading the same field - this sensor stays until the switch is confirmed to move a real wheel |
 
 ### Tires
 Three sets of four, one reading each corner:
@@ -489,10 +489,11 @@ back off removes the generated entities again.
 |---|---|
 | **Lock** | Lock / unlock the doors |
 | **Trunk** | Asks the car to release the tailgate latch, which then re-locks itself after a short window if nobody lifts the gate - which is exactly what the official app's own tailgate button does. **Four owners** now report the app only ever unlocking, never opening, across the EX5 Inspire, the EX5 Tech and the P145 PHEV, with the powered open coming from the key fob or the car's own screen. So this button is not a poor imitation of the app; it is the same action. The latch is confirmed releasing on three of the four - the EX5 Tech, the EX5 Inspire standard range and the P145 PHEV. On the fourth the indicators flash and the latch does not move, which is a **different** question from the powered open and the one thing still unexplained here. Watch the **Trunk Lock** sensor to see which of the two your car does. On the powered open itself: a real EX5 capability catalogue, read in full for the first time on 2026-08-09, **declares** `remote_control_open_2` whose only accepted target is `trunk` - and the three Starray catalogues do not carry it. Nobody has fired it yet and this button still sends the unlock command, so that is a lead rather than a feature; see [#20](https://github.com/YossiKon/geely-connect/issues/20) |
-| **Climate (remote pre-conditioning)** | Remote pre-heat/pre-cool: on/off, set temperature (15.5-28.5 °C), Rapid Warming, Rapid Cooling. The rapid presets drive the setpoint to the coldest or hottest the car allows and ask for both front seats at the highest level - heat when warming, ventilation when cooling - inside the same single request the car accepts, since a second command racing the first gets rejected while the car is still working. On some cars the cabin obeys and the seats do not; [Troubleshooting](#-troubleshooting--debugging) has the script that fixes that, and why fan speed cannot be asked for at all. Only reflects remote pre-climate cycles: the cloud does not report manual cabin HVAC |
+| **Climate (remote pre-conditioning)** | Remote pre-heat/pre-cool: on/off, set temperature (15.5-28.5 °C), Rapid Warming, Rapid Cooling. The rapid presets drive the setpoint to the coldest or hottest the car allows and ask for both front seats at the highest level - heat when warming, ventilation when cooling - inside the same single request the car accepts, since a second command racing the first gets rejected while the car is still working. On a car with a heated steering wheel, rapid warming asks for the wheel too (`sw`, exactly as the captured app body does - [#4](https://github.com/YossiKon/geely-connect/issues/4)). On some cars the cabin obeys and the seats do not; [Troubleshooting](#-troubleshooting--debugging) has the script that fixes that, and why fan speed cannot be asked for at all. Only reflects remote pre-climate cycles: the cloud does not report manual cabin HVAC |
 | **Seat heating** | Driver & passenger (rear if supported): Off/Low/Medium/High |
 | **Seat ventilation** | Driver & passenger (rear if supported) |
 | **Defrost** | Windscreen defrost on/off |
+| **Steering Wheel Heat** | On/off, on cars that show evidence of the feature. The command comes from a capture of the official app's own button against a real car ([#4](https://github.com/YossiKon/geely-connect/issues/4)) - `rce.heat: steering_wheel`, an underscore where every seat name uses hyphens, and no level, because the car cannot report one. Captured is not the same as confirmed: nobody has yet watched a wheel warm from a press of *this* switch, so judge it by the state it reads back, never by the "success" reply |
 | **Windows** | Open / close / ventilate |
 | **Sunroof / Sunshade** | Open / close |
 | **Charging** | Start / stop, plus scheduled charging (start & end time). Stopping a charge does not release the cable: the charge-port latch follows the doors, so to let someone unplug remotely, stop the charge **and** unlock the car - it re-locks itself afterwards if no door is opened |
@@ -793,7 +794,9 @@ than daily use:
 
 - **`geely_connect.fire_control`** - any `serviceId` + parameters through the
   telematics endpoint. This is how the tailgate and steering-wheel candidates
-  get tested.
+  get tested - though the steering wheel is also the cautionary tale: two
+  rounds of guessed candidates were all accepted and did nothing, and the
+  real command only surfaced when an owner captured the app itself (#4).
 - **`geely_connect.fire_rapid`** - the compound rapid warm/cool body, with the
   seat positions, level and any extra field you choose.
 
@@ -809,7 +812,9 @@ than daily use:
 The presets ask for the front seats inside the same single request they use for
 the cabin - heat when warming, ventilation when cooling, both at the highest
 level, with the setpoint driven to the lowest or highest temperature the car
-advertises.
+advertises. On a car that shows evidence of a heated steering wheel, rapid
+warming also carries `sw: "true"`, matching the app's own captured body (#4);
+every other car sends the body exactly as before.
 
 An owner reported the cabin warming and the seats staying cold, and for a while
 the suspicion was the seat position encoding. **It is not.** He fired the exact

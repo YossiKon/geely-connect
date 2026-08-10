@@ -11,6 +11,9 @@ AVD-verified 2026-05-01 - see docs/AVD_CAPTURE_GUIDE.md.
                          State: any winStatus* != 2
   Parking Comfort      → RSM start/stop
                          State: _state.parkComfortState
+  Steering wheel heat  → RCE_2 / [{rce.heat: "steering_wheel"}], duration=48
+                         (captured from the official app, #4)
+                         State: steerWhlHeatingSts (1 on, 2 off, 0 not fitted)
 
   Defrost is now a CLIMATE PRESET (see climate.py), not a switch - keeps
   preClimateActive + defrost as a unified climate state.
@@ -45,8 +48,11 @@ from .const import (
     SERVICE_CHARGING_STOP_PARAMS,
     SERVICE_WINDOW_VENT_PARAMS,
     RCE_KEY_CONDITIONER,
+    RCE_KEY_HEAT,
     RCE_KEY_LEVEL,
+    RCE_STEERING_DURATION_SEC,
     RCE_VAL_DEFROST,
+    RCE_VAL_STEERING_WHEEL,
     SERVICE_CHARGING,
     SERVICE_CLIMATE,
     SERVICE_GCLEAN,
@@ -55,7 +61,12 @@ from .const import (
     SERVICE_PARKING_COMFORT,
     SERVICE_WINDOW,
 )
-from .helpers import walk as _walk, windows_open, schedule_refresh
+from .helpers import (
+    walk as _walk,
+    steering_wheel_fitted,
+    windows_open,
+    schedule_refresh,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -148,6 +159,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
         entities.append(GeelyGCleanSwitch(hass, bundle))
     if caps.get("ac.enabled", True) and caps.get("defrost.enabled", True):
         entities.append(GeelyDefrostSwitch(hass, bundle))
+    # Evidence-gated, not default-permissive: see helpers.steering_wheel_fitted.
+    # A car whose first payload lacks climateStatus and whose catalogue does
+    # not advertise the wheel gets no switch until a reload finds either.
+    if steering_wheel_fitted(caps, bundle["coordinator"].data):
+        entities.append(GeelySteeringWheelHeatSwitch(hass, bundle))
     if charges and (caps.get("scheduled_charging.enabled", True)
                     or caps.get("charging.enabled", True)):
         entities.append(GeelyScheduledChargingSwitch(hass, bundle))
@@ -348,6 +364,72 @@ class GeelyDefrostSwitch(CoordinatorEntity, SwitchEntity):
             _LOGGER.exception("defrost %s failed", command)
             raise HomeAssistantError(f"Geely Defrost failure: {e}") from e
         _LOGGER.debug("Geely defrost %s response=%s", command, redact(resp))
+
+        schedule_refresh(self._hass, self.coordinator, 8)
+
+
+class GeelySteeringWheelHeatSwitch(CoordinatorEntity, SwitchEntity):
+    """Steering-wheel heating.
+
+    Captured from the official app against a real car (#4, 2026-08-10):
+      ON  → RCE_2 / start / [{rce.heat: "steering_wheel"}], duration=48
+      OFF → RCE_2 / stop  / [{rce.heat: "steering_wheel"}], duration=0
+      State: climateStatus.steerWhlHeatingSts - 1 heating at any level,
+             2 off, 0 not fitted (all three measured on real cars, #4).
+
+    A switch and not a select, and that is the field's own fault: it cannot
+    tell low from high, so a level picker would show a position it could
+    never verify. No rce.level travels with the command either.
+
+    The capture proves what the app sends, not yet that our transport moves
+    a wheel - the app's scheduling block differs in flags control() does not
+    replicate (see const.py). Until an owner confirms it, the honest read of
+    a press is: watch steerWhlHeatingSts, ignore the "operation succeed".
+    """
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:steering"
+
+    def __init__(self, hass: HomeAssistant, bundle: dict) -> None:
+        super().__init__(bundle["coordinator"])
+        self._hass = hass
+        self._api = bundle["api"]
+        self._vin = bundle["vin"]
+        self._attr_unique_id = f"geely_{self._vin}_sw_steering_wheel_heat"
+        self._attr_name = "Steering Wheel Heat"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, self._vin)},
+            manufacturer="Geely",
+            name=bundle.get("device_name") or f"Geely ({self._vin})",
+        )
+
+    @property
+    def is_on(self) -> bool | None:
+        v = _walk(self.coordinator.data or {}, (*_CLIMATE_PATH, "steerWhlHeatingSts"))
+        if v in ("1", 1):
+            return True
+        if v in ("2", 2):
+            return False
+        # 0 (not fitted) or absent - unknown, same rule as the sensor.
+        return None
+
+    async def async_turn_on(self, **_: Any) -> None:
+        await self._fire("start", RCE_STEERING_DURATION_SEC)
+
+    async def async_turn_off(self, **_: Any) -> None:
+        await self._fire("stop", 0)
+
+    async def _fire(self, command: str, duration: int) -> None:
+        params = [{"key": RCE_KEY_HEAT, "value": RCE_VAL_STEERING_WHEEL}]
+        try:
+            resp = await self._hass.async_add_executor_job(
+                self._api.control, SERVICE_CLIMATE, params, command, duration,
+            )
+        except GeelyControlError as e:
+            raise HomeAssistantError(f"Geely Steering Wheel Heat: {e.message}") from e
+        except Exception as e:
+            _LOGGER.exception("steering wheel heat %s failed", command)
+            raise HomeAssistantError(f"Geely Steering Wheel Heat failure: {e}") from e
+        _LOGGER.debug("Geely steering wheel heat %s response=%s", command, redact(resp))
 
         schedule_refresh(self._hass, self.coordinator, 8)
 

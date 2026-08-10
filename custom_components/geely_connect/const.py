@@ -393,8 +393,26 @@ RAPID_DEFAULT_VLT_DUR     = "60"
 SERVICE_RAPID_PATH      = CHARGE_SERVER_PATH
 SERVICE_RAPID_BIZ_TYPE  = BIZ_TYPE_RAPID
 
-# --- Steering wheel heat (read field exists, command unverified on this trim) ---
-SERVICE_STEERING_HEAT_KEY = "steerWhlHeatingSts"  # status field
+# --- Steering wheel heat (captured from the official app, #4, 2026-08-10) ---
+# An owner recorded the app's own steering-wheel button against a real car,
+# after two rounds of guessed candidates had all been accepted and done
+# nothing. The app sends, to the same telematics path this integration uses:
+#   ON  → RCE_2 / start / [{rce.heat: "steering_wheel"}], scheduling duration 48
+#   OFF → RCE_2 / stop  / [{rce.heat: "steering_wheel"}], no scheduling block
+# Two details the guesses got wrong: the value is "steering_wheel" with an
+# underscore, unlike the hyphenated seat names on the same key - and no
+# rce.level travels with it, which matches the status field never reporting a
+# level. The app's scheduling block also differs from control()'s in flags we
+# do not replicate (recurrentOperation 1, occurs 0, a "latest" field); every
+# verified RCE_2 seat command already works through our shape, but nobody has
+# yet confirmed this one moves a wheel through OUR body - judge it by
+# steerWhlHeatingSts, never by the response.
+#
+# The same capture's rapid-warming body (bizType=7) carries the wheel as
+# "sw": "true" - the field the "bw" probe candidates were guessing at.
+SERVICE_STEERING_HEAT_KEY = "steerWhlHeatingSts"  # status: 1 heating, 2 off, 0 not fitted
+RCE_VAL_STEERING_WHEEL    = "steering_wheel"
+RCE_STEERING_DURATION_SEC = 48   # what the app sent; meaning of 48 unknown
 
 # --- Window / sunshade / sunroof / ventilate (verified) ---
 SERVICE_WINDOW = "RWS_2"

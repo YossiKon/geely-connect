@@ -1219,6 +1219,7 @@ class GeelyApi:
                       vent_seats: list[str] | None, vlt: bool,
                       duration: str = "180", vlt_duration: str = "60",
                       vlt_pos: str = "12", level: str = "3",
+                      sw: bool | None = None,
                       extra: dict[str, str] | None = None) -> dict:
         """Fire compound climate command via POST /charge-server/ecarx_charge_set.
 
@@ -1232,6 +1233,13 @@ class GeelyApi:
         suspicion that the encoding was wrong. It is not - when the seats appear
         not to respond, suspect the read-back timing instead, because the seat
         state arrives in `climateStatus` after the request is already accepted.
+
+        `sw` is the steering wheel. The app's own rapid-warming body carries
+        `"sw": "true"` (captured on a real car, #4) - the field two rounds of
+        probe candidates were guessing at. None omits the key entirely, which
+        keeps the body byte-identical to the shape verified on cars without
+        the wheel; earlier probe rounds proved the gateway accepts unknown
+        extra keys, so sending it can at worst be ignored.
 
         `level` and `extra` exist for the `fire_rapid` probe service rather than
         the entities. `extra` is applied last and may therefore override a
@@ -1253,6 +1261,8 @@ class GeelyApi:
             body["heat"] = [{"level": level, "pos": p} for p in heat_seats]
         if vent_seats:
             body["ventilation"] = [{"level": level, "pos": p} for p in vent_seats]
+        if sw is not None:
+            body["sw"] = "true" if sw else "false"
         if extra:
             body.update(extra)
         body_bytes = json.dumps(body, separators=(",", ":")).encode()

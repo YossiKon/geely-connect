@@ -65,12 +65,14 @@ fire_rapid:
       name: Extra body fields
       description: >
         Raw key/value pairs merged into the body last, so they can add an
-        undocumented field or override a computed one. This is how to probe for
-        controls that have no capture yet - for example a steering-wheel-heat
-        field alongside the rapid bundle (#4).
+        undocumented field or override a computed one. This is how to probe
+        for controls that have no capture yet. The steering-wheel hunt (#4)
+        ended here - the real field turned out to be "sw", found by capture
+        after every guessed name ("bw", "steelWheelHeating") was accepted
+        and did nothing.
       required: false
       default: {}
-      example: '{"bw": "true"}'
+      example: '{"sw": "true"}'
       selector:
         object:
     vin:

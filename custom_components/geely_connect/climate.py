@@ -77,7 +77,12 @@ from .const import (
     RCE_VAL_DEFROST,
     SERVICE_CLIMATE,
 )
-from .helpers import walk as _walk, truthy as _truthy, schedule_refresh
+from .helpers import (
+    walk as _walk,
+    truthy as _truthy,
+    schedule_refresh,
+    steering_wheel_fitted,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -419,6 +424,13 @@ class GeelyClimate(CoordinatorEntity, ClimateEntity, RestoreEntity):
         racing the first.
         """
         target = self._attr_max_temp if warming else self._attr_min_temp
+        # The app's own rapid-warming body carries the steering wheel as
+        # "sw": "true" (captured on a real car, #4). Sent only when the car
+        # shows evidence of the wheel and only when warming - every other
+        # car keeps the exact body verified working on #19, where sw never
+        # appeared and the seats still warmed.
+        wheel = warming and steering_wheel_fitted(
+            self._caps, self.coordinator.data)
         try:
             resp = await self._hass.async_add_executor_job(
                 lambda: self._api.rapid_climate(
@@ -427,6 +439,7 @@ class GeelyClimate(CoordinatorEntity, ClimateEntity, RestoreEntity):
                     heat_seats=["11", "19"] if warming else None,
                     vent_seats=None if warming else ["11", "19"],
                     vlt=not warming,
+                    sw=True if wheel else None,
                 )
             )
         except GeelyControlError as e:

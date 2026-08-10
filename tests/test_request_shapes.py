@@ -165,6 +165,23 @@ def test_the_seat_level_applies_to_every_seat_in_the_request():
                                     {"level": "1", "pos": "19"}]
 
 
+def test_the_wheel_travels_as_sw_and_only_when_asked():
+    """The captured rapid-warming body carries "sw": "true" (#4). None must
+    omit the key entirely, keeping the body byte-identical to the shape a
+    real EX5 accepted with the seats in it (#19)."""
+    a = _fake_api()
+    sent = _capture(a)
+    a.rapid_climate(ac=True, temp="28.5", heat_seats=["11", "19"],
+                    vent_seats=None, vlt=False, sw=True)
+    assert sent["body"]["sw"] == "true"
+    a.rapid_climate(ac=True, temp="28.5", heat_seats=None, vent_seats=None,
+                    vlt=False, sw=False)
+    assert sent["body"]["sw"] == "false"
+    a.rapid_climate(ac=True, temp="28.5", heat_seats=None, vent_seats=None,
+                    vlt=False)
+    assert "sw" not in sent["body"], "no evidence of a wheel must mean no key"
+
+
 def test_probe_fields_are_merged_last_so_they_can_override():
     """A probe has to be able to add a field with no capture yet - and to
     replace a computed one, which is the only way to test whether the server
