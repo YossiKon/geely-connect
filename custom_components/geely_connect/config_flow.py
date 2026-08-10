@@ -16,6 +16,7 @@ import hashlib
 import logging
 import os
 import re
+import time
 from typing import Any
 
 import voluptuous as vol
@@ -30,9 +31,20 @@ from .const import (
     CONF_BATTERY_KWH,
     CONF_EXTERIOR_TEMP_OFFSET,
     CONF_FULL_EXPOSURE,
+    CONF_PLATFORM,
     CONF_REGION,
+    CONF_ZEEKR_ACCESS_TOKEN,
+    CONF_ZEEKR_HF_EXPIRY,
+    CONF_ZEEKR_HF_TOKEN,
+    CONF_ZEEKR_PASSWORD,
+    CONF_ZEEKR_REFRESH_TOKEN,
+    CONF_STORE_PASSWORD,
     DEFAULT_COUNTRY_CODE,
+    DEFAULT_PLATFORM,
     DEFAULT_REGION,
+    PLATFORM_LABELS,
+    PLATFORM_LEGACY,
+    PLATFORM_ZEEKR,
     UNSUPPORTED_REGIONS,
     region_config,
     resolve_vehicle_region,
@@ -59,7 +71,15 @@ from .const import (
     CONF_VIN,
     DOMAIN,
 )
-from .helpers import vehicle_metadata
+from .helpers import password_encrypt, vehicle_metadata
+from .zeekr_client import (
+    ZeekrApiError,
+    ZeekrAuthError,
+    ZeekrClient,
+    ZeekrIdaas,
+    vehicle_nickname,
+    vehicle_vin,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -107,6 +127,19 @@ def _already_configured_vins(hass) -> set[str]:
     }
 
 
+def _zeekr_login_password(email: str, password: str, country: str) -> ZeekrClient:
+    """Post-switch login: IDaaS password login -> tspCode leg -> logged-in client.
+
+    The new platform has NO OTP-only login (codes are operation-bound; the
+    forced migration sets a password first). Users must complete the new
+    app's setup on a real device before this flow can see their vehicle.
+    """
+    token_value = ZeekrIdaas(country=country).login_by_email_password(email, password)
+    client = ZeekrClient(email="", password="")
+    client.login_tsp(token_value)
+    return client
+
+
 class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Geely (international)."""
 
@@ -122,13 +155,49 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._vehicles: list[dict] = []
         self._idfa: str | None = None
         self._idfv: str | None = None
+        # Zeekr-platform flow state.
+        self._zeekr_tokens: tuple[str, str] | None = None
+        self._platform_default: str | None = None
+        self._zeekr_hf_token: str | None = None
+        self._zeekr_password: str | None = None
         # Set when this flow is a re-auth. We update the existing entry's
         # token instead of creating a new one in that case.
         self._reauth_entry: config_entries.ConfigEntry | None = None
 
-    # ---- Step 1: email + send OTP ----
+    # ---- Step 0: which backend? ----
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """HA entry point for a brand-new entry.
+
+        The legacy backend remains the default; the form carries a platform
+        field (see async_step_legacy) so accounts on the new Geely EM app
+        platform can route to the zeekr flow without leaving setup.
+        """
+        if user_input is not None and user_input.get(CONF_PLATFORM) == PLATFORM_ZEEKR:
+            return await self.async_step_zeekr_login()
+        return await self.async_step_legacy(user_input)
+
+    async def async_step_platform(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Backend picker (Reconfigure): an existing entry's platform is
+        already known, but a legacy entry can be migrated to the new platform
+        in place (the zeekr reauth branch re-stamps the entry)."""
+        if user_input is not None:
+            if user_input.get(CONF_PLATFORM, DEFAULT_PLATFORM) == PLATFORM_ZEEKR:
+                return await self.async_step_zeekr_login()
+            return await self.async_step_legacy()
+        return self.async_show_form(
+            step_id="platform",
+            data_schema=vol.Schema({
+                vol.Required(
+                    CONF_PLATFORM,
+                    default=self._platform_default or DEFAULT_PLATFORM,
+                ): vol.In(PLATFORM_LABELS),
+            }),
+        )
+
+    # ---- Step 1 (legacy): email + send OTP ----
+
+    async def async_step_legacy(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
             self._email = user_input[CONF_EMAIL].strip()
@@ -179,6 +248,7 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({
+                vol.Required(CONF_PLATFORM, default=DEFAULT_PLATFORM): vol.In(PLATFORM_LABELS),
                 vol.Required(CONF_EMAIL, default=defaults.get(CONF_EMAIL, "")): str,
                 vol.Required(
                     CONF_COUNTRY_CODE,
@@ -318,13 +388,19 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return self.async_abort(reason="reauth_account_mismatch")
 
             new_data = dict(self._reauth_entry.data)
+            # No CONF_PLATFORM stamp here: absent means legacy by design, so
+            # legacy reauth must not grow the entry (upstream contract); the
+            # zeekr paths are the ones that stamp + purge.
             new_data[CONF_CIDPSSO_TOKEN] = self._cidpsso_token
             new_data[CONF_USER_ID] = self._user_id
             new_data[CONF_DEVICE_IDFA] = self._idfa
             new_data[CONF_DEVICE_IDFV] = self._idfv
             self.hass.config_entries.async_update_entry(self._reauth_entry, data=new_data)
             await self.hass.config_entries.async_reload(self._reauth_entry.entry_id)
-            return self.async_abort(reason="reauth_successful")
+            return self.async_abort(
+                reason="reconfigure_successful"
+                if self.context.get("source") == "reconfigure"  # config_entries.SOURCE_RECONFIGURE (absent on some HA versions)
+                else "reauth_successful")
 
         await self.async_set_unique_id(f"{self._email}:{vin}")
         self._abort_if_unique_id_configured()
@@ -404,12 +480,193 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             },
         )
 
+    # ---- Zeekr platform (new Geely EM app backend) ---------------------------
+    # Post-switch reality (live-validated 2026-08-10): the new platform has NO
+    # OTP-only login. Pre-switch accounts are forced through a migration in the
+    # official app (captcha/email op=addPassword -> captcha/verify ->
+    # completeMigration sets a password AND links the vehicle). HA therefore
+    # asks for email + password only, and tells users to finish the app-side
+    # setup first. Token auth + snc signer, no per-device mTLS cert.
+
+    async def async_step_zeekr_login(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            email = user_input[CONF_EMAIL].strip().lower()
+            self._email = email
+            self._country_code = user_input[CONF_COUNTRY_CODE].strip().upper()
+            self._pressure_unit = user_input.get(CONF_PRESSURE_UNIT, DEFAULT_PRESSURE_UNIT)
+            self._poll_mode = user_input.get(CONF_POLL_MODE, DEFAULT_POLL_MODE)
+            try:
+                client = await self.hass.async_add_executor_job(
+                    _zeekr_login_password, email, user_input["password"], self._country_code)
+                self._zeekr_tokens = (client.access_token or "", client.refresh_token or "")
+                self._zeekr_hf_token = client.hf_token
+                self._zeekr_password = (user_input["password"]
+                                        if user_input.get(CONF_STORE_PASSWORD, True)
+                                        else "")
+                self._user_id = client.user_id
+                if not _valid_user_id(self._user_id):
+                    _LOGGER.error("zeekr login returned a malformed user_id; aborting")
+                    errors["base"] = "unknown"
+                else:
+                    raw = await self.hass.async_add_executor_job(
+                        client.list_vehicles, client.user_id)
+                    self._vehicles = [v for v in raw if _valid_vin(vehicle_vin(v))]
+                    if not self._vehicles:
+                        errors["base"] = "no_vehicles"
+                    elif len(self._vehicles) == 1:
+                        return await self._finish_zeekr(self._vehicles[0])
+                    else:
+                        return await self.async_step_zeekr_pick()
+            except (ZeekrAuthError, ZeekrApiError) as e:
+                _LOGGER.warning("zeekr login rejected: %s", e)
+                errors["base"] = "invalid_credentials"
+            except Exception:
+                _LOGGER.exception("zeekr login failed")
+                errors["base"] = "network_unreachable"
+
+        defaults: dict[str, Any] = {}
+        if self._reauth_entry is not None:
+            defaults[CONF_EMAIL] = self._reauth_entry.data.get(CONF_EMAIL, "")
+            defaults[CONF_COUNTRY_CODE] = self._reauth_entry.data.get(CONF_COUNTRY_CODE, "")
+            defaults[CONF_PRESSURE_UNIT] = self._reauth_entry.data.get(
+                CONF_PRESSURE_UNIT, DEFAULT_PRESSURE_UNIT)
+            defaults[CONF_POLL_MODE] = self._reauth_entry.data.get(
+                CONF_POLL_MODE, DEFAULT_POLL_MODE)
+        return self.async_show_form(
+            step_id="zeekr_login",
+            data_schema=vol.Schema({
+                vol.Required(CONF_EMAIL, default=defaults.get(CONF_EMAIL, "")): str,
+                vol.Required("password"): str,
+                vol.Optional(CONF_STORE_PASSWORD, default=True): bool,
+                vol.Required(
+                    CONF_COUNTRY_CODE,
+                    default=defaults.get(CONF_COUNTRY_CODE) or DEFAULT_COUNTRY_CODE,
+                ): vol.In(SUPPORTED_COUNTRIES),
+                vol.Required(CONF_PRESSURE_UNIT, default=defaults.get(CONF_PRESSURE_UNIT, DEFAULT_PRESSURE_UNIT)): vol.In(PRESSURE_UNITS),
+                vol.Required(CONF_POLL_MODE, default=defaults.get(CONF_POLL_MODE, DEFAULT_POLL_MODE)): vol.In(POLL_MODES),
+            }),
+            errors=errors,
+            description_placeholders={"email": self._email or ""},
+        )
+
+    async def async_step_zeekr_pick(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        if user_input is not None:
+            chosen = next(
+                (v for v in self._vehicles if vehicle_vin(v) == user_input["vin"]),
+                None,
+            )
+            if chosen is None:
+                return self.async_abort(reason="unknown")
+            return await self._finish_zeekr(chosen)
+        options = {
+            vehicle_vin(v): f"{vehicle_nickname(v) or 'Geely'} ({vehicle_vin(v)})"
+            for v in self._vehicles
+        }
+        return self.async_show_form(
+            step_id="zeekr_pick",
+            data_schema=vol.Schema({vol.Required("vin"): vol.In(options)}),
+        )
+
+    async def _finish_zeekr(self, vehicle: dict) -> FlowResult:
+        vin = vehicle_vin(vehicle)
+        tokens = self._zeekr_tokens
+        if not _valid_vin(vin) or not _valid_user_id(self._user_id) or tokens is None:
+            _LOGGER.error("refusing to finish zeekr setup with malformed VIN/user_id")
+            return self.async_abort(reason="unknown")
+
+        if self._reauth_entry is not None:
+            entry = self._reauth_entry
+            previous_email = entry.data.get(CONF_EMAIL) or ""
+            if previous_email and (self._email or "").lower() != previous_email.lower():
+                _LOGGER.error(
+                    "re-authentication used a different Geely account than the "
+                    "one this entry was created with; aborting"
+                )
+                return self.async_abort(reason="reauth_account_mismatch")
+            new_data = dict(entry.data)
+            new_data[CONF_PLATFORM] = PLATFORM_ZEEKR
+            new_data[CONF_ZEEKR_ACCESS_TOKEN] = tokens[0]
+            new_data[CONF_ZEEKR_REFRESH_TOKEN] = tokens[1]
+            new_data[CONF_ZEEKR_HF_TOKEN] = self._zeekr_hf_token or ""
+            new_data[CONF_ZEEKR_HF_EXPIRY] = int(time.time()) + 172800
+            new_data[CONF_ZEEKR_PASSWORD] = password_encrypt(
+                self.hass, self._zeekr_password or "")
+            new_data[CONF_USER_ID] = self._user_id
+            # Migration in place: the account's vehicle record now carries the
+            # NEW platform's VIN (the legacy VIN is dead there), so the entry
+            # must be re-pointed at the picked vehicle + its metadata.
+            new_data[CONF_VIN] = vin
+            new_data.update(vehicle_metadata(vehicle))
+            # The legacy-only credentials are meaningless on the new platform
+            # and their presence sent setup down the dead legacy path (a
+            # hybrid entry: legacy keys + zeekr tokens + no platform marker).
+            for legacy_key in (
+                CONF_CIDPSSO_TOKEN, CONF_CERT_PATH, CONF_KEY_PATH,
+                CONF_DEVICE_ID, CONF_DEVICE_IDFA, CONF_DEVICE_IDFV, CONF_REGION,
+            ):
+                new_data.pop(legacy_key, None)
+            # Persist what the form offered (the user may have changed them).
+            new_data[CONF_COUNTRY_CODE] = self._country_code
+            new_data[CONF_PRESSURE_UNIT] = self._pressure_unit
+            new_data[CONF_POLL_MODE] = self._poll_mode
+            self.hass.config_entries.async_update_entry(entry, data=new_data)
+            await self.hass.config_entries.async_reload(entry.entry_id)
+            return self.async_abort(
+                reason="reconfigure_successful"
+                if self.context.get("source") == "reconfigure"  # config_entries.SOURCE_RECONFIGURE (absent on some HA versions)
+                else "reauth_successful")
+
+        if vin in _already_configured_vins(self.hass):
+            return self.async_abort(reason="already_configured")
+        await self.async_set_unique_id(f"zeekr:{self._email}:{vin}")
+        self._abort_if_unique_id_configured()
+
+        metadata = vehicle_metadata(vehicle)
+        title = f"{metadata[CONF_VEHICLE_NICKNAME] or 'Geely'} ({vin})"
+        return self.async_create_entry(
+            title=title,
+            data={
+                CONF_PLATFORM:            PLATFORM_ZEEKR,
+                CONF_EMAIL:               self._email,
+                CONF_COUNTRY_CODE:        self._country_code,
+                CONF_VIN:                 vin,
+                CONF_USER_ID:             self._user_id,
+                CONF_ZEEKR_ACCESS_TOKEN:  tokens[0],
+                CONF_ZEEKR_REFRESH_TOKEN: tokens[1],
+                CONF_ZEEKR_HF_TOKEN:      self._zeekr_hf_token or "",
+                CONF_ZEEKR_HF_EXPIRY:     int(time.time()) + 172800,
+                CONF_ZEEKR_PASSWORD:      password_encrypt(
+                    self.hass, self._zeekr_password or ""),
+                **metadata,
+                CONF_PRESSURE_UNIT:       self._pressure_unit,
+                CONF_POLL_MODE:           self._poll_mode,
+            },
+        )
+
     async def async_step_reauth(self, entry_data: dict[str, Any]) -> FlowResult:
         """HA enters this step when the coordinator raises ConfigEntryAuthFailed."""
         self._reauth_entry = self.hass.config_entries.async_get_entry(
             self.context["entry_id"]
         )
-        return await self.async_step_user()
+        if self._reauth_entry.data.get(CONF_PLATFORM, DEFAULT_PLATFORM) == PLATFORM_ZEEKR:
+            return await self.async_step_zeekr_login()
+        return await self.async_step_legacy()
+
+    async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Reconfigure button on an errored entry (HA 2024.7+).
+
+        Shows the backend picker (async_step_platform) so a legacy entry can
+        be MIGRATED to the new platform in place (the zeekr reauth branch
+        re-stamps the entry); the entry's current platform is the default.
+        """
+        entry_id = self.context.get("entry_id")
+        entry = self.hass.config_entries.async_get_entry(entry_id) if entry_id else None
+        if entry is None:
+            return await self.async_step_user()
+        self._reauth_entry = entry
+        self._platform_default = entry.data.get(CONF_PLATFORM, DEFAULT_PLATFORM)
+        return await self.async_step_platform(user_input)
 
     @staticmethod
     @callback
