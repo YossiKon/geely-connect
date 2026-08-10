@@ -388,9 +388,18 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return self.async_abort(reason="reauth_account_mismatch")
 
             new_data = dict(self._reauth_entry.data)
-            # No CONF_PLATFORM stamp here: absent means legacy by design, so
-            # legacy reauth must not grow the entry (upstream contract); the
-            # zeekr paths are the ones that stamp + purge.
+            # Absent CONF_PLATFORM means legacy, so a legacy->legacy reauth
+            # never needs to stamp it. But an entry that was on the NEW platform
+            # can be reconfigured back to legacy through the shared picker, and
+            # then its zeekr marker + session keys must go - otherwise __init__
+            # would keep routing the entry to the new backend and silently
+            # ignore the legacy credentials just obtained (a hybrid entry, the
+            # mirror image of the one the zeekr branch guards against).
+            for zeekr_key in (
+                CONF_PLATFORM, CONF_ZEEKR_ACCESS_TOKEN, CONF_ZEEKR_REFRESH_TOKEN,
+                CONF_ZEEKR_HF_TOKEN, CONF_ZEEKR_HF_EXPIRY, CONF_ZEEKR_PASSWORD,
+            ):
+                new_data.pop(zeekr_key, None)
             new_data[CONF_CIDPSSO_TOKEN] = self._cidpsso_token
             new_data[CONF_USER_ID] = self._user_id
             new_data[CONF_DEVICE_IDFA] = self._idfa
@@ -575,6 +584,11 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             _LOGGER.error("refusing to finish zeekr setup with malformed VIN/user_id")
             return self.async_abort(reason="unknown")
 
+        # password_encrypt reads secrets.yaml (and may run AES-GCM); keep that
+        # blocking work off the event loop. Computed once for whichever branch.
+        enc_password = await self.hass.async_add_executor_job(
+            password_encrypt, self.hass, self._zeekr_password or "")
+
         if self._reauth_entry is not None:
             entry = self._reauth_entry
             previous_email = entry.data.get(CONF_EMAIL) or ""
@@ -590,8 +604,7 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             new_data[CONF_ZEEKR_REFRESH_TOKEN] = tokens[1]
             new_data[CONF_ZEEKR_HF_TOKEN] = self._zeekr_hf_token or ""
             new_data[CONF_ZEEKR_HF_EXPIRY] = int(time.time()) + 172800
-            new_data[CONF_ZEEKR_PASSWORD] = password_encrypt(
-                self.hass, self._zeekr_password or "")
+            new_data[CONF_ZEEKR_PASSWORD] = enc_password
             new_data[CONF_USER_ID] = self._user_id
             # Migration in place: the account's vehicle record now carries the
             # NEW platform's VIN (the legacy VIN is dead there), so the entry
@@ -636,8 +649,7 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_ZEEKR_REFRESH_TOKEN: tokens[1],
                 CONF_ZEEKR_HF_TOKEN:      self._zeekr_hf_token or "",
                 CONF_ZEEKR_HF_EXPIRY:     int(time.time()) + 172800,
-                CONF_ZEEKR_PASSWORD:      password_encrypt(
-                    self.hass, self._zeekr_password or ""),
+                CONF_ZEEKR_PASSWORD:      enc_password,
                 **metadata,
                 CONF_PRESSURE_UNIT:       self._pressure_unit,
                 CONF_POLL_MODE:           self._poll_mode,

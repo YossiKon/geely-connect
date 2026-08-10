@@ -35,6 +35,14 @@ NOTE: the new platform's vehicle chain goes IDaaS token -> tspCode -> TSP
 exchange; the old /ms-user-auth leg (below) is legacy machinery retained
 for the old backend only.
 """
+# -----------------------------------------------------------------------------
+# The new Geely EM (Zeekr) platform port - the live capture of the migration
+# flow, the snc / IDaaS / HF signers, the RSA password path and the two-session
+# model in this file - is the reverse-engineering work of Scott Lorien
+# (@scottaki), contributed as pull request #33. Merged with security fixes on
+# top (response bodies are run through api.redact() at every raise, and the new
+# secret keys are in api._SECRET_KEYS / diagnostics._REDACT). See NOTICE.txt.
+# -----------------------------------------------------------------------------
 from __future__ import annotations
 
 import base64
@@ -50,6 +58,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse, parse_qsl, quote
+
+from .api import redact
 
 # Public protocol identity, embedded in the shipped app APK and extractable
 # by anyone - the same pattern as the legacy integration's per-region app
@@ -187,7 +197,7 @@ def _hf_request(method: str, path: str, *, query: str = "", body: bytes = b"",
         resp = conn.getresponse()
         raw = resp.read()
         if resp.status != 200:
-            raise ZeekrApiError(f"HF HTTP {resp.status}: {raw[:200]!r}")
+            raise ZeekrApiError(f"HF HTTP {resp.status}: {_safe_detail(raw)}")
         return _check_resp(json.loads(raw))
     finally:
         conn.close()
@@ -225,6 +235,21 @@ class ZeekrAuthError(Exception):
 
 class ZeekrApiError(Exception):
     """Gateway rejected the request (signature, params, or server error)."""
+
+
+def _safe_detail(raw: bytes | str, limit: int = 200) -> str:
+    """A response body reduced to something safe to fold into an exception.
+
+    Every raise in this module can surface on Home Assistant's re-auth card
+    and in the log (the adapter maps our errors to GeelyAuthError /
+    GeelyControlError, whose text renders there), so a raw body must never
+    ride along verbatim - the same redact()-at-the-raise invariant the legacy
+    api.py holds. JSON is parsed and run through redact(); anything else is
+    dropped rather than guessed at."""
+    try:
+        return str(redact(json.loads(raw)))[:limit]
+    except Exception:  # noqa: BLE001 - non-JSON / undecodable body: say nothing
+        return "<non-JSON body omitted>"
 
 
 def _make_nonce() -> str:
@@ -425,7 +450,7 @@ def _post_raw_json(url: str, raw: bytes, headers: dict) -> dict:
         resp = conn.getresponse()
         resp_raw = resp.read()
         if resp.status != 200:
-            raise ZeekrApiError(f"HTTP {resp.status}: {resp_raw[:200]!r}")
+            raise ZeekrApiError(f"HTTP {resp.status}: {_safe_detail(resp_raw)}")
         return json.loads(resp_raw)
     finally:
         conn.close()
@@ -441,7 +466,7 @@ def _get_json(url: str, headers: dict) -> dict:
         resp = conn.getresponse()
         raw = resp.read()
         if resp.status != 200:
-            raise ZeekrApiError(f"HTTP {resp.status}: {raw[:200]!r}")
+            raise ZeekrApiError(f"HTTP {resp.status}: {_safe_detail(raw)}")
         return json.loads(raw)
     finally:
         conn.close()
@@ -453,11 +478,24 @@ class ZeekrIdaas:
     def __init__(self, gateway: str = IDAAS_GATEWAY, path: str = IDAAS_PATH,
                  country: str = "AU"):
         self.base = f"{gateway.rstrip('/')}/{path}"
+        # The account's country. Threaded into every request's Country /
+        # RegistCountry headers below - it used to be accepted and dropped, so
+        # every call went out as "AU" regardless of who logged in. Only the
+        # SEA-region gateway/path (this default) is live-verified; a non-SEA
+        # region would also need its own gateway host and idaas path, which
+        # have not been captured, so those accounts stay best-effort.
+        self.country = country
+
+    def _headers(self, method: str, path: str, body: bytes, query: str = "",
+                 token: str | None = None) -> dict:
+        """idaas_headers bound to this client's country (was always 'AU')."""
+        return idaas_headers(method, path, body, query=query,
+                             country=self.country, token=token)
 
     def check_user(self, email: str) -> dict:
         body = {"email": email, "checkType": "1"}
         resp = _post_json(f"{self.base}/auth/checkUserV2", body,
-                          idaas_headers("POST", f"/{IDAAS_PATH}/auth/checkUserV2", json.dumps(body).encode()))
+                          self._headers("POST", f"/{IDAAS_PATH}/auth/checkUserV2", json.dumps(body).encode()))
         return _check_resp(resp).get("data") or {}
 
     def request_code(self, email: str, operation_type: str = "login") -> dict:
@@ -465,31 +503,31 @@ class ZeekrIdaas:
         body = {"email": email, "operationType": operation_type,
                 "humanMachineTicket": "", "language": "en"}
         resp = _post_json(f"{self.base}/captcha/email", body,
-                          idaas_headers("POST", f"/{IDAAS_PATH}/captcha/email", json.dumps(body).encode()))
+                          self._headers("POST", f"/{IDAAS_PATH}/captcha/email", json.dumps(body).encode()))
         return _check_resp(resp).get("data") or {}
 
     def login_by_email(self, email: str, code_id: str, code: str) -> str:
         """loginByEmailEncrypt -> tokenValue. password omitted for OTP-only accounts."""
         body = {"email": email, "codeId": code_id, "code": code}
         resp = _post_json(f"{self.base}/auth/loginByEmailEncrypt", body,
-                          idaas_headers("POST", f"/{IDAAS_PATH}/auth/loginByEmailEncrypt",
+                          self._headers("POST", f"/{IDAAS_PATH}/auth/loginByEmailEncrypt",
                                         json.dumps(body).encode()))
         data = _check_resp(resp).get("data") or {}
         token = data.get("tokenValue")
         if not token:
-            raise ZeekrAuthError(f"loginByEmailEncrypt returned no tokenValue: {str(resp)[:200]}")
+            raise ZeekrAuthError(f"loginByEmailEncrypt returned no tokenValue: {str(redact(resp))[:200]}")
         return token
 
     def login_by_email_password(self, email: str, password: str) -> str:
         """loginByEmailEncrypt{email, RSA(password)} -> tokenValue (post-switch)."""
         body = {"email": email, "password": _rsa_encrypt_password(password)}
         resp = _post_json(f"{self.base}/auth/loginByEmailEncrypt", body,
-                          idaas_headers("POST", f"/{IDAAS_PATH}/auth/loginByEmailEncrypt",
+                          self._headers("POST", f"/{IDAAS_PATH}/auth/loginByEmailEncrypt",
                                         json.dumps(body).encode()))
         data = _check_resp(resp).get("data") or {}
         token = data.get("tokenValue")
         if not token:
-            raise ZeekrAuthError(f"loginByEmailEncrypt(password) returned no tokenValue: {str(resp)[:200]}")
+            raise ZeekrAuthError(f"loginByEmailEncrypt(password) returned no tokenValue: {str(redact(resp))[:200]}")
         return token
 
     def edit_password(self, email: str, code_id: str, code: str, password: str) -> dict:
@@ -497,7 +535,7 @@ class ZeekrIdaas:
         body = {"email": email, "codeId": code_id, "code": code,
                 "password": _rsa_encrypt_password(password)}
         resp = _post_json(f"{self.base}/auth/editPasswordByEmailEncrypt", body,
-                          idaas_headers("POST", f"/{IDAAS_PATH}/auth/editPasswordByEmailEncrypt",
+                          self._headers("POST", f"/{IDAAS_PATH}/auth/editPasswordByEmailEncrypt",
                                         json.dumps(body).encode()))
         return _check_resp(resp).get("data") or {}
 
@@ -507,7 +545,7 @@ class ZeekrIdaas:
         body = {"account": account, "code": code, "codeId": code_id,
                 "operationType": operation_type}
         resp = _post_json(f"{self.base}/captcha/verify", body,
-                          idaas_headers("POST", f"/{IDAAS_PATH}/captcha/verify",
+                          self._headers("POST", f"/{IDAAS_PATH}/captcha/verify",
                                         json.dumps(body).encode()))
         data = _check_resp(resp).get("data")
         return data is True
@@ -520,18 +558,18 @@ class ZeekrIdaas:
                 "password": _rsa_encrypt_password(password),
                 "firstName": first_name, "lastName": last_name}
         resp = _post_json(f"{self.base}/auth/completeMigration", body,
-                          idaas_headers("POST", f"/{IDAAS_PATH}/auth/completeMigration",
+                          self._headers("POST", f"/{IDAAS_PATH}/auth/completeMigration",
                                         json.dumps(body).encode()))
         data = _check_resp(resp).get("data") or {}
         if not data.get("tokenValue"):
-            raise ZeekrAuthError(f"completeMigration returned no tokenValue: {str(resp)[:200]}")
+            raise ZeekrAuthError(f"completeMigration returned no tokenValue: {str(redact(resp))[:200]}")
         return data
 
     def user_info(self, token_value: str) -> dict:
         """POST /user/info (empty body) with the login token: confirms identity."""
         resp = _post_raw_json(
             f"{self.base}/user/info", b"",
-            idaas_headers("POST", f"/{IDAAS_PATH}/user/info", b"",
+            self._headers("POST", f"/{IDAAS_PATH}/user/info", b"",
                           token=token_value))
         return _check_resp(resp).get("data") or {}
 
@@ -544,7 +582,7 @@ class ZeekrIdaas:
         query = f"tspClientId={client_id}"
         resp = _get_json(
             f"{self.base}/user/tspCode?{query}",
-            idaas_headers("GET", f"/{IDAAS_PATH}/user/tspCode", b"", query=query,
+            self._headers("GET", f"/{IDAAS_PATH}/user/tspCode", b"", query=query,
                           token=token_value))
         return _check_resp(resp).get("data") or {}
 
@@ -642,7 +680,7 @@ class ZeekrClient:
             resp = conn.getresponse()
             raw = resp.read()
             if resp.status != 200:
-                raise ZeekrApiError(f"HTTP {resp.status}: {raw[:200]!r}")
+                raise ZeekrApiError(f"HTTP {resp.status}: {_safe_detail(raw)}")
             return _check_resp(json.loads(raw))
         finally:
             conn.close()
@@ -669,7 +707,7 @@ class ZeekrClient:
         self.refresh_token = data.get("refreshToken")
         self.user_id = data.get("userId")
         if not self.access_token:
-            raise ZeekrAuthError(f"login returned no accessToken: {str(auth)[:200]}")
+            raise ZeekrAuthError(f"login returned no accessToken: {str(redact(auth))[:200]}")
 
     def login(self) -> None:
         """email+password -> DDC (signed) -> ms-user-auth (unsigned) -> tokens."""
@@ -678,7 +716,7 @@ class ZeekrClient:
                             urlname="user-api")
         ddc_code = (ddc.get("data") or {}).get("ddcCode")
         if not ddc_code:
-            raise ZeekrAuthError(f"device/code returned no ddcCode: {ddc}")
+            raise ZeekrAuthError(f"device/code returned no ddcCode: {str(redact(ddc))[:200]}")
         self._ms_user_auth_login(ddc_code)
 
     def login_otp(self, token_value: str) -> None:
@@ -697,7 +735,7 @@ class ZeekrClient:
         tsp = idaas.tsp_code(token_value)
         code = tsp.get("code")
         if not code:
-            raise ZeekrAuthError(f"tspCode returned no code: {str(tsp)[:200]}")
+            raise ZeekrAuthError(f"tspCode returned no code: {str(redact(tsp))[:200]}")
         self._ms_user_auth_login(code)
         self.login_hf(token_value)
 
@@ -708,7 +746,7 @@ class ZeekrClient:
         tsp2 = idaas.tsp_code(token_value, client_id=HF_CLIENT2)
         code2 = tsp2.get("code")
         if not code2:
-            raise ZeekrAuthError(f"tspCode(client2) returned no code: {tsp2}")
+            raise ZeekrAuthError(f"tspCode(client2) returned no code: {str(redact(tsp2))[:200]}")
         body = json.dumps({"area": "SEA", "authCode": code2},
                           separators=(",", ":")).encode()
         resp = _hf_request("POST", "/auth/account/session/secure",
@@ -718,7 +756,7 @@ class ZeekrClient:
         data = resp.get("data") or {}
         hf_token = data.get("accessToken")
         if not hf_token:
-            raise ZeekrAuthError(f"HF exchange returned no accessToken: {str(resp)[:200]}")
+            raise ZeekrAuthError(f"HF exchange returned no accessToken: {str(redact(resp))[:200]}")
         self.hf_token = hf_token
         self.hf_expires_in = data.get("expiresIn", 172800)
 

@@ -184,6 +184,15 @@ def test_zeekr_hf_renewal_is_persisted_into_the_entry():
     last = hass.config_entries.updates[-1]["data"]
     assert last["zeekr_hf_token"] == "mock-hf-new", last
     assert last["zeekr_hf_expiry"] == 1750000001, last
+    # A renewal that fires once the bundle is in hass.data (the normal case,
+    # after setup) flags its own writeback so the update listener skips the
+    # reload it would otherwise do on any entry.data change.
+    bundle = hass.data["geely_connect"]["e1"]
+    assert isinstance(bundle, dict)
+    api._hf_takes = [("mock-hf-2", 1750000002)]
+    asyncio.run(_FakeCoordinator.instance.refresh())
+    assert bundle.get("_skip_reload_once") is True, \
+        "the HF writeback must flag itself so the listener skips the reload"
     # A second cycle with no renewal must not touch the entry again.
     n = len(hass.config_entries.updates)
     asyncio.run(_FakeCoordinator.instance.refresh())

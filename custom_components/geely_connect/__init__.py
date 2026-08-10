@@ -376,6 +376,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # adapter presents the same api surface the coordinator and entity
         # platforms call; endpoints the new backend has not been verified on
         # yet raise cleanly and are carried forward by the coordinator.
+        #
+        # password_decrypt reads secrets.yaml (and may run AES-GCM), so it goes
+        # to the executor - a blocking file read on the event loop is exactly
+        # what Home Assistant now warns about.
+        zeekr_password = await hass.async_add_executor_job(
+            password_decrypt, hass, d.get(CONF_ZEEKR_PASSWORD) or "")
         api = ZeekrAdapter(
             email=d.get(CONF_EMAIL) or "",
             vin=d[CONF_VIN],
@@ -384,7 +390,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             refresh_token=d.get(CONF_ZEEKR_REFRESH_TOKEN) or "",
             hf_token=d.get(CONF_ZEEKR_HF_TOKEN) or "",
             vehicle_model=series_code,
-            password=password_decrypt(hass, d.get(CONF_ZEEKR_PASSWORD) or ""),
+            password=zeekr_password,
             country_code=d.get(CONF_COUNTRY_CODE) or DEFAULT_COUNTRY_CODE,
             timezone=hass.config.time_zone,
             hf_expiry=int(d.get(CONF_ZEEKR_HF_EXPIRY) or 0),
@@ -514,6 +520,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 new_data = dict(entry.data)
                 new_data[CONF_ZEEKR_HF_TOKEN] = hf_token
                 new_data[CONF_ZEEKR_HF_EXPIRY] = hf_expiry
+                # This is an internal token refresh, not a reconfiguration.
+                # async_update_entry fires the update listener on ANY data
+                # change, and that listener reloads the whole integration - so
+                # without this guard every ~2-day silent renewal (or any
+                # auth-blip renewal) would tear the integration down and rebuild
+                # it. Flag the write so the listener skips exactly this reload.
+                bucket = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+                if isinstance(bucket, dict):
+                    bucket["_skip_reload_once"] = True
                 hass.config_entries.async_update_entry(entry, data=new_data)
                 _LOGGER.info("zeekr: HF JWT silently renewed; entry updated")
 
@@ -677,6 +692,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    # A silent HF-token refresh writes entry.data (see the coordinator's
+    # renewal block) and would otherwise trip this listener into a full reload.
+    # That write flags itself; consume the flag and do nothing here, so only
+    # real user-driven reconfigurations reload the integration.
+    bucket = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if isinstance(bucket, dict) and bucket.pop("_skip_reload_once", False):
+        return
     # Turning full exposure off has to clear the entities it created. The
     # sensor platform simply stops adding them, and nothing else removes them,
     # so without this they linger in the registry as ~180 unavailable rows.

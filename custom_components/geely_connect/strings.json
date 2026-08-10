@@ -35,7 +35,7 @@
       },
       "zeekr_login": {
         "title": "Geely EM platform (new app)",
-        "description": "Enter the email and password you use with the new Geely app.\n\nIf you have not done so yet, open the new Geely app on your phone first and complete the setup there (the app will walk you through setting a password and linking your vehicle). This integration logs in with email + password only.\n\nStoring the password lets the session renew itself automatically (same as the app does). It is kept in the integration's config entry like the existing credentials and never logged; uncheck to re-authenticate manually every ~2 days instead.",
+        "description": "Experimental: the new-platform backend is still being verified on real cars, so treat it as beta.\n\nEnter the email and password you use with the new Geely app. If you have not done so yet, open the new Geely app on your phone first and complete the setup there (the app will walk you through setting a password and linking your vehicle). This integration logs in with email + password only.\n\nStoring the password lets the session renew itself automatically (as the app does). It is your Geely account password: it is redacted from logs and diagnostics, and encrypted at rest if you add a 'geely_password_key' to secrets.yaml (otherwise it is stored in plain text in Home Assistant's storage). Uncheck to re-authenticate manually about every 2 days instead.",
         "data": {
           "email": "Email",
           "password": "Password",

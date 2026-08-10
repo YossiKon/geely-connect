@@ -11,6 +11,20 @@ MIT-licensed project, and its license is reproduced below as required:
 
 -------------------------------------------------------------------------
 
+New Geely EM (Zeekr) platform support
+-------------------------------------
+
+The new-platform backend (custom_components/geely_connect/zeekr_client.py and
+zeekr_adapter.py, plus the zeekr config-flow steps) was researched and first
+implemented by Scott Lorien (@scottaki) in pull request #33 - the live capture
+of the forced-migration flow, the two session models, the snc / IDaaS / HF
+signers and the RSA password path are his reverse-engineering work. It was
+merged with security and reliability fixes applied on top (redaction of the new
+secrets and of exception bodies, country plumbing, reload-on-write and
+event-loop corrections). Thank you.
+
+-------------------------------------------------------------------------
+
 MIT License
 
 Copyright (c) 2026 Nitay Ben-Zvi

@@ -548,6 +548,55 @@ def test_auth_errors_and_bad_gateway_responses():
         _stop_mock(srv, tmp)
 
 
+def test_a_failed_login_never_leaks_a_token_into_the_exception_text():
+    """#33 security review (S2): every raise here folds the response body
+    through redact(), because the adapter surfaces our error text on Home
+    Assistant's re-auth card. A body carrying a token but no tokenValue must
+    come out masked, not verbatim."""
+    leaky = {"code": "1", "tokenValue": None,
+             "accessToken": "eyJLEAK.header.sig", "refreshToken": "RT-LEAK-9"}
+    orig = zc._post_json
+    zc._post_json = lambda url, body, headers: leaky
+    try:
+        raised = None
+        try:
+            zc.ZeekrIdaas().login_by_email("owner@example.com", "cid", "123")
+        except zc.ZeekrAuthError as e:
+            raised = str(e)
+    finally:
+        zc._post_json = orig
+    assert raised is not None, "expected ZeekrAuthError"
+    assert "eyJLEAK" not in raised and "RT-LEAK-9" not in raised, raised
+    assert "***redacted***" in raised
+
+
+def test_a_non_json_error_body_is_dropped_from_the_exception():
+    """_safe_detail must not fold an unparseable body into exception text -
+    it could be anything, so it is omitted rather than guessed at."""
+    assert "omitted" in zc._safe_detail(b"\x00\x01 not json")
+    assert zc._safe_detail(b'{"accessToken":"eyJX.Y.Z"}') == "{'accessToken': '***redacted***'}"
+
+
+def test_the_account_country_reaches_the_request_headers():
+    """#33 review (N1): the country was accepted and then dropped, so every
+    IDaaS call went out as AU regardless of who logged in. It must now ride the
+    Country / RegistCountry headers."""
+    captured: dict = {}
+    orig = zc._post_json
+
+    def _cap(url, body, headers):
+        captured.update(headers)
+        return {"data": {"tokenValue": "t"}}
+
+    zc._post_json = _cap
+    try:
+        zc.ZeekrIdaas(country="NZ").login_by_email("owner@example.com", "cid", "1")
+    finally:
+        zc._post_json = orig
+    assert captured.get("Country") == "NZ", captured.get("Country")
+    assert captured.get("RegistCountry") == "NZ", captured.get("RegistCountry")
+
+
 def test_rsa_password_encryption_is_pkcs1_and_wrapped():
     ct = zc._rsa_encrypt_password("hunter2")
     lines = ct.split("\n")

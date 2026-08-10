@@ -900,6 +900,23 @@ def test_options_reload_purges_raw_sensors_only_when_exposure_is_off():
     assert hass.config_entries.reloaded == ["e1", "e1"]
 
 
+def test_a_flagged_hf_writeback_makes_the_options_listener_skip_the_reload():
+    """A silent HF-token refresh writes entry.data and so fires this listener
+    like any change - but it flags itself, and the listener must consume the
+    flag and do nothing, or every ~2-day renewal would reload the integration."""
+    m = _mod()
+    hass = _Hass()
+    entry = _entry()
+    hass.data["geely_connect"] = {"e1": {"_skip_reload_once": True}}
+    purged = []
+    with _Patched(m, _purge_raw_exposure_entities=lambda h, e: purged.append(1)):
+        asyncio.run(m._async_options_updated(hass, entry))
+    assert hass.config_entries.reloaded == [], "a flagged write must not reload"
+    assert purged == [], "and must not run the exposure purge either"
+    assert "_skip_reload_once" not in hass.data["geely_connect"]["e1"], \
+        "the flag is consumed, so the next real change still reloads"
+
+
 def test_unload_drops_the_bundle_only_when_platforms_unload():
     m = _mod()
     hass = _Hass()

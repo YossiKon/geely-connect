@@ -24,6 +24,8 @@ analysis (iovif.java lists /remote-control/* and /charge-server/* routes)
 but none has been verified against the live new gateway, so they stay
 explicitly unimplemented until the primary path is proven live.
 """
+# Part of the new Geely EM (Zeekr) platform support first implemented by
+# Scott Lorien (@scottaki) in pull request #33. See NOTICE.txt.
 from __future__ import annotations
 
 import time
