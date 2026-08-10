@@ -179,6 +179,104 @@ def _provision(api, info, file=None, tmpdir=None):
         api._raw_https = orig
 
 
+def _provision_seq(api, infos, files, tmpdir, calls=None):
+    """Like _provision, but answers /info and /file from queues.
+
+    The 8200 retry needs a second, different answer from each endpoint, which the
+    single-payload helper above cannot express. Kept separate so the existing
+    tests that rely on that helper's behaviour are untouched.
+
+    Pass `calls` to own the trail: provisioning raises on a failure path, and the
+    number of requests made before it raised is exactly what those tests need.
+    """
+    calls = [] if calls is None else calls
+    infos, files = list(infos), list(files)
+
+    def _fake_raw(host, method, path, headers, body, **kw):
+        calls.append((path, json.loads(body)))
+        q = infos if path.endswith("/info") else files
+        return json.dumps(q.pop(0) if len(q) > 1 else q[0]).encode()
+
+    orig = api._raw_https
+    api._raw_https = _fake_raw
+    try:
+        return api.provision_user_cert(
+            app_id="a", app_secret="s", user_id="user-1",
+            cidpsso_token="tok", cert_out_path=os.path.join(tmpdir, "v", "cert.pem"),
+            key_out_path=os.path.join(tmpdir, "v", "key.pem")), calls
+    finally:
+        api._raw_https = orig
+
+
+def test_apac_gets_a_second_chance_under_the_name_it_asked_for():
+    """#32: APAC calls the same challenge `checkValue` and answers 8200 when it
+    arrives as `checkCode`. The challenge is single-use, so the retry has to
+    fetch a fresh one - reusing the spent value would fail for a second reason
+    and look like the rename had not helped."""
+    if not _deps():
+        skip("cryptography not installed")
+    api = _api()
+    with tempfile.TemporaryDirectory() as d:
+        (cert, _), calls = _provision_seq(
+            api,
+            infos=[{"code": 1000, "data": {"checkCode": "first"}},
+                   {"code": 1000, "data": {"checkCode": "fresh"}}],
+            files=[{"code": 8200, "hint": "checkValue invalid"},
+                   {"code": 1000, "data": {"cert": "-----APAC CERT-----"}}],
+            tmpdir=d)
+        assert open(cert).read() == "-----APAC CERT-----"
+        assert [c[0].rsplit("/", 1)[1] for c in calls] == ["info", "file", "info", "file"]
+        assert calls[1][1]["checkCode"] == "first"        # the original attempt
+        assert "checkCode" not in calls[3][1], calls[3][1]  # renamed on the retry
+        assert calls[3][1]["checkValue"] == "fresh"       # and a new challenge
+        # The retry must not quietly change anything else about the request.
+        assert calls[3][1]["csr"] == calls[1][1]["csr"]
+        assert calls[3][1]["deviceId"] == calls[1][1]["deviceId"]
+        assert calls[3][1]["accessToken"] == calls[1][1]["accessToken"]
+
+
+def test_an_8200_that_is_not_about_the_challenge_name_is_not_retried():
+    """The retry is keyed to the hint on purpose. Retrying every 8200 would spend
+    a second challenge and hide the real reason behind an identical failure."""
+    if not _deps():
+        skip("cryptography not installed")
+    api = _api()
+    seen = []
+    with tempfile.TemporaryDirectory() as d:
+        try:
+            _provision_seq(api,
+                           infos=[{"code": 1000, "data": {"checkCode": "c"}}],
+                           files=[{"code": 8200, "hint": "device limit reached"}],
+                           tmpdir=d, calls=seen)
+        except RuntimeError as e:
+            assert "cert/file failed" in str(e)
+        else:
+            raise AssertionError("an unrelated 8200 was swallowed")
+    # The point of the test: no second challenge was spent. Asserting only on the
+    # message let a mutant that retries every 8200 through, because its retry
+    # failed with the same message.
+    assert [c[0] for c in seen] == ["/auth/cert/info", "/auth/cert/file"], seen
+
+
+def test_a_failed_retry_challenge_still_reports_the_original_failure():
+    """If the fresh /info also fails there is nothing to retry with, and the user
+    must see the cert error rather than a KeyError out of the retry path."""
+    if not _deps():
+        skip("cryptography not installed")
+    api = _api()
+    with tempfile.TemporaryDirectory() as d:
+        try:
+            _provision_seq(api,
+                           infos=[{"code": 1000, "data": {"checkCode": "c"}},
+                                  {"code": 500, "message": "boom"}],
+                           files=[{"code": 8200, "hint": "checkValue invalid"}],
+                           tmpdir=d)
+        except RuntimeError as e:
+            assert "cert/file failed" in str(e)
+        else:
+            raise AssertionError("a dead retry challenge passed silently")
+
+
 def test_provisioning_writes_the_cert_and_a_private_key():
     if not _deps():
         skip("cryptography not installed")
@@ -410,3 +508,54 @@ def test_the_vehicle_list_needs_the_token_and_tolerates_an_empty_account():
     empty = _Session({"code": 200})
     with _SessionPatch(api, empty):
         assert api.list_vehicles("tok-1") == []
+
+
+def test_a_non_empty_garage_never_touches_the_apac_fallback():
+    """The safety property of the #32 fallback, and the one worth pinning hardest:
+    every account that lists cars today must take exactly the same single request
+    it always took. If this test ever fails, working installs are at risk."""
+    if not _deps():
+        skip("requests not installed")
+    api = _api()
+    session = _Session({"data": [{"vin": FAKE_VIN}]})
+    with _SessionPatch(api, session):
+        assert api.list_vehicles("tok-1", "u-1", "AU") == [{"vin": FAKE_VIN}]
+    assert len(session.calls) == 1, session.calls
+    assert "m-lcmsam-kr" not in session.calls[0][1]
+
+
+def test_an_empty_garage_falls_back_to_the_korean_v1_endpoint():
+    """#32: an Australian account authenticates on the global gateway and finds an
+    empty garage there, while its own app reads the cars from the KR host."""
+    if not _deps():
+        skip("requests not installed")
+    api = _api()
+    session = _Session({"data": []}, {"data": [{"vin": FAKE_VIN}]})
+    with _SessionPatch(api, session):
+        cars = api.list_vehicles("tok-1", "u-1", "AU")
+    assert cars == [{"vin": FAKE_VIN}]
+    assert len(session.calls) == 2, session.calls
+    first, second = session.calls[0][1], session.calls[1][1]
+    assert first.endswith("/cidpcar/vehicleOwner/v2/controlCars")
+    assert second == ("https://m-lcmsam-kr.geely.com"
+                      "/cidpcar/vehicleOwner/v1/listControlCars")
+    # Same token on both, and nothing new invented for the second request.
+    assert session.calls[1][2] == session.calls[0][2]
+
+
+def test_a_broken_fallback_still_reports_an_empty_garage():
+    """An account that genuinely owns no cars must get the config flow's
+    "no_vehicles" message, not a stack trace out of the fallback."""
+    if not _deps():
+        skip("requests not installed")
+    api = _api()
+
+    class _HalfDead(_Session):
+        def get(self, url, headers=None, timeout=None):
+            if "m-lcmsam-kr" in url:
+                raise RuntimeError("kr host unreachable")
+            return super().get(url, headers=headers, timeout=timeout)
+
+    session = _HalfDead({"data": []})
+    with _SessionPatch(api, session):
+        assert api.list_vehicles("tok-1", "u-1", "AU") == []

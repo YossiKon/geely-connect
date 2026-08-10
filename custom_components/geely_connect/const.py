@@ -23,10 +23,16 @@ DOMAIN = "geely_connect"
 # is read from the /controlCars response (tspInfo[].serviceRegion, falling back
 # to edgeInfo.code) rather than from CONF_COUNTRY_CODE.
 #
-# Login, OTP and the vehicle list are NOT regional in practice: accounts in
-# every region reach them through the EU host today, and only certificate
-# provisioning and control commands are rejected. So a region swaps just
-# `cert_host`, `control_host` and the signing credentials.
+# Login and OTP are NOT regional in practice: accounts in every region reach them
+# through the EU host today. So a region swaps just `cert_host`, `control_host`
+# and the signing credentials.
+#
+# The vehicle list used to be listed here as equally non-regional. It is not,
+# quite: an Australian account authenticates on the global gateway and then finds
+# an EMPTY garage on the EU host, while its own app reads the cars from
+# m-lcmsam-kr (#32). api.list_vehicles falls back to the Korean v1 endpoint on an
+# empty result for that reason - and only on an empty result, so an account that
+# lists cars today is unaffected.
 REGIONS: dict[str, dict[str, str]] = {
     "EU": {
         "app_id":       "GEELYE245",

@@ -1385,6 +1385,40 @@ def provision_user_cert(*, app_id: str, app_secret: str, user_id: str,
     resp_bytes = _raw_https(cert_host, "POST", "/auth/cert/file",
                             headers, body, pin_path=pin_path, timeout=30)
     j = json.loads(resp_bytes)
+
+    # APAC names the same challenge `checkValue` and answers 8200 when it arrives
+    # as `checkCode` (#32, reported from an Australian account). Retried under
+    # the other name, with a FRESH challenge because it is single-use - the one
+    # above has now been spent either way.
+    #
+    # Written as an additive branch rather than a refactor of the two requests
+    # above on purpose: this path cannot be tested against a real APAC backend
+    # from here, so the working sequence stays byte-for-byte as it was and only a
+    # response that has already failed can reach this code.
+    if (str(j.get("code")) == "8200"
+            and "checkvalue" in str(j.get("hint") or j.get("message") or "").lower()):
+        info_body = json.dumps({"checkValue": user_id}, separators=(',', ':')).encode()
+        info_headers = _sign_request_for_api_ecloudeu(
+            app_id, app_secret, "POST",
+            f"https://{cert_host}/auth/cert/info", info_body)
+        info = json.loads(_raw_https(cert_host, "POST", "/auth/cert/info",
+                                     info_headers, info_body,
+                                     pin_path=pin_path, timeout=20))
+        if info.get("code") == 1000:
+            body = json.dumps({
+                "csr": csr_pem,
+                "identityType": "geelyos",
+                "accessToken": cidpsso_token,
+                "deviceId": device_for_cert,
+                "checkValue": info["data"]["checkCode"],
+            }, separators=(',', ':')).encode()
+            headers = _sign_request_for_api_ecloudeu(
+                app_id, app_secret, "POST",
+                f"https://{cert_host}/auth/cert/file", body)
+            j = json.loads(_raw_https(cert_host, "POST", "/auth/cert/file",
+                                      headers, body,
+                                      pin_path=pin_path, timeout=30))
+
     if j.get("code") != 1000:
         # 1501 'geelyos verify error' is the EU cert server refusing to verify a
         # token that belongs to another region's GeelyOS. Everything before this
@@ -1443,6 +1477,9 @@ def provision_user_cert(*, app_id: str, app_secret: str, user_id: str,
 
 LOGIN_HOST = "https://access-app-global.geely.com"
 APP_HOST   = "https://m-lcmsam-eu.geely.com"
+# Same host the APAC access code is minted on - see _get_access_code. Used only
+# as the vehicle-list fallback for accounts whose EU garage comes back empty.
+APAC_APP_HOST = "https://m-lcmsam-kr.geely.com"
 
 
 def _ios_headers(token: str | None = None, user_id: str | None = None,
@@ -1613,12 +1650,37 @@ def list_vehicles(cidpsso_token: str, user_id: str | None = None,
                   country_code: str = "GB", *,
                   idfa: str | None = None, idfv: str | None = None) -> list[dict]:
     """List vehicles for the logged-in account. Returns the `data` list
-    from /cidpcar/vehicleOwner/v2/controlCars."""
+    from /cidpcar/vehicleOwner/v2/controlCars.
+
+    An empty v2 garage falls back to the Korean v1 endpoint. Reported by an
+    Australian owner (#32) whose account authenticates on the global gateway and
+    then shows no cars there, while his own app reads them from the KR host - and
+    it matches a pattern this file already documents, since APAC access codes
+    have to be minted on that same host (see _get_access_code).
+
+    The fallback fires ONLY on an empty result, so an account that lists cars
+    today cannot reach it: a non-empty v2 reply is authoritative and returns
+    immediately. The cost of the fallback is one extra request during setup for
+    an account that genuinely owns no cars, which is the case that fails anyway.
+    """
     s = _legacy_session()
+    headers = _ios_headers(token=cidpsso_token, user_id=user_id,
+                           country_code=country_code, idfa=idfa, idfv=idfv)
     r = s.get(f"{APP_HOST}/cidpcar/vehicleOwner/v2/controlCars",
-              headers=_ios_headers(token=cidpsso_token, user_id=user_id,
-                                   country_code=country_code,
-                                   idfa=idfa, idfv=idfv),
-              timeout=20)
+              headers=headers, timeout=20)
     j = r.json()
-    return j.get("data") or []
+    vehicles = j.get("data") or []
+    if vehicles:
+        return vehicles
+    # Same session, same headers, same pinned transport - only the host and the
+    # API version differ, and both hosts already carry this token elsewhere in
+    # this file. The v1 reply wraps the same `data` list.
+    try:
+        r = s.get(f"{APAC_APP_HOST}/cidpcar/vehicleOwner/v1/listControlCars",
+                  headers=headers, timeout=20)
+        return r.json().get("data") or []
+    except Exception as e:  # noqa: BLE001
+        # A dead fallback must not turn "you own no cars" into a stack trace:
+        # the caller's empty-list path already says the right thing.
+        _LOGGER.debug("APAC vehicle-list fallback failed: %s", e)
+        return []
