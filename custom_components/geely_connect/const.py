@@ -23,16 +23,10 @@ DOMAIN = "geely_connect"
 # is read from the /controlCars response (tspInfo[].serviceRegion, falling back
 # to edgeInfo.code) rather than from CONF_COUNTRY_CODE.
 #
-# Login and OTP are NOT regional in practice: accounts in every region reach them
-# through the EU host today. So a region swaps just `cert_host`, `control_host`
-# and the signing credentials.
-#
-# The vehicle list used to be listed here as equally non-regional. It is not,
-# quite: an Australian account authenticates on the global gateway and then finds
-# an EMPTY garage on the EU host, while its own app reads the cars from
-# m-lcmsam-kr (#32). api.list_vehicles falls back to the Korean v1 endpoint on an
-# empty result for that reason - and only on an empty result, so an account that
-# lists cars today is unaffected.
+# Login, OTP and the vehicle list are NOT regional in practice: accounts in
+# every region reach them through the EU host today, and only certificate
+# provisioning and control commands are rejected. So a region swaps just
+# `cert_host`, `control_host` and the signing credentials.
 REGIONS: dict[str, dict[str, str]] = {
     "EU": {
         "app_id":       "GEELYE245",
@@ -88,6 +82,26 @@ CONF_VEHICLE_SERIES     = "vehicle_series"
 CONF_VEHICLE_MODEL_CODE = "vehicle_model_code"
 CONF_VEHICLE_COLOR      = "vehicle_color"
 CONF_VEHICLE_POWER_TYPE = "vehicle_power_type"
+
+# Which backend this entry talks to. "legacy" = the original Geely Global
+# platform (Ecarx: ecloudkr/ecloudeu/ecloudus + mTLS certs); "zeekr" = the
+# new Geely EM app platform (Zeekr: zeekrlife.com gateways, token auth, no
+# mTLS). Absent = legacy, so pre-existing entries are never touched.
+CONF_PLATFORM           = "platform"
+CONF_ZEEKR_ACCESS_TOKEN = "zeekr_access_token"
+CONF_ZEEKR_REFRESH_TOKEN = "zeekr_refresh_token"
+CONF_ZEEKR_HF_TOKEN     = "zeekr_hf_token"
+CONF_ZEEKR_HF_EXPIRY    = "zeekr_hf_expiry"
+CONF_ZEEKR_PASSWORD     = "zeekr_password"
+CONF_STORE_PASSWORD     = "store_password"
+
+PLATFORM_LEGACY = "legacy"
+PLATFORM_ZEEKR  = "zeekr"
+DEFAULT_PLATFORM = PLATFORM_LEGACY
+PLATFORM_LABELS: dict[str, str] = {
+    PLATFORM_LEGACY: "Existing Geely backend (current integration)",
+    PLATFORM_ZEEKR:  "New Geely EM app platform (Zeekr backend)",
+}
 
 # User preferences chosen during setup.
 CONF_PRESSURE_UNIT = "pressure_unit"

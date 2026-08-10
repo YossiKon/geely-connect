@@ -27,6 +27,7 @@ from . import api as geely_api
 from . import cards
 from . import propulsion
 from .api import GeelyApi, GeelyAuthError, GeelyControlError, GeelyTLSPinError, redact
+from .zeekr_adapter import ZeekrAdapter
 from .const import (
     CLIENT_ID,
     VEHICLE_SERIES,
@@ -39,6 +40,7 @@ from .const import (
     CONF_EMAIL,
     CONF_FULL_EXPOSURE,
     CONF_KEY_PATH,
+    CONF_PLATFORM,
     CONF_POLL_MODE,
     CONF_REGION,
     CONF_USER_ID,
@@ -47,15 +49,22 @@ from .const import (
     CONF_VEHICLE_POWER_TYPE,
     CONF_VEHICLE_SERIES,
     CONF_VIN,
+    CONF_ZEEKR_ACCESS_TOKEN,
+    CONF_ZEEKR_HF_EXPIRY,
+    CONF_ZEEKR_HF_TOKEN,
+    CONF_ZEEKR_PASSWORD,
+    CONF_ZEEKR_REFRESH_TOKEN,
     DEFAULT_COUNTRY_CODE,
+    DEFAULT_PLATFORM,
     DEFAULT_POLL_MODE,
     DOMAIN,
+    PLATFORM_ZEEKR,
     POLL_PROFILES,
     SCAN_INTERVAL_SECONDS,
     SERIES_TO_FRIENDLY_NAME,
     region_config,
 )
-from .helpers import vehicle_metadata, schedule_refresh
+from .helpers import password_decrypt, vehicle_metadata, schedule_refresh
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -347,7 +356,11 @@ def _adaptive_interval(data: dict, idle_streak: int, profile: dict) -> timedelta
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Geely (international) from a config entry."""
     await cards.async_register_cards(hass)
-    await _maybe_refetch_vehicle_metadata(hass, entry)
+    if entry.data.get(CONF_PLATFORM, DEFAULT_PLATFORM) != PLATFORM_ZEEKR:
+        # New-platform entries carry their own vehicle metadata (fetched by
+        # the zeekr flow); the legacy heal call would fail against the new
+        # backend's tokens and only add log noise.
+        await _maybe_refetch_vehicle_metadata(hass, entry)
     _purge_obsolete_entities(hass, entry)
     _refresh_device_name(hass, entry)
 
@@ -357,24 +370,44 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         or d.get(CONF_VEHICLE_SERIES)
         or VEHICLE_SERIES
     )
-    # Entries created before regions were tracked carry no CONF_REGION and
-    # resolve to EU, which is the backend they were provisioned against.
-    backend = region_config(d.get(CONF_REGION))
-    api = GeelyApi(
-        app_id=backend["app_id"],
-        app_secret=backend["app_secret"],
-        user_id=d[CONF_USER_ID],
-        vin=d[CONF_VIN],
-        cidpsso_token=d[CONF_CIDPSSO_TOKEN],
-        client_id=CLIENT_ID,
-        vehicle_series=series_code,
-        vehicle_model=series_code,
-        device_id=d[CONF_DEVICE_ID],
-        cert_path=d[CONF_CERT_PATH],
-        key_path=d[CONF_KEY_PATH],
-        control_host=backend["control_host"],
-        email=d.get(CONF_EMAIL),
-    )
+
+    if d.get(CONF_PLATFORM, DEFAULT_PLATFORM) == PLATFORM_ZEEKR:
+        # New Geely EM platform: token auth, no per-device mTLS cert. The
+        # adapter presents the same api surface the coordinator and entity
+        # platforms call; endpoints the new backend has not been verified on
+        # yet raise cleanly and are carried forward by the coordinator.
+        api = ZeekrAdapter(
+            email=d.get(CONF_EMAIL) or "",
+            vin=d[CONF_VIN],
+            user_id=d[CONF_USER_ID],
+            access_token=d[CONF_ZEEKR_ACCESS_TOKEN],
+            refresh_token=d.get(CONF_ZEEKR_REFRESH_TOKEN) or "",
+            hf_token=d.get(CONF_ZEEKR_HF_TOKEN) or "",
+            vehicle_model=series_code,
+            password=password_decrypt(hass, d.get(CONF_ZEEKR_PASSWORD) or ""),
+            country_code=d.get(CONF_COUNTRY_CODE) or DEFAULT_COUNTRY_CODE,
+            timezone=hass.config.time_zone,
+            hf_expiry=int(d.get(CONF_ZEEKR_HF_EXPIRY) or 0),
+        )
+    else:
+        # Entries created before regions were tracked carry no CONF_REGION and
+        # resolve to EU, which is the backend they were provisioned against.
+        backend = region_config(d.get(CONF_REGION))
+        api = GeelyApi(
+            app_id=backend["app_id"],
+            app_secret=backend["app_secret"],
+            user_id=d[CONF_USER_ID],
+            vin=d[CONF_VIN],
+            cidpsso_token=d[CONF_CIDPSSO_TOKEN],
+            client_id=CLIENT_ID,
+            vehicle_series=series_code,
+            vehicle_model=series_code,
+            device_id=d[CONF_DEVICE_ID],
+            cert_path=d[CONF_CERT_PATH],
+            key_path=d[CONF_KEY_PATH],
+            control_host=backend["control_host"],
+            email=d.get(CONF_EMAIL),
+        )
 
     _SUCCESS_CODES = {1000, "1000", 10000000, "10000000", None}
 
@@ -469,6 +502,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if not isinstance(data, dict):
             _LOGGER.debug("vehicle_status returned non-dict data: top-level=%r", redact(resp))
             data = {}
+
+        # The zeekr adapter renews the old-platform HF JWT silently from the
+        # stored password; persist the refreshed token + expiry so the next
+        # setup starts from the fresh session (and the 2-day cycle repeats
+        # without any user action).
+        renewed = getattr(api, "take_renewed_hf_token", None)
+        if renewed is not None:
+            hf_token, hf_expiry = renewed() or ("", 0)
+            if hf_token:
+                new_data = dict(entry.data)
+                new_data[CONF_ZEEKR_HF_TOKEN] = hf_token
+                new_data[CONF_ZEEKR_HF_EXPIRY] = hf_expiry
+                hass.config_entries.async_update_entry(entry, data=new_data)
+                _LOGGER.info("zeekr: HF JWT silently renewed; entry updated")
 
         charging, driving = _poll_flags(data)
 

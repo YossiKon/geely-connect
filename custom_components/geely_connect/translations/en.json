@@ -1,10 +1,18 @@
 {
   "config": {
     "step": {
+      "platform": {
+        "title": "Which Geely backend?",
+        "description": "Pick the platform your account is on.\n\nExisting backend: the current Geely Global integration (email + code, per-device certificate).\n\nNew Geely EM platform: the backend behind the new Geely EM app (email + password, Zeekr cloud) - experimental. Complete the app's setup on your phone first.",
+        "data": {
+          "platform": "Platform"
+        }
+      },
       "user": {
         "title": "Geely Connect",
-        "description": "Unofficial community integration - not affiliated with Geely. Enter your Geely account email and pick your country, and we'll send a 6-digit code to your inbox.\n\nPolling mode decides how often the car is contacted. Geely allows one session per account, so every poll briefly signs the phone app out - pick Manual if that bothers you.",
+        "description": "Unofficial community integration - not affiliated with Geely. Pick the backend your account uses (default: the existing Geely backend, email + code). Accounts on the new Geely EM app platform (email + password, experimental) pick that option instead - complete the app's setup on your phone first.\\n\\nPolling mode decides how often the car is contacted. Geely allows one session per account, so every poll briefly signs the phone app out - pick Manual if that bothers you.",
         "data": {
+          "platform": "Platform",
           "email": "Email",
           "country_code": "Country",
           "pressure_unit": "Tire pressure unit",
@@ -24,13 +32,34 @@
         "data": {
           "vin": "Vehicle"
         }
+      },
+      "zeekr_login": {
+        "title": "Geely EM platform (new app)",
+        "description": "Enter the email and password you use with the new Geely app.\n\nIf you have not done so yet, open the new Geely app on your phone first and complete the setup there (the app will walk you through setting a password and linking your vehicle). This integration logs in with email + password only.\n\nStoring the password lets the session renew itself automatically (same as the app does). It is kept in the integration's config entry like the existing credentials and never logged; uncheck to re-authenticate manually every ~2 days instead.",
+        "data": {
+          "email": "Email",
+          "password": "Password",
+          "country_code": "Country",
+          "pressure_unit": "Tire pressure unit",
+          "poll_mode": "Polling mode",
+          "store_password": "Store my password so the session renews automatically"
+        }
+      },
+      "zeekr_pick": {
+        "title": "Pick a vehicle",
+        "description": "Your account has multiple vehicles. Pick the one to add.",
+        "data": {
+          "vin": "Vehicle"
+        }
       }
     },
     "error": {
       "send_code_failed": "Failed to send the email code. Try again in a minute.",
       "captcha_unreachable": "Home Assistant could not reach Geely's captcha server (captcha4.geely.com). Setup runs from the Home Assistant machine, and this host is in mainland China - check that your network or DNS is not blocking it (Pi-hole/AdGuard blocklists, router geo-filters), then try again.",
+      "network_unreachable": "Home Assistant could not reach the Geely EM platform (zeekrlife.com). Check the network and try again.",
       "invalid_code": "That code wasn't accepted. It may have expired (codes are single-use).",
-      "no_vehicles": "Login succeeded but no vehicles were found on this account.",
+      "invalid_credentials": "That email or password wasn't accepted. If your account is new to the new Geely app, open the app on your phone first and complete the setup there (it sets your password and links your vehicle), then try again.",
+      "no_vehicles": "Login succeeded but no vehicles were found on this account. Open the new Geely app on your phone and make sure your vehicle is linked there, then try again.",
       "unknown": "Something went wrong. Check the logs."
     },
     "abort": {
@@ -39,6 +68,7 @@
       "cert_failed": "Failed to provision the per-device mTLS certificate. Check the logs.",
       "wrong_region": "This Geely account is served by a regional backend this integration has no credentials for. It supports the EU/International, North-American and APAC clouds; other regions need their own app credentials, which are not public. The log line names the region that was detected.",
       "reauth_successful": "Re-authenticated. Token refreshed.",
+      "reconfigure_successful": "Reconfigured. The entry was updated and reloaded.",
       "unknown": "Something went wrong. Check the logs.",
       "reauth_account_mismatch": "Re-authentication used a different Geely account than the one this entry was created with. Sign in with the original account, or remove the entry and add the vehicle again."
     }

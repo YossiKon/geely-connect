@@ -10,11 +10,16 @@ already fetched, plus two Home Assistant conveniences.
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
 import logging
 import math
+import os
 from collections.abc import Callable
 from contextlib import contextmanager
 from typing import Any
+
+import homeassistant.util.yaml as yaml_util
 
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
@@ -47,12 +52,89 @@ def vehicle_metadata(vehicle: dict) -> dict[str, str]:
     more use than the literal brand.
     """
     return {
-        CONF_VEHICLE_NICKNAME:   vehicle.get("nickname") or vehicle.get("model") or "",
-        CONF_VEHICLE_SERIES:     vehicle.get("series") or "",
-        CONF_VEHICLE_MODEL_CODE: vehicle.get("modelCode") or vehicle.get("seriesCode") or "",
-        CONF_VEHICLE_COLOR:      vehicle.get("color") or "",
-        CONF_VEHICLE_POWER_TYPE: vehicle.get("powerType") or "",
+        CONF_VEHICLE_NICKNAME: (vehicle.get("nickname") or vehicle.get("nickName")
+                                or vehicle.get("model") or vehicle.get("modelName")
+                                or ""),
+        CONF_VEHICLE_SERIES: (vehicle.get("series") or vehicle.get("seriesName")
+                              or vehicle.get("appModelCode") or ""),
+        CONF_VEHICLE_MODEL_CODE: (vehicle.get("modelCode") or vehicle.get("seriesCode")
+                                  or vehicle.get("appModelCode") or ""),
+        CONF_VEHICLE_COLOR: vehicle.get("color") or "",
+        CONF_VEHICLE_POWER_TYPE: (vehicle.get("powerType") or vehicle.get("engineType")
+                                  or ""),
     }
+
+
+# ---- credential at-rest encryption (defense-in-depth) ----------------------
+# The zeekr flow can store the account password so the HF session renews
+# itself (the app does the same). .storage is plaintext on disk, so when the
+# user provides a key in secrets.yaml ("geely_password_key"), the value is
+# AES-256-GCM encrypted ("enc:" + base64). Without a key the value is stored
+# plaintext with a warning - identical to the integration's existing posture
+# (the legacy flow stores the mTLS private key in .storage). The key lives in
+# secrets.yaml, OUTSIDE .storage, so a copy of .storage alone yields nothing.
+
+_ENC_PREFIX = "enc:"
+_SECRET_KEY_NAME = "geely_password_key"
+
+
+def _encryption_key(hass: HomeAssistant) -> bytes | None:
+    """32-byte AES key from secrets.yaml, or None when the user has not
+    configured one (plaintext fallback applies)."""
+    try:
+        secrets = yaml_util.load_yaml(hass.config.path("secrets.yaml"))
+    except Exception:  # noqa: BLE001 - missing or malformed secrets.yaml means "no key"
+        return None
+    key = (secrets or {}).get(_SECRET_KEY_NAME)
+    if not key:
+        return None
+    return hashlib.sha256(str(key).encode()).digest()
+
+
+def password_encrypt(hass: HomeAssistant, plain: str) -> str:
+    """Encrypt the zeekr password for at-rest storage when a secrets.yaml
+    key exists; otherwise return it plaintext (warning logged once)."""
+    if not plain:
+        return ""
+    key = _encryption_key(hass)
+    if key is None:
+        _LOGGER.warning(
+            "no '%s' key in secrets.yaml - storing the zeekr password "
+            "plaintext; add the key to encrypt it at rest",
+            _SECRET_KEY_NAME,
+        )
+        return plain
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    nonce = os.urandom(12)
+    ct = AESGCM(key).encrypt(nonce, plain.encode(), None)
+    return _ENC_PREFIX + base64.b64encode(nonce).decode() + ":" + base64.b64encode(ct).decode()
+
+
+def password_decrypt(hass: HomeAssistant, stored: str) -> str:
+    """Reverse of password_encrypt; plaintext values pass through."""
+    if not stored:
+        return ""
+    if not stored.startswith(_ENC_PREFIX):
+        return stored
+    try:
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+        key = _encryption_key(hass)
+        if key is None:
+            _LOGGER.warning(
+                "zeekr password is stored encrypted but no '%s' key in "
+                "secrets.yaml - reauthenticate or add the key",
+                _SECRET_KEY_NAME,
+            )
+            return ""
+        _, nonce_b64, ct_b64 = stored.split(":", 2)
+        nonce = base64.b64decode(nonce_b64)
+        ct = base64.b64decode(ct_b64)
+        return AESGCM(key).decrypt(nonce, ct, None).decode()
+    except Exception:  # noqa: BLE001 - wrong key or tampered value
+        _LOGGER.error("zeekr password decrypt failed (key changed?) - reauthenticate")
+        return ""
 
 
 # The four window corners, in the order the protocol names them.
