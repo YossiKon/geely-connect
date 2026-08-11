@@ -351,10 +351,31 @@ def snc_sign(*, method: str, url: str, headers: dict, body: bytes,
     ).decode()
 
 
+# Codes that mean success in a BaseResult envelope. Everything else present in
+# `code` is a business error, even inside an HTTP 200 - see _check_resp.
+_OK_CODES: set = {"1000", 1000}
+
+
 def _check_resp(resp: dict) -> dict:
-    """BaseResult shape: {code, success, message, data}. Raise on auth/gateway errors."""
+    """BaseResult shape: {code, success, message, data}. Raise on auth/gateway errors.
+
+    The gateway signals business failures (bad/expired token, rejected params)
+    inside an HTTP 200 envelope via `code`/`success`, so trusting the HTTP status
+    alone is not enough. Judge affirmatively: an explicit `success` decides it;
+    otherwise a *present* `code` must be a known success code, or it is an error.
+    A caller that returns neither (some IDaaS bodies omit `code`) is treated as
+    success, since those endpoints carry their result in `data`.
+
+    This matters beyond a clean error: only a raised error re-arms recovery -
+    the adapter's silent HF renewal retry and, failing that, the HA reauth flow.
+    A 200-wrapped `{"code": 401}` slipping through as success would wedge the
+    integration on a stale token until a manual reconfigure.
+    """
+    success = resp.get("success")
+    if success in (True, "true", "1"):
+        return resp
     code = resp.get("code")
-    if code in ("8500", 8500) or resp.get("success") in (False, "false", "0"):
+    if success in (False, "false", "0") or (code is not None and code not in _OK_CODES):
         msg = resp.get("message") or resp.get("msg") or "unknown"
         raise ZeekrApiError(f"code={code} message={msg}")
     return resp

@@ -126,6 +126,11 @@ _SECRET_KEYS: set = {
     # safelist can know the names first. `zeekr_hf_expiry` is a timestamp, not
     # a secret, and is deliberately absent so it stays readable.
     "zeekraccesstoken", "zeekrrefreshtoken", "zeekrhftoken", "zeekrpassword",
+    # The IDaaS user-center session token as it appears on the wire (the new
+    # platform's login responses carry it as `tokenValue`). No path folds a
+    # successful login body into a log today, but masking it is a cheap hedge -
+    # it is a bearer token like any other.
+    "tokenvalue",
 }
 
 # "key" is ambiguous: it holds PEM material in provisioning responses, but the
@@ -1279,7 +1284,8 @@ class GeelyApi:
         return self._recorded(
             "rapid_climate",
             {"temp": temp, "ac": body["ac"], "heat": body.get("heat"),
-             "ventilation": body.get("ventilation"), "vlt": body["vlt"]},
+             "ventilation": body.get("ventilation"), "vlt": body["vlt"],
+             "sw": body.get("sw")},
             lambda: _check_control_resp(
                 self._authed_apis_call("POST", path, body_bytes)))
 

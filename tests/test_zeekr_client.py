@@ -553,8 +553,10 @@ def test_a_failed_login_never_leaks_a_token_into_the_exception_text():
     through redact(), because the adapter surfaces our error text on Home
     Assistant's re-auth card. A body carrying a token but no tokenValue must
     come out masked, not verbatim."""
-    leaky = {"code": "1", "tokenValue": None,
-             "accessToken": "eyJLEAK.header.sig", "refreshToken": "RT-LEAK-9"}
+    # A success envelope (so _check_resp passes) whose data carries tokens but
+    # no tokenValue: login_by_email then raises with the body folded in.
+    leaky = {"code": "1000", "success": True,
+             "data": {"accessToken": "eyJLEAK.header.sig", "refreshToken": "RT-LEAK-9"}}
     orig = zc._post_json
     zc._post_json = lambda url, body, headers: leaky
     try:
@@ -568,6 +570,24 @@ def test_a_failed_login_never_leaks_a_token_into_the_exception_text():
     assert raised is not None, "expected ZeekrAuthError"
     assert "eyJLEAK" not in raised and "RT-LEAK-9" not in raised, raised
     assert "***redacted***" in raised
+
+
+def test_check_resp_rejects_a_200_wrapped_business_error_code():
+    """#33 review C1: a business error inside an HTTP 200 (an expired-token code
+    with no success flag) must raise - otherwise neither the adapter's HF-renewal
+    retry nor the reauth flow fires, and the integration wedges on a stale token.
+    Affirmative success and the code-less IDaaS shape must still pass."""
+    zc._check_resp({"code": "1000", "success": True})   # affirmative success
+    zc._check_resp({"code": 1000})                       # success code, no flag
+    zc._check_resp({"data": {"x": 1}})                   # no code/success (IDaaS)
+    for bad in ({"code": "401", "message": "token expired"},
+                {"code": 4001},
+                {"success": False, "code": "1000"}):
+        try:
+            zc._check_resp(bad)
+            assert False, f"expected ZeekrApiError for {bad}"
+        except zc.ZeekrApiError:
+            pass
 
 
 def test_a_non_json_error_body_is_dropped_from_the_exception():

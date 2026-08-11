@@ -64,8 +64,10 @@ def test_constructor_and_basic_surface():
 
     st = a.vehicle_status()
     assert st["data"]["vehicleStatus"]["basicVehicleStatus"]["powerLevel"] == 98, st
-    pos = a.request_position_refresh()
-    assert pos["data"]["result"]["code"] == 1000, pos
+    # Position wake is a no-op on the new platform until the PAI control write
+    # is live-verified - the coordinator fires it automatically, and an unproven
+    # auto-write to the car is deliberately withheld.
+    assert a.request_position_refresh() == {}
     ctl = a.control("AC", [{"key": "ac", "value": "1"}])
     assert ctl["data"]["result"]["code"] == 1000, ctl
     assert a.fetch_capabilities() == []

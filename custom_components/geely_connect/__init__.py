@@ -392,7 +392,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             vehicle_model=series_code,
             password=zeekr_password,
             country_code=d.get(CONF_COUNTRY_CODE) or DEFAULT_COUNTRY_CODE,
-            timezone=hass.config.time_zone,
+            # time_zone can be None on a freshly-configured HA; it is written
+            # unconditionally into the x-timezone header, where None would make
+            # http.client raise on every HF request.
+            timezone=hass.config.time_zone or "UTC",
             hf_expiry=int(d.get(CONF_ZEEKR_HF_EXPIRY) or 0),
         )
     else:

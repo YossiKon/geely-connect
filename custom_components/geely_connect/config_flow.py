@@ -136,6 +136,10 @@ def _zeekr_login_password(email: str, password: str, country: str) -> ZeekrClien
     """
     token_value = ZeekrIdaas(country=country).login_by_email_password(email, password)
     client = ZeekrClient(email="", password="")
+    # Thread the picked country through the tspCode + HF legs too - login_tsp
+    # builds its own ZeekrIdaas from client.country_code, which otherwise
+    # defaults to AU and would run the second half of login as AU.
+    client.country_code = country
     client.login_tsp(token_value)
     return client
 

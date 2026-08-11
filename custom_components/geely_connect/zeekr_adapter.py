@@ -6,8 +6,9 @@ top of ZeekrClient so the new platform can slot in behind the CONF_PLATFORM
 flag without touching any consumer.
 
 Error mapping:
-  - ZeekrAuthError / auth-looking ZeekrApiError  -> one refresh_session()
-    retry, then GeelyAuthError (which drives the HA reauth flow).
+  - ZeekrAuthError / auth-looking ZeekrApiError  -> one silent HF renewal
+    (_renew_hf: re-login from the stored password and re-mint the HF JWT),
+    then GeelyAuthError (which drives the HA reauth flow).
   - Non-auth ZeekrApiError propagates (coordinator counts it toward its
     failure tolerance like any transient error).
 
@@ -142,21 +143,20 @@ class ZeekrAdapter:
                             self.vin, self.user_id)
 
     def request_position_refresh(self) -> dict:
-        """PAI wake - the same RemoteControlRequest family the legacy client
-        fires (serviceId PAI / operation 4 / pai 1)."""
-        body = {
-            "command": "start",
-            "creator": "tc",
-            "latest": True,
-            "serviceId": "PAI",
-            "serviceParameters": [
-                {"key": "operation", "value": "4"},
-                {"key": "pai", "value": "1"},
-            ],
-            "timestamp": str(int(time.time() * 1000)),
-            "userId": str(self.user_id),
-        }
-        return self._authed(self._client.control_resp, self.vin, body)
+        """PAI wake (serviceId PAI / operation 4 / pai 1) on the legacy client.
+
+        Deliberately a no-op on the new platform: the coordinator fires this
+        automatically on the first poll and on every driving cycle, and the
+        control write path here is NOT live-verified on this backend (only door
+        lock/unlock is). Auto-sending an unproven command to the car on a timer
+        is exactly what the maintainer avoids, so until the PAI write is
+        confirmed we serve the position already in the status payload and skip
+        the active wake. The body it would send is kept for when it is proven:
+
+          {command: start, serviceId: PAI, serviceParameters:
+             [{operation: 4}, {pai: 1}], userId, timestamp}
+        """
+        return {}
 
     def vehicle_status_state(self) -> dict:
         raise NotImplementedError(

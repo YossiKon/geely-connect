@@ -426,7 +426,10 @@ SERVICE_RAPID_BIZ_TYPE  = BIZ_TYPE_RAPID
 # "sw": "true" - the field the "bw" probe candidates were guessing at.
 SERVICE_STEERING_HEAT_KEY = "steerWhlHeatingSts"  # status: 1 heating, 2 off, 0 not fitted
 RCE_VAL_STEERING_WHEEL    = "steering_wheel"
-RCE_STEERING_DURATION_SEC = 48   # what the app sent; meaning of 48 unknown
+# The value the app put in operationScheduling.duration on the start call. That
+# field is seconds everywhere else it is verified (90 for seats, 180 for AC), so
+# 48 is read as seconds here too - captured, not independently timed.
+RCE_STEERING_DURATION_SEC = 48
 
 # --- Window / sunshade / sunroof / ventilate (verified) ---
 SERVICE_WINDOW = "RWS_2"
