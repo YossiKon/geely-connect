@@ -1295,7 +1295,7 @@ def test_steering_wheel_heat_appears_on_the_big_cards_when_the_car_has_it():
         assert got is not None, f"{tag} has no steering wheel heat button"
         assert "Wheel heat" in got["text"], (tag, got)
         assert got["lit"] is True, (tag, got)   # "on" -> the button lights
-        assert "Captured from the" in got["title"], (tag, got["title"])
+        assert "Confirmed on a real" in got["title"], (tag, got["title"])
 
 
 def test_no_steering_wheel_heat_button_without_the_switch():

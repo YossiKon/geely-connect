@@ -371,7 +371,9 @@ class GeelyDefrostSwitch(CoordinatorEntity, SwitchEntity):
 class GeelySteeringWheelHeatSwitch(CoordinatorEntity, SwitchEntity):
     """Steering-wheel heating.
 
-    Captured from the official app against a real car (#4, 2026-08-10):
+    Captured from the official app and CONFIRMED on a real car (#4): the app's
+    own steering-wheel button, and an owner confirmed this standalone command
+    turns the wheel on.
       ON  → RCE_2 / start / [{rce.heat: "steering_wheel"}], duration=48
       OFF → RCE_2 / stop  / [{rce.heat: "steering_wheel"}], duration=0
       State: climateStatus.steerWhlHeatingSts - 1 heating at any level,
@@ -381,10 +383,10 @@ class GeelySteeringWheelHeatSwitch(CoordinatorEntity, SwitchEntity):
     tell low from high, so a level picker would show a position it could
     never verify. No rce.level travels with the command either.
 
-    The capture proves what the app sends, not yet that our transport moves
-    a wheel - the app's scheduling block differs in flags control() does not
-    replicate (see const.py). Until an owner confirms it, the honest read of
-    a press is: watch steerWhlHeatingSts, ignore the "operation succeed".
+    steerWhlHeatingSts lags the command noticeably - the same owner reported the
+    toggle "very slow to respond" - so a press shows its requested state
+    optimistically for a short window and polls the car twice, rather than
+    leaving the button reading the old value until the field catches up.
     """
     _attr_has_entity_name = True
     _attr_icon = "mdi:steering"
@@ -396,6 +398,11 @@ class GeelySteeringWheelHeatSwitch(CoordinatorEntity, SwitchEntity):
         self._vin = bundle["vin"]
         self._attr_unique_id = f"geely_{self._vin}_sw_steering_wheel_heat"
         self._attr_name = "Steering Wheel Heat"
+        # steerWhlHeatingSts is slow to reflect a press, so hold the requested
+        # state until a poll confirms it. The command is verified, so this
+        # cannot show a state the car will not reach.
+        self._optimistic: bool | None = None
+        self._optimistic_until = 0.0
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self._vin)},
             manufacturer="Geely",
@@ -404,6 +411,8 @@ class GeelySteeringWheelHeatSwitch(CoordinatorEntity, SwitchEntity):
 
     @property
     def is_on(self) -> bool | None:
+        if self._optimistic is not None and time.time() < self._optimistic_until:
+            return self._optimistic
         v = _walk(self.coordinator.data or {}, (*_CLIMATE_PATH, "steerWhlHeatingSts"))
         if v in ("1", 1):
             return True
@@ -430,8 +439,12 @@ class GeelySteeringWheelHeatSwitch(CoordinatorEntity, SwitchEntity):
             _LOGGER.exception("steering wheel heat %s failed", command)
             raise HomeAssistantError(f"Geely Steering Wheel Heat failure: {e}") from e
         _LOGGER.debug("Geely steering wheel heat %s response=%s", command, redact(resp))
-
-        schedule_refresh(self._hass, self.coordinator, 8)
+        # Server accepted: show the requested state at once (the field lags),
+        # and poll twice so the real reading replaces the optimistic one.
+        self._optimistic = command == "start"
+        self._optimistic_until = time.time() + 45
+        self.async_write_ha_state()
+        schedule_refresh(self._hass, self.coordinator, 8, 30)
 
 
 class GeelyScheduledChargingSwitch(CoordinatorEntity, SwitchEntity):

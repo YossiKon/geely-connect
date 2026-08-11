@@ -422,7 +422,7 @@ def test_steering_wheel_heat_sends_the_captured_command():
     sw = load("switch")
     api = _Api()
     hass, b = _bundle(_status(climate={"steerWhlHeatingSts": "2"}), api=api)
-    ent = sw.GeelySteeringWheelHeatSwitch(hass, b)
+    ent = _quiet(sw.GeelySteeringWheelHeatSwitch(hass, b))
     rec = _RefreshRec()
     with _patched(sw, schedule_refresh=rec):
         asyncio.run(ent.async_turn_on())
@@ -430,7 +430,25 @@ def test_steering_wheel_heat_sends_the_captured_command():
     params = [{"key": "rce.heat", "value": "steering_wheel"}]
     assert api.calls == [("control", "RCE_2", params, "start", 48),
                          ("control", "RCE_2", params, "stop", 0)], api.calls
-    assert rec.calls == [(8,), (8,)]
+    # The field lags, so the switch polls the car twice after each command.
+    assert rec.calls == [(8, 30), (8, 30)]
+
+
+def test_steering_wheel_heat_shows_its_requested_state_optimistically():
+    """The owner reported the toggle "very slow to respond" (#4): the field lags,
+    so a press must show its requested state at once and only defer to the field
+    once the optimistic window has passed."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    sw = load("switch")
+    climate = {"steerWhlHeatingSts": "2"}   # car says off
+    hass, b = _bundle(_status(climate=climate), api=_Api())
+    ent = _quiet(sw.GeelySteeringWheelHeatSwitch(hass, b))
+    with _patched(sw, schedule_refresh=_RefreshRec()):
+        asyncio.run(ent.async_turn_on())
+    assert ent.is_on is True, "must show on at once, before the field catches up"
+    ent._optimistic_until = 0.0             # window elapsed
+    assert ent.is_on is False, "then it defers to the real field again"
 
 
 def test_steering_wheel_heat_state_reads_the_measured_convention():

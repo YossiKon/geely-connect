@@ -416,11 +416,11 @@ SERVICE_RAPID_BIZ_TYPE  = BIZ_TYPE_RAPID
 # Two details the guesses got wrong: the value is "steering_wheel" with an
 # underscore, unlike the hyphenated seat names on the same key - and no
 # rce.level travels with it, which matches the status field never reporting a
-# level. The app's scheduling block also differs from control()'s in flags we
-# do not replicate (recurrentOperation 1, occurs 0, a "latest" field); every
-# verified RCE_2 seat command already works through our shape, but nobody has
-# yet confirmed this one moves a wheel through OUR body - judge it by
-# steerWhlHeatingSts, never by the response.
+# level. The app's scheduling block differs from control()'s in flags we do not
+# replicate (recurrentOperation 1, occurs 0, a "latest" field), but that did not
+# matter: an owner CONFIRMED this standalone command turns the wheel on through
+# our body (#4). The only wrinkle they found is that steerWhlHeatingSts is slow
+# to catch up, which the switch handles with an optimistic window.
 #
 # The same capture's rapid-warming body (bizType=7) carries the wheel as
 # "sw": "true" - the field the "bw" probe candidates were guessing at.

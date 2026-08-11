@@ -63,11 +63,11 @@ SPECS: tuple[tuple[str, str, tuple[str, ...], BinarySensorDeviceClass | None, tu
     # reads the DC contactor and the sign of the pack current - and that is
     # what switch.charging follows.
     ("charger_plugged_in",   "Charger Plug",      (*_EV,   "statusOfChargerConnection"),    BinarySensorDeviceClass.PLUG,    ("1", 1, "2", 2, "3", 3)),
-    # Steering-wheel heat, read side. The command was captured from the
-    # official app on 2026-08-10 (#4) and ships as switch.Steering Wheel Heat,
-    # gated on evidence of the feature; this sensor predates it and stays
-    # until an owner confirms the write path actually moves a wheel - if the
-    # switch proves out, the sensor becomes the redundant one here.
+    # Steering-wheel heat, read side. The command was captured from the official
+    # app (#4) and ships as switch.Steering Wheel Heat, gated on evidence of the
+    # feature; an owner has since confirmed the switch turns the wheel on, so
+    # this read-only sensor is now redundant with it and kept only for the
+    # dashboards that already reference it - a candidate to retire.
     # Measured on a real car by the owner who falsified every command candidate:
     # 1 while the wheel is heating at ANY level, 2 while it is off. Inverted from
     # every other flag here, and the same 1=on / 2=off convention the seat

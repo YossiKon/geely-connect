@@ -143,11 +143,11 @@
     + "wheel where fitted";
   const RAPID_COOL_HINT = "Rapid cooling: the car's own preset - drives the "
     + "setpoint to its minimum, ventilates both front seats and cracks the windows";
-  /* The steering-wheel command is a capture of the official app's own button.
-   * Rapid warming is confirmed to heat the wheel on a real car; this standalone
-   * toggle sends the captured command directly - press it and watch the wheel. */
-  const SWHEEL_HINT = "Steering wheel heating on / off. Captured from the "
-    + "official app; judge it by the wheel, not the tap.";
+  /* The steering-wheel command is a capture of the official app's own button,
+   * confirmed on a real car to turn the wheel on. Its status field is slow to
+   * catch up, so the switch holds its requested state briefly (optimistic). */
+  const SWHEEL_HINT = "Steering wheel heating on / off. Confirmed on a real "
+    + "car; the reading is slow, so the button holds its state for a moment.";
 
   const DEFAULT_COOLDOWN_S = 3;
   /* How long the temperature stepper waits for the tapping to stop. */
