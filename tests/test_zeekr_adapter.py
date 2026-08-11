@@ -98,6 +98,32 @@ def test_hf_expiry_math():
     assert a._hf_expired() is True
 
 
+def test_a_200_wrapped_auth_error_triggers_a_silent_renewal():
+    """#33 review C1 payoff: the fix is only real if a 200-wrapped auth error
+    actually re-arms renewal. With the clock saying the token is still valid, an
+    authy ZeekrApiError from the HF call must drive one _renew_hf + retry, not
+    surface as a transient failure."""
+    _patch_idaas()
+    try:
+        a, c = _make_adapter(password="hunter2", hf_token="mock-hf",
+                             hf_expiry=10 ** 15)  # clock: NOT expired
+        calls = {"n": 0}
+
+        def _status(vin, user_id=None):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise zc.ZeekrApiError("code=401 message=token expired")
+            return {"code": "1000", "data": {"ok": True}}
+
+        c.vehicle_status_resp = _status
+        st = a.vehicle_status()
+        assert st["data"]["ok"] is True, st
+        assert calls["n"] == 2, "the HF call should be retried after renewal"
+        assert c.hf_token == "mock-hf-new", "the authy 200-error did not renew"
+    finally:
+        _restore_idaas()
+
+
 def test_silent_renewal_chain_and_token_take():
     _patch_idaas()
     try:

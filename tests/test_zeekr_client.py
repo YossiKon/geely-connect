@@ -572,19 +572,27 @@ def test_a_failed_login_never_leaks_a_token_into_the_exception_text():
     assert "***redacted***" in raised
 
 
-def test_check_resp_rejects_a_200_wrapped_business_error_code():
-    """#33 review C1: a business error inside an HTTP 200 (an expired-token code
-    with no success flag) must raise - otherwise neither the adapter's HF-renewal
-    retry nor the reauth flow fires, and the integration wedges on a stale token.
-    Affirmative success and the code-less IDaaS shape must still pass."""
-    zc._check_resp({"code": "1000", "success": True})   # affirmative success
-    zc._check_resp({"code": 1000})                       # success code, no flag
-    zc._check_resp({"data": {"x": 1}})                   # no code/success (IDaaS)
-    for bad in ({"code": "401", "message": "token expired"},
-                {"code": 4001},
-                {"success": False, "code": "1000"}):
+def test_check_resp_strict_vs_lenient_by_leg():
+    """#33 review C1: the HF/vehicle gateway (code 1000 capture-verified) treats a
+    200-wrapped non-1000 code as an error so the adapter's renewal/reauth re-arms;
+    the IDaaS/ms-user-auth legs stay lenient because their success code is not
+    captured and guessing it would raise on a good login. Explicit success:false
+    is an error on either leg; affirmative success always passes."""
+    # Lenient (default): only explicit success:false is an error.
+    zc._check_resp({"code": "1000", "success": True})
+    zc._check_resp({"code": "77", "data": {}})           # unknown code -> ok (lenient)
+    zc._check_resp({"data": {"x": 1}})                    # no code/success -> ok
+    try:
+        zc._check_resp({"success": False, "code": "1000"})
+        assert False, "explicit success:false must raise"
+    except zc.ZeekrApiError:
+        pass
+    # Strict (HF/vehicle): a present non-1000 code is a 200-wrapped error.
+    zc._check_resp({"code": 1000}, ok_codes=zc._OK_CODES)
+    zc._check_resp({"data": {"x": 1}}, ok_codes=zc._OK_CODES)   # no code -> ok
+    for bad in ({"code": "401", "message": "token expired"}, {"code": 4001}):
         try:
-            zc._check_resp(bad)
+            zc._check_resp(bad, ok_codes=zc._OK_CODES)
             assert False, f"expected ZeekrApiError for {bad}"
         except zc.ZeekrApiError:
             pass

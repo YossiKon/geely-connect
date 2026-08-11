@@ -198,7 +198,9 @@ def _hf_request(method: str, path: str, *, query: str = "", body: bytes = b"",
         raw = resp.read()
         if resp.status != 200:
             raise ZeekrApiError(f"HF HTTP {resp.status}: {_safe_detail(raw)}")
-        return _check_resp(json.loads(raw))
+        # Strict here: 1000 is capture-verified on this gateway, so a 200-wrapped
+        # non-1000 code is a real error the adapter must see (renewal / reauth).
+        return _check_resp(json.loads(raw), ok_codes=_OK_CODES)
     finally:
         conn.close()
 
@@ -351,31 +353,39 @@ def snc_sign(*, method: str, url: str, headers: dict, body: bytes,
     ).decode()
 
 
-# Codes that mean success in a BaseResult envelope. Everything else present in
-# `code` is a business error, even inside an HTTP 200 - see _check_resp.
+# Success code for the HF / vehicle gateway (api.ecloudkr.com). Capture-verified
+# there (the HF session-secure body is {code:1000, data:{accessToken...}}), and
+# it is what the coordinator's own _SUCCESS_CODES uses. Deliberately NOT assumed
+# for the IDaaS user-center or ms-user-auth legs, whose success code is not
+# captured - the legacy CIDP login, for one, succeeds on 10000000, so codes
+# differ per backend and guessing one would raise on a good login.
 _OK_CODES: set = {"1000", 1000}
 
 
-def _check_resp(resp: dict) -> dict:
+def _check_resp(resp: dict, *, ok_codes: set | None = None) -> dict:
     """BaseResult shape: {code, success, message, data}. Raise on auth/gateway errors.
 
-    The gateway signals business failures (bad/expired token, rejected params)
-    inside an HTTP 200 envelope via `code`/`success`, so trusting the HTTP status
-    alone is not enough. Judge affirmatively: an explicit `success` decides it;
-    otherwise a *present* `code` must be a known success code, or it is an error.
-    A caller that returns neither (some IDaaS bodies omit `code`) is treated as
-    success, since those endpoints carry their result in `data`.
+    Business failures (bad/expired token, rejected params) arrive inside an HTTP
+    200 envelope, so the HTTP status alone is not enough. An explicit `success`
+    decides it either way. When `ok_codes` is given - only the HF/vehicle gateway,
+    where code 1000 is capture-verified - a *present* code outside that set is a
+    200-wrapped error too. It is omitted for the IDaaS / ms-user-auth legs, whose
+    success code is unverified; there the callers detect failure by the specific
+    field they expect (tokenValue, accessToken, ddcCode), so treating an
+    unfamiliar code as failure could raise on a genuinely successful login.
 
     This matters beyond a clean error: only a raised error re-arms recovery -
     the adapter's silent HF renewal retry and, failing that, the HA reauth flow.
-    A 200-wrapped `{"code": 401}` slipping through as success would wedge the
-    integration on a stale token until a manual reconfigure.
+    A 200-wrapped `{"code": 401}` from the HF gateway slipping through as success
+    would wedge the integration on a stale token until a manual reconfigure.
     """
     success = resp.get("success")
     if success in (True, "true", "1"):
         return resp
     code = resp.get("code")
-    if success in (False, "false", "0") or (code is not None and code not in _OK_CODES):
+    if success in (False, "false", "0") or (
+        ok_codes is not None and code is not None and code not in ok_codes
+    ):
         msg = resp.get("message") or resp.get("msg") or "unknown"
         raise ZeekrApiError(f"code={code} message={msg}")
     return resp
