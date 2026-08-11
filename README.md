@@ -298,10 +298,11 @@ The full and top-view cards carry a complete **Climate** section:
   that way.
 - **Seat heating / Seat cooling** per front seat - each tap steps
   Off → Low → Medium → High → Off.
-- **Fresh air** (G-Clean), **Parking comfort**, and **Open / Close** for the
-  sunroof and the sunshade. Parking comfort never lights up, deliberately: the car
-  does not report whether it is on - the field that looks like its flag reads 1
-  with the feature off - so the button toggles it without claiming a state.
+- **Fresh air** (G-Clean), **Parking comfort**, **Wheel heat** (on cars that
+  have a heated steering wheel), and **Open / Close** for the sunroof and the
+  sunshade. Parking comfort never lights up, deliberately: the car does not
+  report whether it is on - the field that looks like its flag reads 1 with the
+  feature off - so the button toggles it without claiming a state.
 - Every block hides itself on a trim that lacks the entity - and there is no
   fan-speed control because the car's cloud API simply has none.
 
@@ -489,11 +490,11 @@ back off removes the generated entities again.
 |---|---|
 | **Lock** | Lock / unlock the doors |
 | **Trunk** | Asks the car to release the tailgate latch, which then re-locks itself after a short window if nobody lifts the gate - which is exactly what the official app's own tailgate button does. **Four owners** now report the app only ever unlocking, never opening, across the EX5 Inspire, the EX5 Tech and the P145 PHEV, with the powered open coming from the key fob or the car's own screen. So this button is not a poor imitation of the app; it is the same action. The latch is confirmed releasing on three of the four - the EX5 Tech, the EX5 Inspire standard range and the P145 PHEV. On the fourth the indicators flash and the latch does not move, which is a **different** question from the powered open and the one thing still unexplained here. Watch the **Trunk Lock** sensor to see which of the two your car does. On the powered open itself: a real EX5 capability catalogue, read in full for the first time on 2026-08-09, **declares** `remote_control_open_2` whose only accepted target is `trunk` - and the three Starray catalogues do not carry it. Nobody has fired it yet and this button still sends the unlock command, so that is a lead rather than a feature; see [#20](https://github.com/YossiKon/geely-connect/issues/20) |
-| **Climate (remote pre-conditioning)** | Remote pre-heat/pre-cool: on/off, set temperature (15.5-28.5 °C), Rapid Warming, Rapid Cooling. The rapid presets drive the setpoint to the coldest or hottest the car allows and ask for both front seats at the highest level - heat when warming, ventilation when cooling - inside the same single request the car accepts, since a second command racing the first gets rejected while the car is still working. On a car with a heated steering wheel, rapid warming asks for the wheel too (`sw`, exactly as the captured app body does - [#4](https://github.com/YossiKon/geely-connect/issues/4)). On some cars the cabin obeys and the seats do not; [Troubleshooting](#-troubleshooting--debugging) has the script that fixes that, and why fan speed cannot be asked for at all. Only reflects remote pre-climate cycles: the cloud does not report manual cabin HVAC |
+| **Climate (remote pre-conditioning)** | Remote pre-heat/pre-cool: on/off, set temperature (15.5-28.5 °C), Rapid Warming, Rapid Cooling. The rapid presets drive the setpoint to the coldest or hottest the car allows and ask for both front seats at the highest level - heat when warming, ventilation when cooling - inside the same single request the car accepts, since a second command racing the first gets rejected while the car is still working. On a car with a heated steering wheel, rapid warming asks for the wheel too (`sw`, exactly as the captured app body does) - **confirmed on a real car to heat the wheel** ([#4](https://github.com/YossiKon/geely-connect/issues/4)). On some cars the cabin obeys and the seats do not; [Troubleshooting](#-troubleshooting--debugging) has the script that fixes that, and why fan speed cannot be asked for at all. Only reflects remote pre-climate cycles: the cloud does not report manual cabin HVAC |
 | **Seat heating** | Driver & passenger (rear if supported): Off/Low/Medium/High |
 | **Seat ventilation** | Driver & passenger (rear if supported) |
 | **Defrost** | Windscreen defrost on/off |
-| **Steering Wheel Heat** | On/off, on cars that show evidence of the feature. The command comes from a capture of the official app's own button against a real car ([#4](https://github.com/YossiKon/geely-connect/issues/4)) - `rce.heat: steering_wheel`, an underscore where every seat name uses hyphens, and no level, because the car cannot report one. Captured is not the same as confirmed: nobody has yet watched a wheel warm from a press of *this* switch, so judge it by the state it reads back, never by the "success" reply |
+| **Steering Wheel Heat** | On/off, on cars that show evidence of the feature, and now on the built-in cards next to Fresh air. The command comes from a capture of the official app's own button against a real car ([#4](https://github.com/YossiKon/geely-connect/issues/4)) - `rce.heat: steering_wheel`, an underscore where every seat name uses hyphens, and no level, because the car cannot report one. Rapid warming is **confirmed** to heat the wheel on a real car; this standalone toggle sends the captured command directly, so press it and judge it by the state it reads back rather than by the "success" reply |
 | **Windows** | Open / close / ventilate |
 | **Sunroof / Sunshade** | Open / close |
 | **Charging** | Start / stop, plus scheduled charging (start & end time). Stopping a charge does not release the cable: the charge-port latch follows the doors, so to let someone unplug remotely, stop the charge **and** unlock the car - it re-locks itself afterwards if no door is opened |

@@ -35,6 +35,7 @@
     "tire_front_left", "tire_rear_right", "door_rear_right", "charging_power",
     "seat_heat_passenger", "seat_vent_passenger", "seat_heat_driver",
     "seat_vent_driver", "sunshade", "g_clean", "parking_comfort",
+    "steering_wheel_heat",
     "tire_rear_left", "door_rear_left", "combined_range", "charge_complete",
     "charge_voltage", "electric_range", "charge_current", "door_passenger",
     "charger_plug", "total_mileage", "refresh_data", "unlock_trunk",
@@ -142,6 +143,11 @@
     + "wheel where fitted";
   const RAPID_COOL_HINT = "Rapid cooling: the car's own preset - drives the "
     + "setpoint to its minimum, ventilates both front seats and cracks the windows";
+  /* The steering-wheel command is a capture of the official app's own button.
+   * Rapid warming is confirmed to heat the wheel on a real car; this standalone
+   * toggle sends the captured command directly - press it and watch the wheel. */
+  const SWHEEL_HINT = "Steering wheel heating on / off. Captured from the "
+    + "official app; judge it by the wheel, not the tap.";
 
   const DEFAULT_COOLDOWN_S = 3;
   /* How long the temperature stepper waits for the tapping to stop. */
@@ -441,6 +447,8 @@
     fresh: `<path d="M5 9.5c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2"/>
             <path d="M5 14c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2"/>
             <path d="M5 18.5c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2"/>`,
+    steering: `<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2"/>
+               <path d="M12 4v6M6.2 15l4.4-2.5M17.8 15l-4.4-2.5"/>`,
     minus: `<path d="M6 12h12"/>`,
     plus: `<path d="M12 6v12M6 12h12"/>`,
     cool: `<path d="M12 3.5v17M4.6 7.75l14.8 8.5M19.4 7.75 4.6 16.25"/>`,
@@ -1100,6 +1108,7 @@
         case "shade_close": this._call("cover", "close_cover", "sunshade"); break;
         case "gclean": this._call("switch", "toggle", "g_clean"); break;
         case "pcomfort": this._call("switch", "toggle", "parking_comfort"); break;
+        case "swheel": this._call("switch", "toggle", "steering_wheel_heat"); break;
         case "charging_sw": this._call("switch", "toggle", "charging"); break;
         case "sched_sw": this._call("switch", "toggle", "scheduled_charging"); break;
         case "defrost": this._call("switch", "toggle", "defrost"); break;
@@ -1256,6 +1265,7 @@
       };
       const gclean = this._st("switch.g_clean");
       const pcomfort = this._st("switch.parking_comfort");
+      const swheel = this._st("switch.steering_wheel_heat");
       const heatRow = seat("seat_heat_driver", "Driver", "seatheat", "Seat heat") +
         seat("seat_heat_passenger", "Passenger", "seatheat", "Seat heat");
       const ventRow = seat("seat_vent_driver", "Driver", "seatvent", "Seat cooling") +
@@ -1273,6 +1283,8 @@
             data-act="gclean" title="Fresh air (G-Clean)">${icon("fresh")}<span>Fresh air</span></button>` : "") +
         (pcomfort ? `<button class="cbtn ${pcomfort.state === "on" ? "on" : ""}"
             data-act="pcomfort" title="${esc(PCOMFORT_HINT)}">${icon("sleep")}<span>Parking comfort</span></button>` : "") +
+        (swheel ? `<button class="cbtn ${swheel.state === "on" ? "on" : ""}"
+            data-act="swheel" title="${esc(SWHEEL_HINT)}">${icon("steering")}<span>Wheel heat</span></button>` : "") +
         cover("sunroof", "sunroof_open", "sunroof_close", "Sunroof", "roof") +
         cover("sunshade", "shade_open", "shade_close", "Shade", "shade");
       return `

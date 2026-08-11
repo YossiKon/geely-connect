@@ -61,6 +61,9 @@ window.mkHass = (opts) => {
   if (opts.parkingComfort !== undefined) {
     put(`switch.${P}_parking_comfort`, opts.parkingComfort);
   }
+  if (opts.steeringWheelHeat !== undefined) {
+    put(`switch.${P}_steering_wheel_heat`, opts.steeringWheelHeat);
+  }
   put(`sensor.${P}_speed`, opts.speed === undefined ? "0" : opts.speed,
       { unit_of_measurement: "km/h" });
   // A car with a tank. The integration only creates these when the propulsion
@@ -1276,3 +1279,38 @@ def test_pressing_parking_comfort_toggles_the_switch():
         return hass.serviceCalls.map((c) => [c[0], c[1], c[2].entity_id]);
     }"""
     assert _evaluate(script) == [["switch", "toggle", "switch.car_parking_comfort"]]
+
+
+def test_steering_wheel_heat_appears_on_the_big_cards_when_the_car_has_it():
+    """Asked for on #4 after an owner confirmed rapid warming heats the wheel.
+    It sits with the cabin-air controls; the tooltip says to judge it by the wheel."""
+    probe = """(() => {
+        const b = el.shadowRoot.querySelector('[data-act="swheel"]');
+        return b ? { text: b.textContent.replace(/\\s+/g, " ").trim(),
+                     title: b.getAttribute("title"),
+                     lit: b.classList.contains("on") } : null;
+    })()"""
+    for tag in ("geely-card", "geely-card-top"):
+        got = _mount(tag, probe, steeringWheelHeat="on")
+        assert got is not None, f"{tag} has no steering wheel heat button"
+        assert "Wheel heat" in got["text"], (tag, got)
+        assert got["lit"] is True, (tag, got)   # "on" -> the button lights
+        assert "Captured from the" in got["title"], (tag, got["title"])
+
+
+def test_no_steering_wheel_heat_button_without_the_switch():
+    probe = 'el.shadowRoot.querySelectorAll(\'[data-act="swheel"]\').length'
+    assert _mount("geely-card", probe) == 0
+
+
+def test_pressing_steering_wheel_heat_toggles_the_switch():
+    script = """() => {
+        const el = document.createElement("geely-card");
+        document.body.appendChild(el);
+        el.setConfig({});
+        const hass = window.mkHass({ steeringWheelHeat: "off" });
+        el.hass = hass;
+        el._onAction("swheel");
+        return hass.serviceCalls.map((c) => [c[0], c[1], c[2].entity_id]);
+    }"""
+    assert _evaluate(script) == [["switch", "toggle", "switch.car_steering_wheel_heat"]]
