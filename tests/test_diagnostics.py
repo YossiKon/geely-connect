@@ -299,13 +299,20 @@ def test_every_schedule_slot_is_read_and_redacted():
 
     def get(slot):
         seen.append(slot)
-        return {"code": "1000", "data": {"vin": FAKE_VIN, "bizType": slot,
-                                         "startTime": "22:00"}}
+        # Everything the write side of this same endpoint is known to carry,
+        # echoed back: `pin` holds the VIN by convention here, which is the
+        # field that leaked it once already.
+        return {"code": "1000", "sessionId": TOKEN,
+                "data": {"vin": FAKE_VIN, "pin": FAKE_VIN, "userId": USER_ID,
+                         "bizType": slot, "startTime": "22:00"}}
 
     out = _sweep_report(get)
     # 7 is the rapid-warming write; its GET returns nothing worth a round trip.
     assert seen == ["1", "2", "3", "4", "5", "6", "8"]
-    assert FAKE_VIN not in json.dumps(out), "the echoed VIN reached the report"
+    blob = json.dumps(out)
+    for label, secret in (("VIN", FAKE_VIN), ("user id", USER_ID),
+                          ("session token", TOKEN)):
+        assert secret not in blob, f"{label} reached the report from a schedule slot"
     assert out["4"]["data"]["startTime"] == "22:00", "redaction ate the schedule"
 
 
