@@ -5,6 +5,7 @@ tokens, certificates, VIN or GPS location.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 from typing import Any
 
@@ -38,6 +39,32 @@ _REDACT = {
     # stays visible on purpose.
     "zeekr_access_token", "zeekr_refresh_token", "zeekr_hf_token", "zeekr_password",
 }
+
+
+# The charge-server schedule slots, read with a GET each. Only two of these
+# are known: 4 is Parking Comfort and 6 is Scheduled Charging. The rest of the
+# range is swept because two questions in the tracker are stuck on the same
+# missing fact - which slot, if any, holds a feature nobody has located:
+#
+#   #30  Parking Comfort has no readable state field anywhere in the payload,
+#        and slot 4 was captured returning a schedule (scheduleList/startTime/
+#        endTime) with no state in it - which is the evidence for "you arm it
+#        in the car". Nothing has ever polled it, so that shape rests on one
+#        capture from one car.
+#   #4   Battery Temperature Maintenance lives under "Schedule a trip" in the
+#        app, next to a comfort toggle, and has no known endpoint at all. If
+#        it is a charge-server schedule, it is in this range.
+#
+# 7 is left out: it is the rapid-warming write, and its GET returns nothing.
+# All of these are GETs against the vehicle's own VIN, they run only when
+# someone downloads a report, and a slot that does not exist answers with an
+# error that is recorded rather than raised.
+_CHARGE_SERVER_SLOTS = ("1", "2", "3", "4", "5", "6", "8")
+
+# A sweep is worth ~a second per slot on a healthy connection and must not be
+# what makes a report impossible to produce on a sick one. Whatever has
+# arrived by then is kept.
+_SWEEP_TIMEOUT_S = 25
 
 
 def _clean(data: Any) -> Any:
@@ -93,11 +120,48 @@ async def async_get_config_entry_diagnostics(
         # control is missing from the car or only from this integration.
         "capabilities_raw": _clean(bundle.get("capabilities_raw") or []),
         "status": _clean((coordinator.data if coordinator else {}) or {}),
+        # The charge-server schedule slots, which nothing polls - see
+        # _CHARGE_SERVER_SLOTS for the two open questions this answers.
+        "charge_server": await _charge_server(hass, bundle.get("api"), vin),
         # Whether the dashboard cards are actually being served, and from
         # where: the first thing to check when a card reads "Custom element
         # not found" but the vehicle itself is fine.
         "cards": _card_status(hass),
     }
+
+
+async def _charge_server(hass: HomeAssistant, api: Any,
+                         vin: str | None) -> dict[str, Any]:
+    """Read every charge-server slot once, recording failures as results.
+
+    A slot that does not exist is expected to answer with an error, and that
+    error is the finding - so nothing here raises, and a slot that times out
+    does not cost the report the slots already read.
+
+    The EM (Zeekr) platform has no such endpoint; its client simply does not
+    carry the method, which is also what an entry that failed setup before
+    building a client looks like from here.
+    """
+    get = getattr(api, "charge_server_get", None)
+    if get is None:
+        return {}
+
+    out: dict[str, Any] = {}
+
+    async def _sweep() -> None:
+        for slot in _CHARGE_SERVER_SLOTS:
+            try:
+                out[slot] = _clean(await hass.async_add_executor_job(get, slot))
+            except Exception as e:  # noqa: BLE001 - diagnostics must never raise
+                out[slot] = {"error": _scrub(f"{type(e).__name__}: {e}", vin)[:300]}
+
+    try:
+        await asyncio.wait_for(_sweep(), _SWEEP_TIMEOUT_S)
+    except (TimeoutError, asyncio.TimeoutError):
+        out["truncated"] = (
+            f"the sweep passed {_SWEEP_TIMEOUT_S}s and was cut short; "
+            "the slots above are what came back in time")
+    return out
 
 
 def _polling(bundle: dict, coordinator: Any, vin: str | None) -> dict[str, Any]:

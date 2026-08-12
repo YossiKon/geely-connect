@@ -170,7 +170,7 @@ def test_the_report_is_still_worth_reading():
     r = _report()
     assert set(r) == {"entry_data", "options", "polling", "recent_commands",
                       "logging", "capabilities", "capabilities_raw", "status",
-                      "cards"}
+                      "charge_server", "cards"}
     assert r["options"]["pressure_unit"] == "psi"
     assert r["status"]["_state"]["parkComfortState"] == "1"
 
@@ -255,6 +255,96 @@ def test_a_report_can_be_produced_before_the_coordinator_exists():
 
     r = asyncio.run(diag.async_get_config_entry_diagnostics(Hass(), Entry()))
     assert r["status"] == {}
+
+
+def _sweep_report(get):
+    """A report from an entry whose client can read charge-server slots."""
+    diag = load("diagnostics")
+
+    class Api:
+        command_trail: list = []
+        charge_server_get = staticmethod(get)
+
+    class Entry:
+        entry_id = "e1"
+        data = {"vin": FAKE_VIN}
+        options: dict = {}
+
+    class Hass:
+        data = {"geely_connect": {"e1": {"api": Api()}}}
+
+        async def async_add_executor_job(self, fn, *args):
+            # A real thread, not an inline call: a client that blocks has to
+            # block the way it would in Home Assistant for the timeout below
+            # to mean anything.
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(None, fn, *args)
+
+    return asyncio.run(
+        diag.async_get_config_entry_diagnostics(Hass(), Entry()))["charge_server"]
+
+
+def test_a_client_without_the_endpoint_is_not_asked_for_it():
+    """The EM platform has no charge-server, and neither does an entry whose
+    setup died before it built a client. Both must produce a report."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    assert _report()["charge_server"] == {}
+
+
+def test_every_schedule_slot_is_read_and_redacted():
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    seen = []
+
+    def get(slot):
+        seen.append(slot)
+        return {"code": "1000", "data": {"vin": FAKE_VIN, "bizType": slot,
+                                         "startTime": "22:00"}}
+
+    out = _sweep_report(get)
+    # 7 is the rapid-warming write; its GET returns nothing worth a round trip.
+    assert seen == ["1", "2", "3", "4", "5", "6", "8"]
+    assert FAKE_VIN not in json.dumps(out), "the echoed VIN reached the report"
+    assert out["4"]["data"]["startTime"] == "22:00", "redaction ate the schedule"
+
+
+def test_a_slot_that_does_not_exist_is_recorded_rather_than_raised():
+    """Most of this range is expected to fail - which slot fails, and how, is
+    the finding. A failure that took the report down would lose the rest."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+
+    def get(slot):
+        if slot == "6":
+            return {"code": "1000", "data": {"rbcStartTime": "23:00"}}
+        raise RuntimeError(f"illegal request parameter for {FAKE_VIN}")
+
+    out = _sweep_report(get)
+    assert out["6"]["data"]["rbcStartTime"] == "23:00"
+    assert "illegal request parameter" in out["1"]["error"]
+    assert FAKE_VIN not in json.dumps(out), "a VIN inside an error message survived"
+
+
+def test_a_hanging_endpoint_does_not_cost_the_whole_report():
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    diag = load("diagnostics")
+    original = diag._SWEEP_TIMEOUT_S
+    diag._SWEEP_TIMEOUT_S = 0.05
+    try:
+        def get(slot):
+            if slot == "1":
+                return {"code": "1000", "data": {"ok": True}}
+            import time
+            time.sleep(0.5)
+            return {}
+
+        out = _sweep_report(get)
+    finally:
+        diag._SWEEP_TIMEOUT_S = original
+    assert out["1"]["data"]["ok"] is True, "the slot read before the stall was lost"
+    assert "cut short" in out["truncated"]
 
 
 def test_the_two_redaction_lists_have_not_drifted_apart():

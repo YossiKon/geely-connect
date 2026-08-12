@@ -124,6 +124,41 @@ def test_a_starray_catalogue_declares_no_trunk_open_command():
     assert ex5["tailgate.enabled"] is True
 
 
+def test_what_the_unlock_command_accepts_is_read_from_the_catalogue():
+    """`valueEnum` went unread until #20, and it is where the boot lives.
+
+    A real EX5 catalogue declares `remote_control_unlock_2` with
+    `valueEnum: "door,trunk"` and a `door` param repeating it - which is the
+    car's own statement that the unlock command takes the boot as a target,
+    and therefore the declaration behind the Unlock Trunk button. It sat in an
+    attached report unread while the thread argued about it."""
+    out = cap.parse([_entry("remote_control_unlock_2", True, valueEnum="door,trunk",
+                            paramsJson=[{"nameKey": "door", "name": "d",
+                                         "config": "door,trunk"}])])
+    assert out["unlock.targets"] == ["door", "trunk"]
+
+
+def test_the_two_places_a_target_list_hides_are_merged():
+    """Either source alone is enough; a car carrying only one must not read as
+    a car that accepts nothing."""
+    enum_only = cap.parse([_entry("remote_control_unlock_2", True,
+                                  valueEnum="door,trunk")])
+    param_only = cap.parse([_entry("remote_control_unlock_2", True,
+                                   paramsJson=[{"nameKey": "door", "name": "d",
+                                                "config": "door,trunk"}])])
+    assert enum_only["unlock.targets"] == param_only["unlock.targets"] == ["door", "trunk"]
+    # A list, which is what the EM platform's catalogue hands back.
+    as_list = cap.parse([_entry("remote_control_unlock_2", True,
+                                valueEnum=["door", "trunk"])])
+    assert as_list["unlock.targets"] == ["door", "trunk"]
+
+
+def test_a_lock_that_takes_only_the_doors_says_so():
+    out = cap.parse([_entry("remote_control_unlock_2", True, valueEnum="door")])
+    assert out["unlock.targets"] == ["door"]
+    assert out.get("tailgate.enabled") is None
+
+
 def test_ac_range_can_come_from_the_params_block():
     out = cap.parse([_entry(
         "remote_climate_control_2", True,

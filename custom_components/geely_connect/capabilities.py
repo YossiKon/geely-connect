@@ -39,6 +39,27 @@ def _by_id(items: list[dict]) -> dict[str, dict]:
     return {x.get("functionId"): x for x in items if x.get("functionId")}
 
 
+def _split(raw: Any) -> set[str]:
+    """A comma-separated catalog value as a set. Accepts a real list too."""
+    if raw is None:
+        return set()
+    parts = raw if isinstance(raw, (list, tuple)) else str(raw).split(",")
+    return {str(p).strip() for p in parts if str(p).strip()}
+
+
+def _targets(entry: dict) -> set[str]:
+    """What an entry says its command accepts, from `valueEnum` and its params.
+
+    `valueEnum` is carried by 19 of an EX5's 62 entries and nothing here read
+    it until #20 - which is how `remote_control_unlock_2`'s own declaration
+    that it accepts `door,trunk` sat unread in an attached catalog while the
+    thread argued about whether the boot could be opened at all. The same list
+    usually appears again as a param (`door: "door,trunk"`), so both are read
+    and merged rather than picking a favourite.
+    """
+    return _split(entry.get("valueEnum")) | _split(_params_to_dict(entry).get("door"))
+
+
 def parse(items: list[dict]) -> dict[str, Any]:
     """Return a flat capability summary derived from the raw catalog list.
 
@@ -52,7 +73,7 @@ def parse(items: list[dict]) -> dict[str, Any]:
       window_vent.enabled, window_vent.duration_s
       steering_wheel_heat.enabled
       tailgate.enabled
-      lock.enabled, unlock.enabled
+      lock.enabled, unlock.enabled, unlock.targets (list of accepted targets)
       sunroof.enabled, sunshade.enabled, windows.enabled
       find_car.enabled
       charging.enabled, parking_comfort.enabled
@@ -155,6 +176,22 @@ def parse(items: list[dict]) -> dict[str, Any]:
         out["lock.enabled"] = True
     if enabled("remote_control_unlock_2"):
         out["unlock.enabled"] = True
+        targets = _targets(by_id.get("remote_control_unlock_2") or {})
+        if targets:
+            out["unlock.targets"] = sorted(targets)
+    # Stays keyed to remote_control_open_2 alone, and the reason is now the
+    # opposite of what it looks like. #20 ended at the TCAM's own vehicleCtrl
+    # binary: RDO_TRUNK is provisioned in configuration with no handler behind
+    # it, so this entry declares a command the car cannot execute - the powered
+    # open is not reachable from any cloud channel. What the Unlock Trunk
+    # button actually sends is RDU_2 target=trunk, whose declaration is
+    # unlock.targets above.
+    #
+    # So the flag is not read as "this car can power its tailgate open"; it is
+    # the one catalog entry known to differ between an EX5 and a Starray, and
+    # #20's evidence rests on it being absent from all three Starray dumps.
+    # Widening it to accept the unlock entry would make every car look alike
+    # and cost that finding - see the test that pins this.
     if enabled("remote_control_open_2"):
         out["tailgate.enabled"] = True
     if enabled("remote_control_skylight_2"):

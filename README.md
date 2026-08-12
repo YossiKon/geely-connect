@@ -756,6 +756,7 @@ you have installed, this integration's manifest, and how long setup took - so
 | `capabilities` | The feature flags this trim advertises, as the integration derived them |
 | `capabilities_raw` | The capability catalog exactly as the server sent it. This is what answers "does this car support X at all, or is it only missing from the integration?" |
 | `status` | The full vehicle payload behind every sensor |
+| `charge_server` | The car's schedule slots, read live when you press the button. Two of them are known - Parking Comfort and Scheduled Charging - and the rest of the range is read because a feature nobody has located may be sitting in one. A slot that does not exist answers with an error, and that is recorded rather than hidden |
 | `cards` | Whether the dashboard cards are being served, and from where |
 
 **What is removed:** tokens, certificates, the captcha secret, and the mTLS key
@@ -769,8 +770,9 @@ they are reported. Tests assert that none of it survives - see
 `tests/test_diagnostics.py`, `tests/test_redaction.py`.
 
 **What stays, so you know what you are sharing:** which commands you sent and
-when, your polling mode, your car's feature list, and its current state
-including tire pressures and battery level. No location - GPS is redacted.
+when, your polling mode, your car's feature list, its current state including
+tire pressures and battery level, and any charging or comfort schedule times
+the car is holding. No location - GPS is redacted.
 
 ### 2. Turn on debug logging when the timing matters
 
