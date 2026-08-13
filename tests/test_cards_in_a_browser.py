@@ -609,6 +609,55 @@ def test_the_fuel_section_reports_the_engine_and_not_the_headline_twice():
     assert any(r.startswith("Fuel range") for r in rows), rows
 
 
+# ------------------------------------------- #29: the climate row on a phone
+
+_ROWS_PROBE = """(() => {
+    el.style.width = arguments0.width;
+    return [...el.shadowRoot.querySelectorAll(".crow")].map((r) => ({
+        cls: r.className,
+        lines: new Set([...r.children].map(
+            (k) => Math.round(k.getBoundingClientRect().top))).size,
+        overflow: Math.round(r.scrollWidth - r.clientWidth),
+    }));
+})()"""
+
+
+def _rows(tag, width, **hass_opts):
+    """Every climate row's line count at a given CARD width - not viewport."""
+    probe = _ROWS_PROBE.replace("arguments0", json.dumps({"width": width}))
+    return _mount(tag, probe, **hass_opts)
+
+
+def test_the_temperature_row_stays_on_one_line_on_a_phone():
+    """The stepper and the two rapid presets are one row, and at phone width
+    Rapid cool dropped to a line of its own with a gap beside Rapid heat (#29).
+
+    390px is a card on a phone; it is also a column in a desktop dashboard,
+    which is why the rule behind this is a container query rather than a
+    viewport media query - the viewport says nothing about how wide the card
+    got. Widths below this ellipsise the labels instead of wrapping, so the
+    row is one line either way."""
+    for tag in ("geely-card", "geely-card-top"):
+        for width in ("330px", "390px", "500px"):
+            rows = _rows(tag, width)
+            temp = [r for r in rows if "temprow" in r["cls"]]
+            assert len(temp) == 1, (tag, width, rows)
+            assert temp[0]["lines"] == 1, (tag, width, temp)
+            assert temp[0]["overflow"] == 0, f"{tag} {width} overflows: {temp}"
+
+
+def test_only_the_temperature_row_is_pinned_to_one_line():
+    """The seat and air rows carry three to five buttons and are meant to wrap.
+    Pinning them too would ellipsise every label, so the rule is scoped to the
+    one row - and this is what says so."""
+    rows = _rows("geely-card", "390px",
+                 seats={"heatDriver": "High", "ventPassenger": "Medium"})
+    others = [r for r in rows if "temprow" not in r["cls"]]
+    assert others, "no seat rows rendered - the fixture stopped covering this"
+    for r in others:
+        assert "wrap" in r["cls"] and "nowrap" not in r["cls"], r
+
+
 # ------------------------------------- seat heating and cooling on the big cards
 
 _SEAT_PROBE = """(() => {

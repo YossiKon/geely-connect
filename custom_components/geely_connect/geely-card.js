@@ -468,6 +468,11 @@
     * { box-sizing: border-box; margin: 0; }
     .shell {
       position: relative; overflow: hidden;
+      /* Makes the card itself the thing narrow-width rules are measured
+       * against - see the @container rule below. The card is as narrow inside
+       * a desktop dashboard column as it is on a phone, and a viewport media
+       * query cannot tell the two apart. */
+      container-type: inline-size;
       border-radius: var(--ha-card-border-radius, 12px);
       background:
         radial-gradient(120% 90% at 85% -10%,
@@ -661,6 +666,24 @@
     .cbtn.on b { color:${ON_TEXT}; font-weight: 700; }
     @media (hover: hover) {
       .cstep:hover, .cmini:hover { background: rgba(120,130,140,.15); }
+    }
+    /* The temperature stepper and the two rapid presets are one row, and on a
+     * phone the third one dropped to a line of its own, leaving a gap beside
+     * the second (#29). The row is pinned to a single line here and the
+     * horizontal padding pays for it - nothing vertical changes, so every tap
+     * target keeps its height, and the steppers keep their width.
+     *
+     * Only this row. The seat and air rows carry three to five buttons and are
+     * meant to wrap; forcing them onto one line would truncate every label.
+     * If a card is narrow enough that these labels still do not fit, they
+     * ellipsise rather than wrap, which is the behaviour that was asked for. */
+    @container (max-width: 380px) {
+      .crow.temprow { flex-wrap: nowrap; gap: 6px; }
+      .crow.temprow .cbtn { padding: 10px 9px; min-width: 0; }
+      .crow.temprow .cbtn span {
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .crow.temprow .temp .tval { min-width: 46px; }
     }
     .cpair { display:flex; align-items:center; gap:6px; padding:4px 6px 4px 12px;
              border:1px solid var(--divider-color, rgba(120,130,140,.25));
@@ -1290,7 +1313,7 @@
       return `
         <hr class="hairline">
         <p class="micro">${icon("climate")} Climate</p>
-        <div class="crow wrap">
+        <div class="crow wrap temprow">
           <div class="temp ${on ? "on" : ""}">
             <button class="cstep" data-act="tempdown" title="Cooler">${icon("minus")}</button>
             <span class="tval">${isFinite(target) ? String(target).replace(/\.0$/, "") : "—"}°</span>
