@@ -42,7 +42,11 @@ window.mkHass = (opts) => {
   });
   put(`sensor.${P}_12v_battery`, "99", { unit_of_measurement: "%" });
   put(`sensor.${P}_battery`, "61", { unit_of_measurement: "%" });
-  put(`sensor.${P}_electric_range`, "256", { unit_of_measurement: "km" });
+  // Home Assistant hands the card an already-converted state when an owner
+  // sets this entity to miles, so the fake does the same rather than pretending
+  // the card converts anything itself.
+  put(`sensor.${P}_electric_range`, "256",
+      { unit_of_measurement: opts.rangeUnit || "km" });
   put(`sensor.${P}_tire_front_left`, "220", { unit_of_measurement: "kPa" });
   put(`sensor.${P}_tire_front_right`, "240", { unit_of_measurement: "kPa" });
   put(`sensor.${P}_tire_rear_left`, "260", { unit_of_measurement: "kPa" });
@@ -65,7 +69,7 @@ window.mkHass = (opts) => {
     put(`switch.${P}_steering_wheel_heat`, opts.steeringWheelHeat);
   }
   put(`sensor.${P}_speed`, opts.speed === undefined ? "0" : opts.speed,
-      { unit_of_measurement: "km/h" });
+      { unit_of_measurement: opts.speedUnit || "km/h" });
   // A car with a tank. The integration only creates these when the propulsion
   // verdict says the tank exists, so their presence is what the card reads.
   if (opts.fuel) {
@@ -607,6 +611,34 @@ def test_the_fuel_section_reports_the_engine_and_not_the_headline_twice():
     # A trim that reports the halves but not the sum still gets it spelled out.
     rows = _mount("geely-card", probe, fuel={"combined": None})
     assert any(r.startswith("Fuel range") for r in rows), rows
+
+
+# ------------------------------------------------ #37: miles, not just km
+
+def test_the_range_label_follows_the_entity_rather_than_saying_km():
+    """Home Assistant converts a distance entity when an owner picks miles in
+    its settings - the state arrives already converted, with `mi` on it. The
+    card used to print the converted number under a hard-coded "km", which is
+    worse than not supporting miles at all: the number is right and the label
+    lies about it (#37)."""
+    for tag in CARD_TAGS:
+        got = _mount(tag, """(() => {
+            const u = el.shadowRoot.querySelector(".u");
+            return u ? u.textContent.trim() : null;
+        })()""", rangeUnit="mi")
+        assert got == "mi", (tag, got)
+    # And the default is unchanged for everyone who never touches it.
+    assert _mount("geely-card", """
+        el.shadowRoot.querySelector(".u").textContent.trim()""") == "km"
+
+
+def test_the_driving_banner_speed_follows_its_entity_too():
+    for tag in ("geely-card", "geely-card-top"):
+        got = _mount(tag, """
+            el.shadowRoot.textContent.replace(/\\s+/g, " ")""",
+                     speed="63", speedUnit="mph", engine="Running")
+        assert "63 mph" in got, (tag, got[:200])
+        assert "km/h" not in got, (tag, got[:200])
 
 
 # ------------------------------------------- #29: the climate row on a phone

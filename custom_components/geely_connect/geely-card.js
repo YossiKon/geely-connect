@@ -1038,6 +1038,7 @@
       // every card with no way back. `driving_lock: false` gives that back.
       if (this._config.driving_lock === false) return false;
       const speed = NUM(this._st("sensor.speed"));
+      // No unit needed here: "is it moving" is the same question in mph.
       if (speed != null && speed > 0) return true;
       const eng = this._st("sensor.engine_state");
       const raw = eng ? String(eng.state).trim().toLowerCase() : "";
@@ -1554,7 +1555,7 @@
           </div>
           <div class="hero">
             <div>
-              <div class="num n ${OK(s.range) ? "" : "unavail"}">${range}<span class="u">km</span></div>
+              <div class="num n ${OK(s.range) ? "" : "unavail"}">${range}<span class="u">${esc(UNIT(s.range) || "km")}</span></div>
               <div class="micro sub">${esc(this._rangeLabel(s))}</div>
               ${split ? `<div class="micro sub">${esc(split)}</div>` : ""}
             </div>
@@ -1625,6 +1626,10 @@
       const fuelRange = this._st("sensor.fuel_range");
       const combined = this._st("sensor.combined_range");
       const speed = NUM(this._st("sensor.speed"));
+      // Home Assistant converts the value when an owner sets this entity to
+      // mph; the label has to follow it or the card reads "60 km/h" over a
+      // number that is miles (#37).
+      const speedUnit = UNIT(this._st("sensor.speed")) || "km/h";
 
       const tire = (suffix) => {
         const st = this._st(`sensor.tire_${suffix}`);
@@ -1639,7 +1644,7 @@
       const statusLine = s.charging
         ? `Charging${OK(power) ? " · " + power.state + " kW" : ""}`
         : driving
-        ? `Driving${speed != null && speed > 0 ? ` · ${Math.round(speed)} km/h` : ""}`
+        ? `Driving${speed != null && speed > 0 ? ` · ${Math.round(speed)} ${esc(speedUnit)}` : ""}`
         : s.doorsOpen.length ? `${s.doorsOpen.length} opening${s.doorsOpen.length > 1 ? "s" : ""} open`
         : s.locked && s.locked.state === "locked" ? "Parked · Locked" : "Parked";
 
@@ -1695,7 +1700,7 @@
 
           <div class="hero">
             <div>
-              <div class="num n ${OK(s.range) ? "" : "unavail"}">${range}<span class="u">km</span></div>
+              <div class="num n ${OK(s.range) ? "" : "unavail"}">${range}<span class="u">${esc(UNIT(s.range) || "km")}</span></div>
               <div class="micro" style="margin-top:5px">${esc(this._rangeLabel(s))}</div>
               ${split ? `<div class="micro" style="margin-top:3px">${esc(split)}</div>` : ""}
             </div>
@@ -1904,7 +1909,7 @@
             <div class="left">
               <div class="topline">
                 <i class="dot ${online && online.state === "off" ? "off" : ""}"></i>
-                <span class="num rng ${OK(s.range) ? "" : "unavail"}">${range}<span class="u">km</span></span>
+                <span class="num rng ${OK(s.range) ? "" : "unavail"}">${range}<span class="u">${esc(UNIT(s.range) || "km")}</span></span>
                 <span class="pct">${this._levels(s, batt)}</span>
               </div>
               <div class="status ${driving ? "warn" : s.charging ? "charging" : s.doorsOpen.length ? "warn" : ""}">${esc(statusLine)}</div>
@@ -1999,7 +2004,7 @@
             <span class="temp">${temp != null ? Math.round(temp) + "° in" : ""}</span>
           </div>
           <div class="mid">
-            <span class="num n ${OK(s.range) ? "" : "unavail"}">${range}</span><span class="u">km</span>
+            <span class="num n ${OK(s.range) ? "" : "unavail"}">${range}</span><span class="u">${esc(UNIT(s.range) || "km")}</span>
             <div class="status ${driving ? "warn" : s.charging ? "charging" : s.doorsOpen.length ? "warn" : ""}">${esc(statusLine)}</div>
           </div>
           <div class="actions">
@@ -2061,6 +2066,10 @@
       const fuelRange = this._st("sensor.fuel_range");
       const combined = this._st("sensor.combined_range");
       const speed = NUM(this._st("sensor.speed"));
+      // Home Assistant converts the value when an owner sets this entity to
+      // mph; the label has to follow it or the card reads "60 km/h" over a
+      // number that is miles (#37).
+      const speedUnit = UNIT(this._st("sensor.speed")) || "km/h";
 
       const isOpen = (suffix) => {
         const st = this._st(`binary_sensor.${suffix}`);
@@ -2080,7 +2089,7 @@
       const statusLine = s.charging
         ? `Charging${OK(power) ? " · " + power.state + " kW" : ""}`
         : driving
-        ? `Driving${speed != null && speed > 0 ? ` · ${Math.round(speed)} km/h` : ""}`
+        ? `Driving${speed != null && speed > 0 ? ` · ${Math.round(speed)} ${esc(speedUnit)}` : ""}`
         : s.doorsOpen.length ? `${s.doorsOpen.length} opening${s.doorsOpen.length > 1 ? "s" : ""} open`
         : s.locked && s.locked.state === "locked" ? "Parked · Locked" : "Parked";
       const sched = schedA && schedB && OK(schedA) && OK(schedB)
@@ -2152,7 +2161,7 @@
 
           <div class="hero">
             <div>
-              <div class="num n ${OK(s.range) ? "" : "unavail"}">${range}<span class="u">km</span></div>
+              <div class="num n ${OK(s.range) ? "" : "unavail"}">${range}<span class="u">${esc(UNIT(s.range) || "km")}</span></div>
               <div class="micro" style="margin-top:5px">${esc(this._rangeLabel(s))}</div>
               ${split ? `<div class="micro" style="margin-top:3px">${esc(split)}</div>` : ""}
             </div>

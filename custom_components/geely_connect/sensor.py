@@ -1064,8 +1064,9 @@ def _is_charging(data: dict) -> bool:
     return False
 
 
-def _charge_leg(data: dict) -> tuple[float, float] | None:
-    """The volts and amps of whichever charge leg is actually delivering power.
+def _charge_leg(data: dict) -> tuple[float, float, bool] | None:
+    """The volts and amps of whichever charge leg is actually delivering power,
+    and whether that leg is the AC one - which decides the phase count below.
 
     The car reports two independent pairs - AC (`chargeUAct` / `chargeIAct`) and
     DC (`dcChargeUAct` / `dcChargeIAct`) - and never says which one is in use.
@@ -1108,7 +1109,7 @@ def _charge_leg(data: dict) -> tuple[float, float] | None:
     if ac is None and dc is None:
         return None
     if not _is_charging(data):
-        return (0.0, 0.0)
+        return (0.0, 0.0, True)
     # The car does say which leg is live after all: the DC contactor.
     # Raw payloads from real sessions on two cars settle the election rule:
     #
@@ -1130,9 +1131,9 @@ def _charge_leg(data: dict) -> tuple[float, float] | None:
     ac_ok = ac is not None and 0 < ac[0] <= 500 and 0 < ac[1] <= 150
     if str(_walk(data, (*_EV, "dcDcConnectStatus"))) == "3":
         if dc_ok:
-            return (dc[0], abs(dc[1]))
+            return (dc[0], abs(dc[1]), False)
         if ac_ok:
-            return ac
+            return (*ac, True)
         # Contactor closed but neither pair is usable. Returning the raw pair
         # here used to publish exactly what the walls above exist to refuse -
         # 1586 V as Charge Voltage, with a negative current behind it - while
@@ -1143,10 +1144,30 @@ def _charge_leg(data: dict) -> tuple[float, float] | None:
     # The DC pair stays as fallback for trims that fast-charge without
     # reporting the contactor at all.
     if ac_ok:
-        return ac
+        return (*ac, True)
     if dc_ok:
-        return (dc[0], abs(dc[1]))
+        return (dc[0], abs(dc[1]), False)
     return None
+
+
+# Where a single-phase supply stops and a three-phase one begins. Mains are
+# 100-250 V single-phase; three-phase is 380-415 V line-to-line, and 400 V is
+# what an EX5 reports on one (#36).
+_THREE_PHASE_VOLTS_MIN = 300.0
+_ROOT_3 = 3.0 ** 0.5
+
+
+def _ac_phases(volts: float) -> int:
+    """How many phases an AC supply at this voltage has.
+
+    Known blind spot, stated rather than papered over: a 208 V three-phase
+    supply - a North American commercial one - reads as single-phase here and
+    would be reported a third low. Nobody has sent one, and a threshold low
+    enough to catch it would wrongly multiply every 230 V household charge,
+    which is the case that IS verified (#17: 236.7 V x 28.4 A = 6.7 kW against
+    a 6.7 kW wallbox).
+    """
+    return 3 if volts >= _THREE_PHASE_VOLTS_MIN else 1
 
 
 class GeelyChargePowerSensor(CoordinatorEntity, _AutoPrecision):
@@ -1177,10 +1198,36 @@ class GeelyChargePowerSensor(CoordinatorEntity, _AutoPrecision):
         leg = _charge_leg(self.coordinator.data or {})
         if leg is None:
             return None
-        volts, amps = leg
+        volts, amps, is_ac = leg
         if volts <= 0 or amps <= 0:
             return 0.0
-        return round(volts * amps / 1000.0, 2)
+        # Volts x amps is the whole answer on one phase and short by root 3 on
+        # three, because the car reports the LINE voltage against ONE phase's
+        # current. Measured on an EX5 on a three-phase wallbox (#36): the car's
+        # own screen read 400 V, 14 A and 9.8 kW - numbers that do not multiply
+        # - while this entity published 5.72 kW from 400.2 V x 14.3 A and the
+        # wallbox metered 10.12 kW at the wall. root 3 x 400.2 x 14.3 = 9.91 kW,
+        # which is the car's figure and the wallbox's minus onboard losses.
+        #
+        # Only the AC leg. A DC session is one circuit into the pack, where the
+        # product is already the power - and the fixture that proves it (400 V
+        # at 125 A on a fast charger) would otherwise publish 86.6 kW.
+        watts = volts * amps
+        if is_ac and _ac_phases(volts) == 3:
+            watts *= _ROOT_3
+        return round(watts / 1000.0, 2)
+
+    @property
+    def extra_state_attributes(self):
+        """Why the number is what it is - the two readings behind it, and the
+        phase count, which is the part that cannot be seen from the outside."""
+        leg = _charge_leg(self.coordinator.data or {})
+        if leg is None:
+            return None
+        volts, amps, is_ac = leg
+        return {"volts": round(volts, 1), "amps": round(amps, 1),
+                "supply": "AC" if is_ac else "DC",
+                "phases": _ac_phases(volts) if is_ac else 1}
 
 
 class GeelyChargeCurrentSensor(CoordinatorEntity, _AutoPrecision):

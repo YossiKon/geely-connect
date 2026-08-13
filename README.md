@@ -9,14 +9,24 @@
 
 A **security-hardened** [Home Assistant](https://www.home-assistant.io/)
 integration for Geely vehicles that use the **Geely Global / International**
-mobile app. Tested on the **Geely EX5** (EU, battery-only) and the **Geely
-Starray PHEV** (APAC, petrol + plug-in); it is capability-driven, so other
-Geely models should work too - only the entities your specific car reports are
-created, and a car with a tank gets the fuel and engine ones on top.
+mobile app. Owner-tested on the **Geely EX5** (Europe, Australia and Brazil -
+battery-only) and the **Geely Starray PHEV** (Australia, petrol + plug-in); it
+is capability-driven, so other Geely models should work too - only the entities
+your specific car reports are created, and a car with a tank gets the fuel and
+engine ones on top.
 
 It talks directly to Geely's own cloud - the same servers the official app uses
 - and adds a hardened transport, full data exposure, efficient polling and a
 polished setup on top.
+
+> **What the app cannot do remotely, this cannot either.** Every command here
+> goes through the same cloud the official app talks to, so the app is the
+> ceiling rather than a starting point. The powered tailgate is the worked
+> example: the car opens it from the key fob and its own screen, and neither
+> the app nor this integration can - the module that would execute it has no
+> handler for the command at all ([#20](https://github.com/YossiKon/geely-connect/issues/20)).
+> Anything the car offers only on its own touchscreen is likely to be in the
+> same position.
 
 ---
 
@@ -422,6 +432,23 @@ can take whichever it wants without depending on the setup choice:
 # psi regardless of what the sensor's own unit is
 {{ state_attr('sensor.my_geely_ex5_tire_front_left', 'psi') }}
 ```
+
+### Miles instead of kilometres
+
+There is no setting for this in the integration, because there does not need to
+be: every distance and speed entity carries `device_class: distance` or
+`speed`, so **Home Assistant does the conversion itself** - including in
+long-term statistics, which a template sensor would lose.
+
+- **One entity** - open it, press the gear, set **Unit of measurement** to `mi`
+  (or `mph`). Range, odometer, trip meter, distance to service and both speeds
+  can each be set on their own.
+- **All of them** - Settings → System → General → **Unit system → US customary**
+  changes the default for every entity nobody has overridden.
+
+The cards follow whatever the entity says rather than assuming: the range tile
+and the driving banner print `mi` and `mph` when that is what the entity is in
+([#37](https://github.com/YossiKon/geely-connect/issues/37)).
 
 ### Body (open / closed)
 Driver door, Passenger door, Rear-Left door, Rear-Right door, Trunk, Hood,

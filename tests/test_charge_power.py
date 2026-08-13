@@ -69,6 +69,46 @@ def test_dc_charging_uses_the_dc_pair():
     assert _power(_charging(dcChargeUAct="400.0", dcChargeIAct="125.0")) == 50.0
 
 
+# --------------------------------------------------- #36: three-phase AC ---
+
+def test_a_three_phase_wallbox_is_not_reported_a_third_low():
+    """The car reports the LINE voltage against ONE phase's current, so their
+    product is short by root 3 on three phases.
+
+    Measured (#36): the car's own screen read 400 V, 14 A and 9.8 kW - numbers
+    that visibly do not multiply - while this entity published 5.72 kW from
+    400.2 V x 14.3 A and the wallbox metered 10.12 kW at the wall."""
+    assert _power(_charging(chargeUAct="400.2", chargeIAct="14.3")) == 9.91
+
+
+def test_a_single_phase_charge_keeps_its_honest_product():
+    """The case that must not regress: #17's real payload, which matched the
+    6.7 kW wallbox it was plugged into exactly as volts x amps."""
+    assert _power(_charging(chargeUAct="236.7", chargeIAct="28.4")) == 6.72
+
+
+def test_a_dc_session_never_gets_the_three_phase_factor():
+    """A DC charge is one circuit into the pack and its product is already the
+    power. This is the same 400 V that means three phases on the AC leg, so the
+    two legs have to be told apart rather than judged by voltage alone -
+    multiplying here would publish 86.6 kW on a 50 kW charger."""
+    assert _power(_charging(dcDcConnectStatus="3", dcChargeUAct="400.0",
+                            dcChargeIAct="-125.0")) == 50.0
+
+
+def test_the_power_says_which_supply_and_how_many_phases_it_assumed():
+    """The phase count is the one input to this number that cannot be seen from
+    outside, so a wrong reading can be diagnosed from the entity itself."""
+    attrs = _make("GeelyChargePowerSensor",
+                  _charging(chargeUAct="400.2", chargeIAct="14.3")
+                  ).extra_state_attributes
+    assert attrs == {"volts": 400.2, "amps": 14.3, "supply": "AC", "phases": 3}
+    dc = _make("GeelyChargePowerSensor",
+               _charging(dcDcConnectStatus="3", dcChargeUAct="400.0",
+                         dcChargeIAct="-125.0")).extra_state_attributes
+    assert dc["supply"] == "DC" and dc["phases"] == 1
+
+
 def test_a_payload_with_no_ac_pair_still_reports_the_fast_charge():
     """A trim that omits the AC keys entirely must not read unknown while DC
     fast charging - one absent pair falls through to the other."""
