@@ -1,6 +1,22 @@
 """Cover entities: sunshade (sun-curtain) and all windows.
 
-Service `RWS_2` with `target=sunshade|window` - same on Geely / Zeekr."""
+Service `RWS_2` with `target=sunshade|window` - same on Geely / Zeekr.
+
+Open and close only, and that is the whole of what the API offers rather than
+a gap in this file. The capability catalogue looks like it promises more: an
+EX5 declares `remote_control_skylight_2`, `remote_control_curtain_2` and
+`remote_control_window_2` with `valueRange: "0|100"` and a step of 4, which
+reads exactly like positional control. An owner probed it on a real car (#35)
+with the position passed four ways alongside `target` - `position`, `open`,
+`rws.position` and the catalogue's own `skylight_open` - at several values.
+Every one of them opened the roof or the blind FULLY: the position is ignored
+and the command falls back to plain open.
+
+So `valueRange` in that catalogue is declaration-side only, and not evidence
+that a command accepts a value. Worth remembering before reading a range in
+any other entry as a feature - which is the same lesson the parameter names
+taught in #4, where the catalogue's own spellings were not the request's.
+"""
 # -----------------------------------------------------------------------------
 # Portions of this file - the reverse-engineered Geely protocol / field mappings
 # (the parts that required protocol research) - are derived from

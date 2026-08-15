@@ -87,6 +87,16 @@ def test_a_single_phase_charge_keeps_its_honest_product():
     assert _power(_charging(chargeUAct="236.7", chargeIAct="28.4")) == 6.72
 
 
+def test_a_second_real_single_phase_car_agrees():
+    """A different owner's home charger (#10), and the one sample with an
+    independent cross-check: 3.27 kW at the plug against a Pack Power of
+    -2.97 kW is a 9% gap, which is what AC-DC conversion loss looks like. A
+    root-3 factor here would make it 5.66 kW against the same pack draw -
+    a charger that delivers less than it takes, which is the shape of wrong
+    that this asserts against from below."""
+    assert _power(_charging(chargeUAct="231.7", chargeIAct="14.1")) == 3.27
+
+
 def test_a_dc_session_never_gets_the_three_phase_factor():
     """A DC charge is one circuit into the pack and its product is already the
     power. This is the same 400 V that means three phases on the AC leg, so the
