@@ -50,7 +50,13 @@ SPECS: tuple[tuple[str, str, tuple[str, ...], BinarySensorDeviceClass | None, tu
     ("door_rear_left",       "Door Rear-Left",    (*_SAFE, "doorOpenStatusDriverRear"),     BinarySensorDeviceClass.DOOR,    ("1", 1)),
     ("door_rear_right",      "Door Rear-Right",   (*_SAFE, "doorOpenStatusPassengerRear"),  BinarySensorDeviceClass.DOOR,    ("1", 1)),
     ("trunk_open",           "Trunk",             (*_SAFE, "trunkOpenStatus"),              BinarySensorDeviceClass.OPENING, ("1", 1)),
-    ("hood_open",            "Hood",              (*_SAFE, "engineHoodOpenStatus"),         None,                            ("1", 1)),
+    # OPENING rather than no class, which is what the trunk beside it uses.
+    # Without one, Home Assistant has no labels to show and falls back to
+    # On/Off - so this one panel read "Off" in a row of things reading
+    # "Closed" (#40). The state itself is unchanged: a binary sensor is always
+    # on/off underneath, and the device class only decides what that is called
+    # on screen, so nothing keyed on the state moves.
+    ("hood_open",            "Hood",              (*_SAFE, "engineHoodOpenStatus"),         BinarySensorDeviceClass.OPENING, ("1", 1)),
     ("driver_seatbelt",      "Driver Seatbelt",   (*_SAFE, "seatBeltStatusDriver"),         None,                            ("true", True)),
     # `statusOfChargerConnection` - values:
     #   0 = unplugged

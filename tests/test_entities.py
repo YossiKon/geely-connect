@@ -497,3 +497,23 @@ def test_the_trunk_lock_is_readable_at_all():
     assert lock("1").is_on is False
     assert lock("2").is_on is False, "double-locked is still locked"
     assert lock(None).is_on is None
+
+
+def test_every_panel_that_opens_says_closed_rather_than_off():
+    """A binary sensor with no device class has no labels to show, so Home
+    Assistant falls back to On/Off. The hood was the one opening without a
+    class, and it read "Off" in a row of doors reading "Closed" (#40).
+
+    Deliberately a rule over all of them rather than a check of the one that
+    was wrong, because the next panel added would land in the same trap - the
+    seatbelt is excluded because it is not an opening and On/Off is honest
+    for it."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    bs = load("binary_sensor")
+    openings = {"door_driver", "door_passenger", "door_rear_left",
+                "door_rear_right", "trunk_open", "hood_open"}
+    for spec in bs.SPECS:
+        if spec[0] not in openings:
+            continue
+        assert spec[3] is not None, f"{spec[0]} has no device class, so it reads On/Off"
