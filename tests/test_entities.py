@@ -546,3 +546,59 @@ def test_an_unknown_park_brake_code_stays_visible_as_itself():
         skip("homeassistant not installed")
     sensor = load("sensor")
     assert sensor._coerce("7", "map", sensor._PARK_BRAKE_MAP) == "7"
+
+
+def _park_brake(value):
+    """The park-brake binary sensor reading one raw code."""
+    import copy
+    bs = load("binary_sensor")
+    spec = next(s for s in bs.SPECS if s[0] == "park_brake_engaged")
+    data = copy.deepcopy(STATUS)
+    safe = data["vehicleStatus"]["additionalVehicleStatus"]["drivingSafetyStatus"]
+    if value is None:
+        safe.pop("electricParkBrakeStatus", None)
+    else:
+        safe["electricParkBrakeStatus"] = value
+
+    class C(_Coord):
+        pass
+    C.data = data
+    return bs.GeelyBinarySensor(C(), FAKE_VIN, "Geely", *spec)
+
+
+def test_the_park_brake_binary_reads_the_two_measured_codes():
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    assert _park_brake("3").is_on is True
+    assert _park_brake("9").is_on is False
+
+
+def test_an_unrecognised_park_brake_code_is_unknown_not_released():
+    """The point of the entity, and the reporter's own design (#41): 3 and 9
+    are the only codes any car has been seen sending, out of a set nobody has
+    enumerated. A fourth code is most likely a fault state, and reporting a
+    car whose brake state cannot be determined as *released* is the failure
+    that matters - it is the direction that reads safe when it is not."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    for code in ("7", 7, "0x3", "", "engaged"):
+        assert _park_brake(code).is_on is None, code
+    assert _park_brake(None).is_on is None, "a missing field must not read off"
+
+
+def test_every_other_binary_sensor_still_treats_unknown_as_off():
+    """off_values is opt-in. Adding it must not have changed an entity that can
+    say what off is - a door that is not open is closed, and always was."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    import copy
+    bs = load("binary_sensor")
+    spec = next(s for s in bs.SPECS if s[0] == "door_driver")
+    data = copy.deepcopy(STATUS)
+    data["vehicleStatus"]["additionalVehicleStatus"]["drivingSafetyStatus"][
+        "doorOpenStatusDriver"] = "0"
+
+    class C(_Coord):
+        pass
+    C.data = data
+    assert bs.GeelyBinarySensor(C(), FAKE_VIN, "Geely", *spec).is_on is False

@@ -106,6 +106,19 @@ SPECS: tuple[tuple[str, str, tuple[str, ...], BinarySensorDeviceClass | None, tu
     # 0 unlocked. So 0 is the unlocked code here too, which with device_class
     # LOCK is what "on" has to mean.
     ("trunk_unlocked",       "Trunk Lock",        (*_SAFE, "trunkLockStatus"),              BinarySensorDeviceClass.LOCK,    ("0", 0)),
+    # Park brake, on/off beside the mapped text sensor that names the code -
+    # the same pairing `statusOfChargerConnection` already has (Charger Plug
+    # here, Charger Connection there), and for the same reason: an automation
+    # wants on/off, a dashboard wants a word.
+    #
+    # This one is the reason `off_values` exists. Every other entity above
+    # treats "not an on value" as off, which cannot be said here: 3 (engaged)
+    # and 9 (released) are the only codes any car has been seen sending, out of
+    # a set nobody has enumerated, so a fourth code has to read unknown rather
+    # than be filed as released. That was the reporter's own design (#41) and
+    # it is better than the answer given first, which was to refuse the entity.
+    # 0/1 ride along from the original mapping - unproven, not disproven.
+    ("park_brake_engaged",   "Park Brake Engaged", (*_SAFE, "electricParkBrakeStatus"),     None,                            ("3", 3, "1", 1), (), ("9", 9, "0", 0)),
 )
 
 # Removed (redundant with proper entities):
@@ -178,7 +191,8 @@ class GeelyBinarySensor(CoordinatorEntity, BinarySensorEntity):
                  friendly_name: str, path: tuple[str, ...],
                  device_class: BinarySensorDeviceClass | None,
                  on_values: tuple[Any, ...],
-                 absent_values: tuple[Any, ...] = ()) -> None:
+                 absent_values: tuple[Any, ...] = (),
+                 off_values: tuple[Any, ...] = ()) -> None:
         super().__init__(coordinator)
         self._path = path
         self._on_values = on_values
@@ -186,6 +200,12 @@ class GeelyBinarySensor(CoordinatorEntity, BinarySensorEntity):
         # "the feature is off". Without this the entity reads a confident Off on
         # hardware that is not fitted.
         self._absent_values = absent_values
+        # When set, the ONLY values that mean off - everything unrecognised
+        # then reads unknown instead. For a field whose full code set nobody
+        # has enumerated, "not on" is not the same claim as "off". Empty for
+        # every entity that can say what off is, which keeps their behaviour
+        # exactly as it was.
+        self._off_values = off_values
         self._attr_unique_id = f"geely_{vin}_bs_{key}"
         self._attr_name = friendly_name
         if device_class is not None:
@@ -204,4 +224,8 @@ class GeelyBinarySensor(CoordinatorEntity, BinarySensorEntity):
         v = _walk(self.coordinator.data or {}, self._path)
         if v is None or v in self._absent_values:
             return None
-        return v in self._on_values
+        if v in self._on_values:
+            return True
+        if self._off_values:
+            return False if v in self._off_values else None
+        return False
