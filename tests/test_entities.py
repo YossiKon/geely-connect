@@ -517,3 +517,32 @@ def test_every_panel_that_opens_says_closed_rather_than_off():
         if spec[0] not in openings:
             continue
         assert spec[3] is not None, f"{spec[0]} has no device class, so it reads On/Off"
+
+
+def test_the_park_brake_reads_the_codes_real_cars_send():
+    """The map shipped with 0/1 and no car has ever been seen sending either.
+
+    Two EX5s send 3 and 9 instead (#41): an owner watched the brake and read 3
+    engaged, 9 released, and a second car's diagnostics attached to #20 shows
+    `electricParkBrakeStatus: "3"` while parked with the engine off - which is
+    the state a parked car is in. Before this, both of them saw a bare "3"
+    where the entity promises a word."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    sensor = load("sensor")
+    m = sensor._PARK_BRAKE_MAP
+    assert m["3"] == m[3] == "Engaged"
+    assert m["9"] == m[9] == "Released"
+    # The originals stay: they are unproven, not disproven, and dropping them
+    # on an absence would break any car that does use them.
+    assert m["0"] == "Released" and m["1"] == "Engaged"
+
+
+def test_an_unknown_park_brake_code_stays_visible_as_itself():
+    """Two codes are known out of a set nobody has enumerated, so a third has
+    to arrive as a number somebody can report - not as a guessed label, and not
+    as unknown, which would hide it."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    sensor = load("sensor")
+    assert sensor._coerce("7", "map", sensor._PARK_BRAKE_MAP) == "7"

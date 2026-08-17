@@ -137,9 +137,27 @@ _CHARGING_CODES = frozenset(
     code for code, label in _CHARGER_CONNECTION_MAP.items() if label == "Charging"
 )
 
+# Two encodings, because real cars use the second one and nothing here knew it.
+#
+# 0/1 came with the original field mapping and no car has been seen reporting
+# either, so they stay rather than being removed on an absence.
+#
+# 3/9 are measured (#41): an owner watched the brake and read 3 engaged, 9
+# released. 3 is corroborated by a second EX5 whose diagnostics were attached
+# to #20 - parked, `engineStatus: engine_off`, `electricParkBrakeStatus: "3"`,
+# which is the state a parked car is in.
+#
+# An unmapped code deliberately falls through to the raw value (see _coerce),
+# so a car using a third encoding shows a number somebody can report rather
+# than a label invented for it. That is also why this stays a sensor and not a
+# binary sensor: with two codes known out of an unknown set, "not engaged"
+# cannot honestly mean released - the same trap #13 fell into by reading
+# parkComfortState as a flag.
 _PARK_BRAKE_MAP = {
     "0": "Released", 0: "Released",
     "1": "Engaged",  1: "Engaged",
+    "9": "Released", 9: "Released",
+    "3": "Engaged",  3: "Engaged",
 }
 
 _ENGINE_STATE_MAP = {
