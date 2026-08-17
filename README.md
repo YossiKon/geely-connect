@@ -424,6 +424,12 @@ an existing one, and again whenever you change the unit under **Configure**.
 
 The originals stay, so anything already pointing at them keeps working.
 
+> **If the card shows `—` for all four tires**, check that the **first** set is
+> enabled: the card reads those four and nothing else, so disabling them as
+> duplicates - a reasonable thing to do on seeing three sets - empties the
+> panel while every other view keeps working from the second set
+> ([#39](https://github.com/YossiKon/geely-connect/issues/39)).
+
 **All three units are always there.** Each of the four carries `psi`, `bar` and
 `kPa` attributes, whatever the state itself is showing - so a card or template
 can take whichever it wants without depending on the setup choice:
