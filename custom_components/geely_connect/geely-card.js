@@ -1332,10 +1332,34 @@
         ${airRow ? `<div class="crow wrap" style="margin-top:10px">${airRow}</div>` : ""}`;
     }
 
+    /* The value as Home Assistant itself would print it - unit and the user's
+     * display precision included.
+     *
+     * `st.state` is the raw value, which reads fine until Home Assistant
+     * converts one: an odometer switched to miles arrives as
+     * 7730.479002662467 and the card printed every digit (#42). The chosen
+     * precision lives in the entity registry, not on the state, and
+     * formatEntityState is the frontend's own way to apply it - so the card
+     * asks rather than reimplementing rounding it would get subtly wrong
+     * across distances, pressures and temperatures.
+     *
+     * The raw pair remains the fallback for a Home Assistant too old to offer
+     * the helper, which is what the value looked like before this. */
+    _fmt(st) {
+      const hass = this._hass;
+      if (hass && typeof hass.formatEntityState === "function") {
+        try {
+          const out = hass.formatEntityState(st);
+          if (out) return out;
+        } catch (err) { /* fall through to the raw pair */ }
+      }
+      return `${st.state}${UNIT(st) ? " " + UNIT(st) : ""}`;
+    }
+
     _row(label, st, opts = {}) {
       if (!st && !opts.value) return "";
       const value = opts.value != null ? opts.value
-        : OK(st) ? `${st.state}${UNIT(st) ? " " + UNIT(st) : ""}` : "—";
+        : OK(st) ? this._fmt(st) : "—";
       return `<div class="row ${opts.accent ? "accent" : ""} ${opts.warn ? "warn" : ""}">
           <span>${esc(label)}</span><b>${esc(value)}</b></div>`;
     }

@@ -641,6 +641,52 @@ def test_the_driving_banner_speed_follows_its_entity_too():
         assert "km/h" not in got, (tag, got[:200])
 
 
+# --------------------------------- #42: the precision the owner asked for
+
+_PRECISION_SCRIPT = r"""() => {
+    const mk = (withFmt) => {
+        const el = document.createElement("geely-card");
+        document.body.appendChild(el);
+        el.setConfig({});
+        const hass = window.mkHass({});
+        // What Home Assistant hands a card once it converts km to miles: the
+        // full float, with the chosen precision held in the entity registry
+        // rather than on the state.
+        hass.states["sensor.car_total_mileage"] = {
+            entity_id: "sensor.car_total_mileage", state: "7730.479002662467",
+            attributes: {unit_of_measurement: "mi", device_class: "distance"}};
+        if (withFmt) {
+            hass.formatEntityState = (st) => Math.round(Number(st.state)) + " mi";
+        }
+        el.hass = hass;
+        return [...el.shadowRoot.querySelectorAll(".row")]
+            .map((r) => r.textContent.replace(/\s+/g, " ").trim())
+            .filter((t) => t.indexOf("Odometer") === 0)[0];
+    };
+    return {formatted: mk(true), fallback: mk(false)};
+}"""
+
+
+def test_a_row_prints_the_number_the_way_home_assistant_would():
+    """The card read `state` directly, which is the raw value. That is
+    invisible until Home Assistant converts one: an odometer switched to miles
+    arrives as 7730.479002662467 and every digit was printed (#42).
+
+    The precision is registry data, not state data, so the card asks the
+    frontend to format rather than reimplementing rounding it would get subtly
+    wrong across distances, pressures and temperatures."""
+    got = _evaluate(_PRECISION_SCRIPT)
+    assert got["formatted"] == "Odometer7730 mi", got
+
+
+def test_a_home_assistant_without_the_formatter_still_gets_a_value():
+    """The fallback is exactly what the card showed before, so an older Home
+    Assistant loses nothing - a blank row would be a worse bug than an
+    over-precise one."""
+    got = _evaluate(_PRECISION_SCRIPT)
+    assert got["fallback"] == "Odometer7730.479002662467 mi", got
+
+
 # ------------------------------------------- #29: the climate row on a phone
 
 _ROWS_PROBE = """(() => {
