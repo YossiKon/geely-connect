@@ -602,3 +602,46 @@ def test_every_other_binary_sensor_still_treats_unknown_as_off():
         pass
     C.data = data
     assert bs.GeelyBinarySensor(C(), FAKE_VIN, "Geely", *spec).is_on is False
+
+
+def _btm(value):
+    """The battery-temperature-maintenance sensor reading one raw value."""
+    import copy
+    bs = load("binary_sensor")
+    spec = next(s for s in bs.SPECS if s[0] == "battery_temp_maintenance")
+    data = copy.deepcopy(STATUS)
+    data.setdefault("_state", {})
+    if value is None:
+        data["_state"].pop("btTempActive", None)
+    else:
+        data["_state"]["btTempActive"] = value
+
+    class C(_Coord):
+        pass
+    C.data = data
+    return bs.GeelyBinarySensor(C(), FAKE_VIN, "Geely", *spec)
+
+
+def test_battery_temperature_maintenance_reads_the_flag_three_sources_agree_on():
+    """The half of #4 open since 4 August, and it needed no new request - the
+    field was already in the secondary status block.
+
+    On one EX5 the app shows the toggle on, `_state.btTempActive` reads 1, and
+    the vendor's schedule endpoint returns `btTempActive: "true"` beside a
+    `scheduledTime` that decodes to exactly the 22:30 the app displays. A
+    Starray reads 0, which is the off half."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    assert _btm(1).is_on is True
+    assert _btm("1").is_on is True
+    assert _btm("true").is_on is True
+    assert _btm(0).is_on is False
+    assert _btm("false").is_on is False
+
+
+def test_a_car_that_never_reports_the_flag_says_unknown_not_off():
+    """A trim without the feature, or a payload fetched before the secondary
+    block arrives, must not claim the maintenance is switched off."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    assert _btm(None).is_on is None

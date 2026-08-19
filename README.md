@@ -33,7 +33,7 @@ polished setup on top.
 ## ✨ Highlights
 
 - 🔒 **Security-first** - verified TLS plus public-key pinning.
-- 📊 **Everything enabled** - all 74 entities are on from the start (87 on a
+- 📊 **Everything enabled** - all 75 entities are on from the start (88 on a
   hybrid), no duplicates, nothing to switch on by hand.
 - 🧮 **Computed extras** - charging power, charge completion time, range at full
   charge and efficiency, none of which the car reports itself.
@@ -461,6 +461,22 @@ Driver door, Passenger door, Rear-Left door, Rear-Right door, Trunk, Hood,
 Driver seatbelt.
 
 The **Trunk Lock** sensor is worth knowing about separately: it reads the tailgate's own latch, not whether the gate is open. On the cars in [#20](https://github.com/YossiKon/geely-connect/issues/20) the Unlock Trunk button releases that latch without the gate moving, and until now the only feedback was the indicators flashing - so this is how you tell whether the command did anything.
+
+**Battery Temperature Maintenance** reads the app's *Scheduled trip → Battery
+Temperature Maintenance* toggle. It is a setting rather than a live activity:
+on means the car will condition the pack before the scheduled departure, not
+that it is doing so now. Three sources on one car agree on the decode
+([#4](https://github.com/YossiKon/geely-connect/issues/4)) - the app screenshot,
+the status flag, and the vendor's own schedule endpoint, whose departure time
+decodes to exactly the time the app shows. There is no switch for it yet:
+arming the schedule means writing the departure time back, and inventing that
+value would silently move it.
+
+**Park Brake Engaged** sits beside the *Park Brake* text sensor - on/off for an
+automation, a word for a dashboard. Only the two codes real cars send are
+mapped; anything else reads unknown rather than *released*, because a car whose
+brake state cannot be determined must not report the reading that looks safe
+([#41](https://github.com/YossiKon/geely-connect/issues/41)).
 
 ### Maintenance & health
 | Entity | Description |
@@ -1021,7 +1037,7 @@ enabling. Everything the car reports, plus the computed extras above.
 
 The one thing that varies by car is propulsion: the thirteen fuel and engine
 entities are created only for a car with a tank, so a battery-electric EX5 gets
-74 entities and a PHEV gets 87. That's a decision made once at startup from your
+75 entities and a PHEV gets 88. That's a decision made once at startup from your
 account's `powerType` plus the car's own telemetry - there is no option to set.
 
 The only thing not created is the raw full-exposure pass (see below), because

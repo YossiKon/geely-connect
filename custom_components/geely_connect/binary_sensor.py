@@ -25,6 +25,8 @@ from .helpers import walk as _walk
 _SAFE = ("vehicleStatus", "additionalVehicleStatus", "drivingSafetyStatus")
 _CLIM = ("vehicleStatus", "additionalVehicleStatus", "climateStatus")
 _EV   = ("vehicleStatus", "additionalVehicleStatus", "electricVehicleStatus")
+# The secondary status endpoint, where the *Active flags live.
+_STATE = ("_state",)
 
 # (key, friendly_name, path, device_class, on_when_value_in)
 # Friendly names drop the redundant "open" / "unlocked" suffix - HA's
@@ -39,6 +41,7 @@ _ICONS: dict[str, str] = {
     "charger_plugged_in": "mdi:ev-plug-type2",
     "tank_flap":        "mdi:gas-station",
     "steering_wheel_heating": "mdi:steering",
+    "battery_temp_maintenance": "mdi:battery-heart-variant",
 }
 
 
@@ -119,6 +122,24 @@ SPECS: tuple[tuple[str, str, tuple[str, ...], BinarySensorDeviceClass | None, tu
     # it is better than the answer given first, which was to refuse the entity.
     # 0/1 ride along from the original mapping - unproven, not disproven.
     ("park_brake_engaged",   "Park Brake Engaged", (*_SAFE, "electricParkBrakeStatus"),     None,                            ("3", 3, "1", 1), (), ("9", 9, "0", 0)),
+    # Battery Temperature Maintenance, the half of #4 that had been open since
+    # 4 August. It is the app's "Scheduled trip -> Battery Temperature
+    # Maintenance" toggle, and the read side needs no new request: the field is
+    # already in the secondary status block this integration polls.
+    #
+    # Identified by three sources agreeing on one car (#4), rather than by the
+    # flag-watching test an owner was asked to run:
+    #   - the app screenshot shows the toggle ON;
+    #   - `_state.btTempActive` reads 1 on that car;
+    #   - the vendor's own schedule endpoint (charge-server bizType 4, read
+    #     into the diagnostics report since v1.40.0) returns
+    #     `btTempActive: "true"` alongside `scheduledTime` decoding to exactly
+    #     the 22:30 the app displays.
+    # A Starray reads 0 here, which is the off half of the pair.
+    #
+    # `btActive` is deliberately NOT this field - it reads 0/false on the car
+    # whose maintenance is on, so whatever it is, it is something else.
+    ("battery_temp_maintenance", "Battery Temperature Maintenance", (*_STATE, "btTempActive"), None, ("1", 1, "true", True)),
 )
 
 # Removed (redundant with proper entities):
