@@ -137,6 +137,11 @@ SPECS: tuple[tuple[str, str, tuple[str, ...], BinarySensorDeviceClass | None, tu
     #     the 22:30 the app displays.
     # A Starray reads 0 here, which is the off half of the pair.
     #
+    # Then the entity was watched changing: the same owner switched the
+    # scheduled trip off and it followed to Off. That is worth more than the
+    # three snapshots above, because a field can agree with a setting once by
+    # coincidence and cannot track it by coincidence.
+    #
     # `btActive` is deliberately NOT this field - it reads 0/false on the car
     # whose maintenance is on, so whatever it is, it is something else.
     ("battery_temp_maintenance", "Battery Temperature Maintenance", (*_STATE, "btTempActive"), None, ("1", 1, "true", True)),
