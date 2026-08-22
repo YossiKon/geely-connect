@@ -1697,6 +1697,14 @@
         .row span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
         .row b { font-weight:500; color: var(--primary-text-color);
                  font-variant-numeric: tabular-nums; white-space:nowrap; }
+        /* Two columns stop fitting here: measured, the first label and
+         * value start ellipsising at 380px and a second pair follows by 340px
+         * (#47). One column at full width clips nothing at any width tested,
+         * so the pair stacks instead of being shortened. */
+        @container (max-width: 380px) {
+          .grid { grid-template-columns:minmax(0,1fr); }
+          .row b { overflow:hidden; text-overflow:ellipsis; }
+        }
         .row.accent b { color:${ACCENT}; }
         .row.warn b { color:${AMBER}; }
         .tires { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; text-align:center; }
@@ -2164,6 +2172,14 @@
         .row span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
         .row b { font-weight:500; color: var(--primary-text-color);
                  font-variant-numeric: tabular-nums; white-space:nowrap; }
+        /* Two columns stop fitting here: measured, the first label and
+         * value start ellipsising at 380px and a second pair follows by 340px
+         * (#47). One column at full width clips nothing at any width tested,
+         * so the pair stacks instead of being shortened. */
+        @container (max-width: 380px) {
+          .grid { grid-template-columns:minmax(0,1fr); }
+          .row b { overflow:hidden; text-overflow:ellipsis; }
+        }
         .row.accent b { color:${ACCENT}; }
         .row.warn b { color:${AMBER}; }
         .sec { margin-top:2px; }

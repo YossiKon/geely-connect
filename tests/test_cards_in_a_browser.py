@@ -726,6 +726,11 @@ _SERVICE_SCRIPT = r"""(arg) => {
         text: svc.textContent.replace(/\s+/g, " ").trim(),
         gridOverflow: Math.round(grid.scrollWidth - grid.clientWidth),
         valueClipped: b.scrollWidth > b.clientWidth,
+        clipped: [...grid.querySelectorAll(".row")].filter((r) => {
+          const l = r.querySelector("span"), v = r.querySelector("b");
+          return (l && l.scrollWidth > l.clientWidth)
+              || (v && v.scrollWidth > v.clientWidth);
+        }).map((r) => r.textContent.replace(/\s+/g, " ").trim()),
       };
       el.remove();
     }
@@ -752,6 +757,17 @@ def test_the_service_row_drops_the_hardcoded_unit_without_a_formatter():
     got = _evaluate(_SERVICE_SCRIPT, arg={"width": "460px", "withFmt": False})
     for tag, r in got.items():
         assert r["text"] == "Service in619 d / 16818.0326890957 mi", (tag, r)
+
+
+def test_the_pair_stacks_rather_than_shortening_anything_on_a_phone():
+    """A 1fr track floors at min-content, so one long cell widened the grid and
+    pushed the right-hand column off screen (#47). Shortening the value only
+    moved the problem: at 360px two columns ellipsise a label and a reading.
+    One column at full width clips nothing, so the pair stacks."""
+    got = _evaluate(_SERVICE_SCRIPT, arg={"width": "360px", "withFmt": True})
+    for tag, r in got.items():
+        assert r["gridOverflow"] == 0, (tag, r)
+        assert r["clipped"] == [], (tag, r["clipped"])
 
 
 # ------------------------------------------- #29: the climate row on a phone
