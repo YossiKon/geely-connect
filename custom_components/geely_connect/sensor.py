@@ -206,6 +206,13 @@ _SENSOR_ICONS: dict[str, str] = {
     "power_consumption_trip": "mdi:lightning-bolt-outline",
 }
 
+# Home Assistant grew the energy_distance device class in 2025.3, and with it
+# the converter that puts mi/kWh in the unit picker (#37). hacs.json still
+# admits 2024.1, where the attribute is absent and reading it would fail the
+# import and take every entity down, so ask rather than assume.
+_ENERGY_DISTANCE = getattr(SensorDeviceClass, "ENERGY_DISTANCE", None)
+
+
 # (key, friendly_name, dotted-path, unit, device_class, value_type, value_map?)
 SENSOR_SPECS: tuple[tuple, ...] = (
     ("battery",             "Battery",              (*_EV,    "chargeLevel"),                          PERCENTAGE,                       SensorDeviceClass.BATTERY,     "float", None),
@@ -220,7 +227,7 @@ SENSOR_SPECS: tuple[tuple, ...] = (
     ("time_to_full_min",    "Time To Full Charge",  (*_EV,    "timeToFullyCharged"),                   "min",                            None,                          "minutes", None),
     ("12v_battery",         "12V Battery",          (*_MAINT, "mainBatteryStatus", "chargeLevel"),     PERCENTAGE,                       None,                          "float", None),
     ("12v_voltage",         "12V Voltage",          (*_MAINT, "mainBatteryStatus", "voltage"),         UnitOfElectricPotential.VOLT,     SensorDeviceClass.VOLTAGE,     "float", None),
-    ("avg_consumption",     "Average Consumption",  (*_EV,    "averPowerConsumption"),                 "kWh/100km",                      None,                          "float", None),
+    ("avg_consumption",     "Average Consumption",  (*_EV,    "averPowerConsumption"),                 "kWh/100km",                      _ENERGY_DISTANCE,              "float", None),
     ("trip_meter",          "Trip Meter",           (*_RUN,   "tripMeter1"),                           UnitOfLength.KILOMETERS,          SensorDeviceClass.DISTANCE,    "float", None),
     ("avg_speed",           "Average Speed",        (*_RUN,   "avgSpeed"),                             UnitOfSpeed.KILOMETERS_PER_HOUR,  SensorDeviceClass.SPEED,       "float", None),
     # Tyre temperatures, from the same TPMS sensors as the pressures below.
@@ -241,7 +248,7 @@ SENSOR_SPECS: tuple[tuple, ...] = (
     ("distance_to_service", "Distance To Service",  (*_MAINT, "distanceToService"),                    UnitOfLength.KILOMETERS,          SensorDeviceClass.DISTANCE,    "int",   None),
     # The trip twin of avg_consumption. The server has always sent both; only
     # the lifetime one was read, which made the pair look like one reading.
-    ("power_consumption_trip", "Trip Consumption",   (*_EV,    "averTraPowerConsumption"),              "kWh/100km",                      None,                          "float", None),
+    ("power_consumption_trip", "Trip Consumption",   (*_EV,    "averTraPowerConsumption"),              "kWh/100km",                      _ENERGY_DISTANCE,              "float", None),
 )
 
 # Only created for a car that burns fuel - see propulsion.py. A BEV reports none
@@ -734,6 +741,7 @@ class GeelyEfficiencySensor(CoordinatorEntity, _AutoPrecision):
     (server reports kWh/100km)."""
 
     _attr_has_entity_name = True
+    _attr_device_class = _ENERGY_DISTANCE
     _attr_native_unit_of_measurement = "km/kWh"
     _attr_icon = "mdi:leaf"
     _attr_state_class = SensorStateClass.MEASUREMENT

@@ -67,6 +67,37 @@ def test_efficiency_is_none_when_the_field_is_absent():
     assert _make("GeelyEfficiencySensor", data).native_value is None
 
 
+def test_energy_per_distance_sensors_can_be_switched_to_miles():
+    """A unit picker only appears when the device class has a converter, and
+    energy_distance is the one carrying mi/kWh (#37). Two things have to hold:
+    the three entities must go through _ENERGY_DISTANCE rather than naming the
+    member directly, since it is absent before Home Assistant 2025.3, and their
+    unit strings must stay members of UnitOfEnergyDistance or Home Assistant
+    rejects the pair instead of converting it."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    from homeassistant.components.sensor import SensorDeviceClass
+    from homeassistant.components.sensor.const import DEVICE_CLASS_UNITS
+    from homeassistant.util.unit_conversion import EnergyDistanceConverter
+
+    sensor = load("sensor")
+    assert sensor._ENERGY_DISTANCE == SensorDeviceClass.ENERGY_DISTANCE
+    allowed = DEVICE_CLASS_UNITS[SensorDeviceClass.ENERGY_DISTANCE]
+
+    eff = _make("GeelyEfficiencySensor", _status())
+    assert eff.device_class is sensor._ENERGY_DISTANCE
+    assert eff.native_unit_of_measurement in allowed
+
+    for key in ("avg_consumption", "power_consumption_trip"):
+        spec = next(x for x in sensor.SENSOR_SPECS if x[0] == key)
+        assert spec[4] is sensor._ENERGY_DISTANCE, key
+        assert spec[3] in allowed, key
+
+    # 15.9 kWh/100km is what a real EX5 reports; a miles install reads 3.9.
+    assert round(EnergyDistanceConverter.convert(
+        15.9, "kWh/100km", "mi/kWh"), 1) == 3.9
+
+
 # ---------------------------------------------------------- full range ---
 
 def test_full_range_extrapolates_to_a_hundred_percent():
