@@ -1804,8 +1804,8 @@
             ${this._row("12 V battery", this._st("sensor.12v_battery"))}
             ${this._row("Service in", days, {
               warn: OK(days) && NUM(days) != null && NUM(days) <= 30,
-              value: OK(days) ? `${days.state} d / ${OK(this._st("sensor.distance_to_service"))
-                ? this._st("sensor.distance_to_service").state + " km" : "—"}` : "—" })}
+              value: OK(days) ? `${this._fmt(days)} / ${OK(this._st("sensor.distance_to_service"))
+                ? this._fmt(this._st("sensor.distance_to_service")) : "—"}` : "—" })}
           </div>
 
           <div class="footer">
@@ -2256,8 +2256,8 @@
             ${this._row("12 V battery", this._st("sensor.12v_battery"))}
             ${this._row("Service in", days, {
               warn: OK(days) && NUM(days) != null && NUM(days) <= 30,
-              value: OK(days) ? `${days.state} d / ${OK(this._st("sensor.distance_to_service"))
-                ? this._st("sensor.distance_to_service").state + " km" : "—"}` : "—" })}
+              value: OK(days) ? `${this._fmt(days)} / ${OK(this._st("sensor.distance_to_service"))
+                ? this._fmt(this._st("sensor.distance_to_service")) : "—"}` : "—" })}
           </div>
 
           <div class="footer">
