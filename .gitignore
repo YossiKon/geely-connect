@@ -20,3 +20,6 @@ Thumbs.db
 
 # Browser automation artifacts (page snapshots, console logs)
 .playwright-mcp/
+
+# Serena local project config
+.serena/

@@ -665,7 +665,17 @@ class GeelySensor(CoordinatorEntity, _AutoPrecision):
         # working lever instead of an untried one.
         if self._value_offset and isinstance(val, (int, float)):
             val = round(val + self._value_offset, 1)
-        if self._key == "charger_connected" and val == "Plugged in"                 and _is_charging(self.coordinator.data or {}):
+        if self._key == "speed":
+            # `speed` is published alongside `speedValidity`; when the flag is
+            # false the value is whatever the car last put there, so a stale
+            # non-zero reading would be shown as real motion. Treat it as
+            # unknown instead, the same convention `steerWhlHeatingSts` = 0
+            # uses for an unhelpful value. A trim that never reports the flag
+            # is unaffected - only an explicit falsy value gates the sensor.
+            valid = _walk(self.coordinator.data or {}, (*_BASIC, "speedValidity"))
+            if valid is not None and str(valid).strip().lower() in ("false", "0"):
+                return None
+        if self._key == "charger_connected" and val == "Plugged in"                and _is_charging(self.coordinator.data or {}):
             # DC fast charge holds the raw field at 1 for the whole session
             # (#10), and a label that says "Plugged in" during a 90 kW charge
             # is technically true and practically wrong.

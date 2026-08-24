@@ -392,7 +392,7 @@ def test_a_car_without_a_heated_wheel_says_unknown_not_off():
 
 def test_the_steering_wheel_sensor_exists_and_is_read_only():
     """No command for it has ever been verified - every candidate fired at a
-    real car returned "operation succeed" and moved nothing - so it must appear
+    real car returned "operation succeed" and nothing moved - so it must appear
     as a sensor and NOT as a switch anyone could press."""
     if not have_homeassistant():
         skip("homeassistant not installed")
@@ -402,6 +402,68 @@ def test_the_steering_wheel_sensor_exists_and_is_read_only():
     assert not any("steer" in k for k in keys if k.startswith(("sw_", "select_"))), (
         "a pressable steering-wheel control appeared, with no verified command"
     )
+
+
+# ------------------------------- #44: speedValidity -------------------------
+
+def _speed(speed, validity=None, **basic_extra):
+    """The speed sensor over a basicVehicleStatus with `speed` and a
+    `speedValidity` flag. `validity=None` means the flag is absent (a trim
+    that never reports it); pass a real value to set it."""
+    import copy
+    data = copy.deepcopy(STATUS)
+    basic = data["vehicleStatus"]["basicVehicleStatus"]
+    basic["speed"] = speed
+    for k, v in basic_extra.items():
+        basic[k] = v
+    if validity is not None:
+        basic["speedValidity"] = validity
+    else:
+        basic.pop("speedValidity", None)
+
+    class C(_Coord):
+        pass
+    C.data = data
+    sensor = load("sensor")
+    spec = next(s for s in sensor.SENSOR_SPECS if s[0] == "speed")
+    return sensor.GeelySensor(C(), FAKE_VIN, "Geely EX5 (0000)", *spec,
+                              pressure_unit="psi")
+
+
+def test_speed_is_unknown_when_speed_validity_is_false():
+    """A parked EX5 sends `speed` = 0 with `speedValidity` = false; the two
+    agree by coincidence. The flag going false is the car saying the value is
+    stale, so the sensor must publish unknown rather than a confident zero."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    assert _speed("0", False).native_value is None
+    assert _speed("0", "false").native_value is None
+
+
+def test_a_stale_nonzero_speed_is_unknown_not_real_motion():
+    """The case that actually bites: flag false but the last speed was
+    non-zero. Without the guard this is published as real motion, which can
+    hold the driving lock and keep polling fast while the car is parked."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    assert _speed("50", False).native_value is None
+    assert _speed("50", "false").native_value is None
+
+
+def test_speed_is_published_when_speed_validity_is_true():
+    """The flag true means the value is live, so it passes through unchanged."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    assert _speed("50", True).native_value == 50.0
+    assert _speed("50", "true").native_value == 50.0
+
+
+def test_speed_is_published_when_speed_validity_is_absent():
+    """A trim that never reports the flag must keep the old behaviour - the
+    guard only fires on an explicit falsy value, not on a missing one."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    assert _speed("50").native_value == 50.0
 
 
 def test_the_documented_entity_counts_are_the_real_ones():
