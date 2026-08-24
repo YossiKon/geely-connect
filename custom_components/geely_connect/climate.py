@@ -465,20 +465,75 @@ class GeelyClimate(CoordinatorEntity, ClimateEntity, RestoreEntity):
         _LOGGER.debug("Geely rapid %s response=%s",
                       "warming" if warming else "cooling", redact(resp))
 
-        # Two polls, and the second one is the point. The rapid bundle asks for
-        # the cabin AND both front seats in one request, and the seat state
-        # arrives in `climateStatus` on the car's own schedule - a single poll at
-        # eight seconds can land before the seats are reported, and nothing came
-        # after it, so the seat entities read Off while the seats were warming.
-        # That is very likely what "it only turns on the heater" was (#19): the
-        # request has been proved correct since - the reporter fired the exact
-        # same body by hand and both seats went to high - which leaves the
-        # read-back as the difference between the two paths. The probe service
-        # polls twice for the same reason.
-        schedule_refresh(self._hass, self.coordinator, 8, 20)
+        # Three polls, then a verdict. The first two are the seat read-back
+        # story (#19): the rapid bundle asks for the cabin AND both front
+        # seats in one request, the seat state arrives on the car's own
+        # schedule, and a single poll at eight seconds can land before it.
+        #
+        # The third poll and the `after` are newer, and they exist because
+        # "accepted" was being worn as "running". The gateway answers 1000 to
+        # a rapid it will never deliver - the maintainer pressed Rapid cool,
+        # watched the card show it on for the optimistic window, and the car
+        # outside never started. The entity had the counter-evidence at t=8
+        # and t=20 (preClimateActive never moved) and did nothing with it.
+        # After the last poll, _verify_rapid either lets a visibly-running
+        # cycle stand, or drops every optimistic override and says out loud
+        # that the car has not reported starting.
+        self._rapid_warming = warming
+        schedule_refresh(self._hass, self.coordinator, 8, 20, 40,
+                         after=self._verify_rapid)
         self.async_write_ha_state()
 
     # ---- helpers ----
+
+    def _verify_rapid(self) -> None:
+        """The gateway said yes; this is whether the car did.
+
+        Runs after the last post-rapid poll, ~70s in. A cycle that started
+        shows as preClimateActive by then (owners confirm rapid inside ~30s,
+        #4), so its absence across three polls is read as "did not start":
+        every optimistic override is dropped, and the failure is said out
+        loud instead of being left to expire quietly minutes later with the
+        owner still waiting for cold air.
+
+        Worded as "has not reported starting" rather than "failed", because
+        a car can be asleep and catch up late - rare, and a wrong "it is
+        running" costs more than a wrong "check the car".
+        """
+        if _truthy(_walk(self.coordinator.data or {}, _PRECLIMATE_PATH)):
+            return                          # visibly running - nothing to say
+        self._optimistic_hvac_mode = None
+        self._optimistic_until = 0.0
+        self._optimistic_action = None
+        self._optimistic_action_until = 0.0
+        self._optimistic_preset = None
+        self._optimistic_preset_until = 0.0
+        self.async_write_ha_state()
+        what = "warming" if getattr(self, "_rapid_warming", False) else "cooling"
+        self._notify_rapid_silence(what)
+
+    def _notify_rapid_silence(self, what: str) -> None:
+        """One visible notice beats a control that quietly un-presses itself.
+
+        Separate method so tests can observe it without faking Home
+        Assistant's notification machinery, and guarded so a notification
+        failure can never break the state cleanup that precedes it.
+        """
+        try:
+            from homeassistant.components import persistent_notification
+            persistent_notification.async_create(
+                self._hass,
+                (f"The cloud accepted rapid {what}, but the car has not "
+                 f"reported starting it after a minute. It may be asleep or "
+                 f"out of coverage - worth a glance at the car or the app "
+                 f"before assuming it is running."),
+                title="Geely: rapid command not confirmed",
+                notification_id=f"geely_rapid_{self._vin}",
+            )
+        except Exception:  # noqa: BLE001 - the cleanup above must stand
+            _LOGGER.warning(
+                "rapid %s accepted by the cloud but never confirmed by the "
+                "car; notification could not be created", what)
 
     def _set_optimistic(self, mode: HVACMode) -> None:
         self._optimistic_hvac_mode = mode

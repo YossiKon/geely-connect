@@ -584,3 +584,51 @@ def test_a_rapid_preset_polls_twice_so_the_seat_entities_catch_up():
         f"the rapid preset still polls only once: {seen}")
     # Relative and cumulative, so the second read lands well after the first.
     assert sum(seen[0]) >= 20, seen
+
+
+# ------------------------------- the rapid verdict: accepted is not running ---
+
+def test_an_unconfirmed_rapid_drops_its_optimism_and_says_so():
+    """The gateway answers 1000 to a rapid it will never deliver, and the card
+    wore that as "running" for the optimistic window while the car sat idle -
+    pressed, lit, and quietly un-pressed minutes later (maintainer's own EX5).
+    After the last post-command poll, no preClimateActive means every override
+    is dropped at once and the silence is said out loud."""
+    _ha()
+    e, api, c = _entity(data=_status(interior="30.0"))    # no preClimateActive
+    sched = []
+    orig = c.schedule_refresh
+    c.schedule_refresh = lambda h, co, *d, after=None: sched.append((d, after))
+    said = []
+    e._notify_rapid_silence = lambda what: said.append(what)
+    try:
+        asyncio.run(e.async_set_preset_mode(c.PRESET_RAPID_COOLING))
+        assert e.preset_mode == c.PRESET_RAPID_COOLING, "optimism never showed"
+        (delays, after) = sched[0]
+        assert delays == (8, 20, 40), "the third look is gone"
+        assert callable(after), "no verdict after the last poll"
+        after()
+        assert e.preset_mode != c.PRESET_RAPID_COOLING, "still lit on no evidence"
+        assert e.hvac_mode == c.HVACMode.OFF
+        assert said == ["cooling"], "the silence stayed silent"
+    finally:
+        c.schedule_refresh = orig
+
+
+def test_a_visibly_running_rapid_is_left_alone():
+    """preClimateActive true is the car itself reporting the cycle; the
+    verdict must not clear a working state or nag about it."""
+    _ha()
+    e, api, c = _entity(data=_status(interior="30.0", pre="true"))
+    sched = []
+    orig = c.schedule_refresh
+    c.schedule_refresh = lambda h, co, *d, after=None: sched.append((d, after))
+    said = []
+    e._notify_rapid_silence = lambda what: said.append(what)
+    try:
+        asyncio.run(e.async_set_preset_mode(c.PRESET_RAPID_WARMING))
+        sched[0][1]()
+        assert said == [], "a running cycle was reported as silent"
+        assert e.hvac_mode == c.HVACMode.HEAT_COOL
+    finally:
+        c.schedule_refresh = orig
