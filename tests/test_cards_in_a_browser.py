@@ -687,6 +687,89 @@ def test_a_home_assistant_without_the_formatter_still_gets_a_value():
     assert got["fallback"] == "Odometer7730.479002662467 mi", got
 
 
+# --------------------------- #47: the Service in cell and the grid it widened
+
+_SERVICE_SCRIPT = r"""(arg) => {
+    const out = {};
+    for (const tag of ["geely-card", "geely-card-top"]) {
+      const el = document.createElement(tag);
+      document.body.appendChild(el);
+      el.setConfig({});
+      el.style.width = arg.width;
+      const hass = window.mkHass({});
+      // The whole block, because 1fr columns are sized against every row: two
+      // of them leave the long cell room the real card never gives it.
+      const put = (id, st, u) => { hass.states[id] = {entity_id: id, state: st,
+          attributes: {unit_of_measurement: u}}; };
+      put("sensor.car_total_mileage", "3192.60518571542", "mi");
+      put("sensor.car_trip_meter", "3192.72945995387", "mi");
+      put("sensor.car_average_consumption", "15.9", "kWh/100km");
+      put("sensor.car_efficiency", "3.908", "mi/kWh");
+      // A miles install: both halves arrive converted, with the precision in
+      // the registry rather than on the state.
+      put("sensor.car_days_to_service", "619", "d");
+      put("sensor.car_distance_to_service", "16818.0326890957", "mi");
+      if (arg.withFmt) {
+        hass.formatEntityState = (st) => {
+          const u = st.attributes.unit_of_measurement || "";
+          const n = u === "mi"
+            ? Math.round(Number(st.state)).toLocaleString("en") : st.state;
+          return u ? `${n} ${u}` : `${n}`;
+        };
+      }
+      el.hass = hass;
+      const grid = [...el.shadowRoot.querySelectorAll(".grid.sec")].pop();
+      const svc = [...grid.querySelectorAll(".row")].find(
+          (r) => r.textContent.indexOf("Service in") >= 0);
+      const b = svc.querySelector("b");
+      out[tag] = {
+        text: svc.textContent.replace(/\s+/g, " ").trim(),
+        gridOverflow: Math.round(grid.scrollWidth - grid.clientWidth),
+        valueClipped: b.scrollWidth > b.clientWidth,
+        clipped: [...grid.querySelectorAll(".row")].filter((r) => {
+          const l = r.querySelector("span"), v = r.querySelector("b");
+          return (l && l.scrollWidth > l.clientWidth)
+              || (v && v.scrollWidth > v.clientWidth);
+        }).map((r) => r.textContent.replace(/\s+/g, " ").trim()),
+      };
+      el.remove();
+    }
+    return out;
+}"""
+
+
+def test_the_service_row_prints_the_owners_unit():
+    """This cell passed its own `value`, so it never reached `_fmt`: it printed
+    the raw state and appended a hardcoded " km". On a miles install that reads
+    "16818.0326890957 km", wrong on both counts (#47). Asserted at a width
+    where the value fits, and pinned as unclipped, so the text this claims is
+    on screen really is."""
+    got = _evaluate(_SERVICE_SCRIPT, arg={"width": "460px", "withFmt": True})
+    for tag, r in got.items():
+        assert r["text"] == "Service in619 d / 16,818 mi", (tag, r)
+        assert not r["valueClipped"], (tag, r)
+
+
+def test_the_service_row_drops_the_hardcoded_unit_without_a_formatter():
+    """The fallback path changed too, since the old code appended " km"
+    whatever the entity said. An older Home Assistant now gets the entity's own
+    unit rather than a wrong one."""
+    got = _evaluate(_SERVICE_SCRIPT, arg={"width": "460px", "withFmt": False})
+    for tag, r in got.items():
+        assert r["text"] == "Service in619 d / 16818.0326890957 mi", (tag, r)
+
+
+def test_the_pair_stacks_rather_than_shortening_anything_on_a_phone():
+    """A 1fr track floors at min-content, so one long cell widened the grid and
+    pushed the right-hand column off screen (#47). Shortening the value only
+    moved the problem: at 360px two columns ellipsise a label and a reading.
+    One column at full width clips nothing, so the pair stacks."""
+    got = _evaluate(_SERVICE_SCRIPT, arg={"width": "360px", "withFmt": True})
+    for tag, r in got.items():
+        assert r["gridOverflow"] == 0, (tag, r)
+        assert r["clipped"] == [], (tag, r["clipped"])
+
+
 # ------------------------------------------- #29: the climate row on a phone
 
 _ROWS_PROBE = """(() => {
