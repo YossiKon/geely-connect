@@ -1666,7 +1666,7 @@
       // field read 0 for twenty-five minutes of a drive. The speed is still
       // shown when the car actually reports one.
       const statusLine = s.charging
-        ? `Charging${OK(power) ? " · " + power.state + " kW" : ""}`
+        ? `Charging${OK(power) ? " · " + this._fmt(power) : ""}`
         : driving
         ? `Driving${speed != null && speed > 0 ? ` · ${Math.round(speed)} ${esc(speedUnit)}` : ""}`
         : s.doorsOpen.length ? `${s.doorsOpen.length} opening${s.doorsOpen.length > 1 ? "s" : ""} open`
@@ -2119,7 +2119,7 @@
       // field read 0 for twenty-five minutes of a drive. The speed is still
       // shown when the car actually reports one.
       const statusLine = s.charging
-        ? `Charging${OK(power) ? " · " + power.state + " kW" : ""}`
+        ? `Charging${OK(power) ? " · " + this._fmt(power) : ""}`
         : driving
         ? `Driving${speed != null && speed > 0 ? ` · ${Math.round(speed)} ${esc(speedUnit)}` : ""}`
         : s.doorsOpen.length ? `${s.doorsOpen.length} opening${s.doorsOpen.length > 1 ? "s" : ""} open`

@@ -770,6 +770,50 @@ def test_the_pair_stacks_rather_than_shortening_anything_on_a_phone():
         assert r["clipped"] == [], (tag, r["clipped"])
 
 
+# ----------------------------------- #49: the banner's kW was a string literal
+
+_BANNER_SCRIPT = r"""(arg) => {
+    const out = {};
+    for (const tag of ["geely-card", "geely-card-top"]) {
+      const el = document.createElement(tag);
+      document.body.appendChild(el);
+      el.setConfig({});
+      const hass = window.mkHass({charging: true});
+      hass.states["sensor.car_charging_power"] = {
+          entity_id: "sensor.car_charging_power", state: arg.state,
+          attributes: {unit_of_measurement: arg.unit, device_class: "power"}};
+      if (arg.withFmt) {
+        hass.formatEntityState = (st) =>
+            `${Number(st.state).toLocaleString("en")} ${st.attributes.unit_of_measurement}`;
+      }
+      el.hass = hass;
+      const status = el.shadowRoot.querySelector(".status");
+      out[tag] = status ? status.textContent.replace(/\s+/g, " ").trim() : null;
+      el.remove();
+    }
+    return out;
+}"""
+
+
+def test_the_charging_banner_reads_the_entitys_own_unit():
+    """The banner appended a literal " kW" to the raw state - the last cell in
+    the card doing so (#49). Invisible while kW is the default, and wrong by
+    three orders of magnitude the day an owner switches the entity to watts:
+    6830 W printed as "6830 kW"."""
+    got = _evaluate(_BANNER_SCRIPT,
+                    arg={"state": "6830", "unit": "W", "withFmt": True})
+    for tag, text in got.items():
+        assert "6,830 W" in text, (tag, text)
+        assert "kW" not in text, (tag, text)
+
+
+def test_the_charging_banner_fallback_still_shows_power():
+    got = _evaluate(_BANNER_SCRIPT,
+                    arg={"state": "6.83", "unit": "kW", "withFmt": False})
+    for tag, text in got.items():
+        assert "6.83 kW" in text, (tag, text)
+
+
 # ------------------------------------------- #29: the climate row on a phone
 
 _ROWS_PROBE = """(() => {
