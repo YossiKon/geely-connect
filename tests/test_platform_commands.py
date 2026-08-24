@@ -175,8 +175,11 @@ def test_lock_sends_rdl2_door_all_and_goes_optimistic():
         assert writes == [1], "the optimistic flip was not written to HA"
         (coord, delays, after) = sched[0]
         assert coord is entity.coordinator
-        assert delays == (8,)
-        assert callable(after), "no release callback for the optimistic state"
+        # Two polls, and deliberately NO release callback: a poll that still
+        # shows the old state must not end the hold, so only agreement or the
+        # timeout does (see test_a_stale_poll_does_not_snap_the_lock_back).
+        assert delays == (8, 12)
+        assert after is None, "a forced release is the stale-poll bug again"
     finally:
         lock.schedule_refresh, lock.time = orig_sched, orig_time
 
@@ -245,20 +248,27 @@ def test_lock_stays_in_transition_while_the_api_reports_nothing():
         lock.schedule_refresh, lock.time = orig_sched, orig_time
 
 
-def test_the_after_callback_releases_the_optimistic_override():
+def test_a_stale_poll_does_not_snap_the_lock_back():
+    """The release used to run after the first poll unconditionally, and the
+    8s snapshot is routinely the PRE-command one - so pressing Lock showed
+    locked, then snapped back to unlocked at t=8 while the car outside was
+    executing the command (reported live by an owner). A poll that still
+    shows the old state is not evidence the command failed; the hold now ends
+    only on agreement or on the timeout."""
     _need_ha()
     lock, entity, writes = _make_lock(data=_lock_data("0"))
     sched = []
     orig_sched, orig_time = lock.schedule_refresh, lock.time
-    lock.schedule_refresh = lambda h, c, *d, after=None: sched.append(after)
-    lock.time = FakeTime(1000.0)
+    lock.schedule_refresh = lambda h, c, *d, **k: sched.append(d)
+    clock = FakeTime(1000.0)
+    lock.time = clock
     try:
         asyncio.run(entity.async_lock())
         assert entity.is_locked is True
-        sched[0]()                              # the post-poll release runs
-        assert entity._pending_target_locked is None
-        assert entity.is_locked is False, "release did not fall back to server truth"
-        assert writes == [1, 1], "release did not write the real state"
+        clock.now = 1008.0                       # the first poll has landed...
+        assert entity.is_locked is True, "a stale poll snapped the lock back"
+        assert entity.is_locking is True, "the spinner dropped on no evidence"
+        assert sched == [(8, 12)], "the second chance to confirm is gone"
     finally:
         lock.schedule_refresh, lock.time = orig_sched, orig_time
 

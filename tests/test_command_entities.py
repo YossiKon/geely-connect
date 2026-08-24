@@ -866,3 +866,68 @@ def test_a_rejected_time_write_leaves_no_optimistic_trace():
     with _patched(t, schedule_refresh=rec, time_mod=_Clock()):
         e2 = _expect_error(ent2.async_set_value(dtime(2, 0)))
     assert "Geely Scheduled Charging time failure: boom" in str(e2), e2
+
+
+# ----------------------------------------- the optimistic hold on toggles ---
+
+def test_a_toggle_holds_its_requested_state_through_a_stale_poll():
+    """The poll 8s after a command routinely re-reads the snapshot from BEFORE
+    the command, and every unheld switch snapped back to its old state on
+    screen while the car was executing - reported live by an owner pressing
+    Defrost and watching it revert. The hold ignores a contradicting poll
+    inside the window, because a snapshot older than the command cannot
+    testify about it."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    sw = load("switch")
+    data = _status(climate={"defrost": "false"})
+    hass, b = _bundle(data)
+    ent = sw.GeelyDefrostSwitch(hass, b)
+    with _patched(sw, schedule_refresh=_RefreshRec()):
+        asyncio.run(ent.async_turn_on())
+    # The stale poll still says off; the switch must not follow it.
+    assert ent.is_on is True, "a stale poll snapped the toggle back"
+
+
+def test_the_hold_ends_the_moment_a_poll_confirms():
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    sw = load("switch")
+    data = _status(climate={"defrost": "false"})
+    hass, b = _bundle(data)
+    ent = sw.GeelyDefrostSwitch(hass, b)
+    with _patched(sw, schedule_refresh=_RefreshRec()):
+        asyncio.run(ent.async_turn_on())
+    data["vehicleStatus"]["additionalVehicleStatus"]["climateStatus"]["defrost"] = "true"
+    assert ent.is_on is True
+    assert ent._hold_state is None, "a confirming poll did not release the hold"
+    # And once released, raw state rules again - including a later off.
+    data["vehicleStatus"]["additionalVehicleStatus"]["climateStatus"]["defrost"] = "false"
+    assert ent.is_on is False
+
+
+def test_the_hold_expires_rather_than_pinning_a_refused_command():
+    """If the car never confirms - a genuinely refused command - the window
+    runs out and the raw state returns. Optimism is bounded."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    sw = load("switch")
+    data = _status(climate={"defrost": "false"})
+    hass, b = _bundle(data)
+    ent = sw.GeelyDefrostSwitch(hass, b)
+    with _patched(sw, schedule_refresh=_RefreshRec()):
+        asyncio.run(ent.async_turn_on())
+    ent._hold_until = 0.0                       # the 45s window has passed
+    assert ent.is_on is False, "expired optimism beat the raw state"
+
+
+def test_every_command_switch_carries_the_hold():
+    """The bounce was reported on 'the built-in cards' generally, not one
+    switch, so the fix has to cover every toggle a card renders. A new switch
+    class that forgets the mixin lands right back in the bug."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    sw = load("switch")
+    for cls in (sw.GeelySwitch, sw.GeelyGCleanSwitch, sw.GeelyDefrostSwitch,
+                sw.GeelyWindowVentilationSwitch):
+        assert issubclass(cls, sw._OptimisticHold), cls.__name__

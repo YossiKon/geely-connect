@@ -89,6 +89,46 @@ def _state_in(v: Any, on_values: tuple[Any, ...]) -> bool:
     return v in on_values
 
 
+class _OptimisticHold:
+    """Hold a requested state until the car confirms it or a window expires.
+
+    The gateway acknowledges a command long before the car's telemetry
+    reflects it, and the poll scheduled 8s later routinely re-reads the
+    snapshot from BEFORE the command. Without a hold, that poll snaps the
+    toggle back to its old state on screen while the car is executing - the
+    "I pressed it and it jumped back" report. The steering-wheel switch
+    proved this pattern (v1.39.1); this mixin is that pattern, shared.
+
+    The hold ends EARLY the moment the raw reading agrees with the requested
+    state, so a confirming poll hands over seamlessly. A contradicting poll
+    inside the window is ignored, because a snapshot older than the command
+    cannot testify about it. A raw None keeps the hold: absence of evidence
+    is not the old state coming back.
+    """
+    _hold_state: bool | None = None
+    _hold_until: float = 0.0
+
+    def _hold(self, state: bool, seconds: float = 45.0) -> None:
+        self._hold_state = state
+        self._hold_until = time.time() + seconds
+
+    def _write_held_state(self) -> None:
+        """Show the held state at once. The frontend's own optimistic flip
+        covers the first moment; this makes the entity agree with it rather
+        than waiting for the next coordinator tick. Guarded because tests
+        drive bare entities that were never added to Home Assistant."""
+        if getattr(self, "hass", None) is not None:
+            self.async_write_ha_state()
+
+    def _resolve(self, raw: bool | None) -> bool | None:
+        if self._hold_state is None or time.time() >= self._hold_until:
+            return raw
+        if raw is not None and raw == self._hold_state:
+            self._hold_state = None      # confirmed - raw takes over
+            return raw
+        return self._hold_state
+
+
 # (key, name, icon, service_id, on_params, off_params, command_on, command_off, state_path, on_when_in, capability_flag)
 SWITCH_DEFS: list[tuple] = [
     # Parking Comfort - the path below is absent on purpose, so is_on returns
@@ -170,7 +210,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
     add_entities(entities)
 
 
-class GeelySwitch(CoordinatorEntity, SwitchEntity):
+class GeelySwitch(_OptimisticHold, CoordinatorEntity, SwitchEntity):
     _attr_has_entity_name = True
 
     def __init__(self, hass: HomeAssistant, bundle: dict, key: str, name: str,
@@ -213,10 +253,10 @@ class GeelySwitch(CoordinatorEntity, SwitchEntity):
             # field, so a trim that omits statusOfChargerConnection entirely
             # would otherwise report unknown through a whole DC session.
             from .sensor import _is_charging
-            return _is_charging(self.coordinator.data or {})
+            return self._resolve(_is_charging(self.coordinator.data or {}))
         if v is None:
-            return None
-        return _state_in(v, self._on_when_in)
+            return self._resolve(None)
+        return self._resolve(_state_in(v, self._on_when_in))
 
     async def async_turn_on(self, **_: Any) -> None:
         await self._fire(self._on_params, self._command_on)
@@ -236,11 +276,12 @@ class GeelySwitch(CoordinatorEntity, SwitchEntity):
             raise HomeAssistantError(f"Geely {self._service_id} failure: {e}") from e
         _LOGGER.debug("Geely switch %s %s params=%s response=%s",
                       self._service_id, command, redact(params), redact(resp))
-
+        self._hold(command == self._command_on)
+        self._write_held_state()
         schedule_refresh(self._hass, self.coordinator, 8)
 
 
-class GeelyGCleanSwitch(CoordinatorEntity, SwitchEntity):
+class GeelyGCleanSwitch(_OptimisticHold, CoordinatorEntity, SwitchEntity):
     """G-clean (cabin air purification).
 
     AVD-verified 2026-05-01:
@@ -274,8 +315,8 @@ class GeelyGCleanSwitch(CoordinatorEntity, SwitchEntity):
     def is_on(self) -> bool | None:
         v = _walk(self.coordinator.data or {}, (*_CLIMATE_PATH, "airBlowerActive"))
         if v is None:
-            return None
-        return _state_in(v, ("true", "True", True, "1", 1))
+            return self._resolve(None)
+        return self._resolve(_state_in(v, ("true", "True", True, "1", 1)))
 
     @property
     def available(self) -> bool:
@@ -308,11 +349,12 @@ class GeelyGCleanSwitch(CoordinatorEntity, SwitchEntity):
             _LOGGER.exception("g-clean %s failed", command)
             raise HomeAssistantError(f"Geely G-Clean failure: {e}") from e
         _LOGGER.debug("Geely g-clean %s response=%s", command, redact(resp))
-
+        self._hold(command == "start")
+        self._write_held_state()
         schedule_refresh(self._hass, self.coordinator, 8)
 
 
-class GeelyDefrostSwitch(CoordinatorEntity, SwitchEntity):
+class GeelyDefrostSwitch(_OptimisticHold, CoordinatorEntity, SwitchEntity):
     """Front defrost.
 
     AVD-verified 2026-05-01:
@@ -340,8 +382,8 @@ class GeelyDefrostSwitch(CoordinatorEntity, SwitchEntity):
     def is_on(self) -> bool | None:
         v = _walk(self.coordinator.data or {}, (*_CLIMATE_PATH, "defrost"))
         if v is None:
-            return None
-        return _state_in(v, ("true", "True", True, "1", 1))
+            return self._resolve(None)
+        return self._resolve(_state_in(v, ("true", "True", True, "1", 1)))
 
     async def async_turn_on(self, **_: Any) -> None:
         await self._fire("start", 90)
@@ -364,7 +406,8 @@ class GeelyDefrostSwitch(CoordinatorEntity, SwitchEntity):
             _LOGGER.exception("defrost %s failed", command)
             raise HomeAssistantError(f"Geely Defrost failure: {e}") from e
         _LOGGER.debug("Geely defrost %s response=%s", command, redact(resp))
-
+        self._hold(command == "start")
+        self._write_held_state()
         schedule_refresh(self._hass, self.coordinator, 8)
 
 
@@ -554,7 +597,7 @@ class GeelyScheduledChargingSwitch(CoordinatorEntity, SwitchEntity):
         schedule_refresh(self._hass, self.coordinator, 15, 20, 20)
 
 
-class GeelyWindowVentilationSwitch(CoordinatorEntity, SwitchEntity):
+class GeelyWindowVentilationSwitch(_OptimisticHold, CoordinatorEntity, SwitchEntity):
     """Cracks all four windows for fresh air. Verified ON via
     `RWS_2 target=ventilate`. OFF closes windows via `target=window` stop."""
 
@@ -578,7 +621,7 @@ class GeelyWindowVentilationSwitch(CoordinatorEntity, SwitchEntity):
     def is_on(self) -> bool | None:
         # Ventilation is "on" whenever any window is off its closed stop -
         # the same four fields the windows cover reads, uninverted.
-        return windows_open(self.coordinator.data)
+        return self._resolve(windows_open(self.coordinator.data))
 
     async def async_turn_on(self, **_: Any) -> None:
         await self._fire("start", [{"key": "target", "value": "ventilate"}])
@@ -598,5 +641,6 @@ class GeelyWindowVentilationSwitch(CoordinatorEntity, SwitchEntity):
             raise HomeAssistantError(f"Geely Window Ventilation failure: {e}") from e
         _LOGGER.debug("Geely vent switch %s params=%s response=%s",
                       command, redact(params), redact(resp))
-
+        self._hold(command == "start")
+        self._write_held_state()
         schedule_refresh(self._hass, self.coordinator, 8)

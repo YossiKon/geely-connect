@@ -54,9 +54,18 @@ _LOCK_STATE_PATH = (
 )
 
 # How long to show the locking/unlocking spinner before falling back to
-# whatever the server reports. Slightly longer than our poll-after-fire
-# delay so the spinner stays until at least one fresh poll lands.
-_TRANSITION_TIMEOUT_S = 12.0
+# whatever the server reports.
+#
+# Was 12s, sized to "one fresh poll" - but the poll 8s after a command very
+# often re-reads the snapshot from BEFORE the command, because the gateway
+# acknowledges long before the car's telemetry re-uploads. An owner pressed
+# Lock, watched it show locked, and then watched it snap back to unlocked at
+# t=8 while the car outside was actually locking - the release below used to
+# fire on that stale poll unconditionally. The transition now ends only on
+# agreement or on this timeout, so the window is sized to how long a slow car
+# takes to report, not to how soon we ask. 40s matches the 45/60s holds the
+# switches use.
+_TRANSITION_TIMEOUT_S = 40.0
 
 
 
@@ -150,10 +159,12 @@ class GeelyLock(CoordinatorEntity, LockEntity):
         self._pending_target_locked = target_locked
         self._pending_started_at = time.time()
         self.async_write_ha_state()
-        # Refresh after the server has had time to update telemetry.
-        def _clear_optimistic() -> None:
-            # Drop the optimistic flag once the real state should be in.
-            self._pending_target_locked = None
-            self.async_write_ha_state()
-
-        schedule_refresh(self._hass, self.coordinator, 8, after=_clear_optimistic)
+        # Two polls, and NO forced release. The release used to run after the
+        # first poll whether or not it brought post-command data, and the 8s
+        # snapshot is routinely the pre-command one - which snapped the lock
+        # back to its old state on screen while the car was executing the
+        # command. _is_in_transition already ends the hold the moment a poll
+        # AGREES with the target, and the timeout above ends it if nothing
+        # ever does; a poll that still shows the old state is not evidence
+        # the command failed, only that the car has not reported yet.
+        schedule_refresh(self._hass, self.coordinator, 8, 12)
