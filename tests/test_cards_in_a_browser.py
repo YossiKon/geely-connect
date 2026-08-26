@@ -1568,3 +1568,39 @@ def test_pressing_steering_wheel_heat_toggles_the_switch():
         return hass.serviceCalls.map((c) => [c[0], c[1], c[2].entity_id]);
     }"""
     assert _evaluate(script) == [["switch", "toggle", "switch.car_steering_wheel_heat"]]
+
+
+# ------------------------- #50: which consumption the card is showing
+
+def test_the_consumption_row_says_it_is_the_lifetime_one():
+    """An owner compared this tile with his car's screen and reported the
+    integration as wrong by roughly a factor of two (#50). Both numbers were
+    right: the row is the average since the car was new, and a car screen
+    almost always shows the current trip - a real payload has the two 48%
+    apart in the same poll. An unqualified "Consumption" sitting one row from
+    "Trip meter" reads as trip-scoped, which is the whole confusion."""
+    got = _evaluate(r"""() => {
+        const out = {};
+        for (const tag of ["geely-card", "geely-card-top"]) {
+          const el = document.createElement(tag);
+          document.body.appendChild(el);
+          el.setConfig({});
+          const hass = window.mkHass({});
+          hass.states["sensor.car_average_consumption"] = {
+              entity_id: "sensor.car_average_consumption", state: "29.9",
+              attributes: {unit_of_measurement: "kWh/100km"}};
+          el.hass = hass;
+          const row = [...el.shadowRoot.querySelectorAll(".row")].find(
+              (r) => /29\.9/.test(r.textContent));
+          out[tag] = {text: row.textContent.replace(/\s+/g, " ").trim(),
+                      title: row.getAttribute("title") || ""};
+          el.remove();
+        }
+        return out;
+    }""")
+    for tag, r in got.items():
+        assert "Lifetime" in r["text"], (tag, r)
+        assert r["text"].strip() != "Consumption29.9 kWh/100km", (tag, r)
+        # The tooltip has to name where the other figure lives, or the label
+        # only tells half the story.
+        assert "Trip Consumption" in r["title"], (tag, r)

@@ -89,7 +89,7 @@ _TIRE_CORNERS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
 # a number belongs in one of these sets. The enum-valued ones (engine_state,
 # park_brake, charger_connected) correctly have neither.
 _MEASUREMENT_KEYS = {
-    "battery", "range", "interior_temp", "exterior_temp", "speed",
+    "battery", "range", "interior_temp", "exterior_temp", "speed", "cabin_humidity",
     "12v_battery", "12v_voltage", "avg_consumption", "avg_speed",
     "tire_pressure_fl", "tire_pressure_fr", "tire_pressure_rl", "tire_pressure_rr",
     "tire_temp_fl", "tire_temp_fr", "tire_temp_rl", "tire_temp_rr",
@@ -119,6 +119,7 @@ _EV     = (*_ADD, "electricVehicleStatus")
 _CLIM   = (*_ADD, "climateStatus")
 _SAFE   = (*_ADD, "drivingSafetyStatus")
 _RUN    = (*_ADD, "runningStatus")
+_POLL   = (*_ADD, "pollutionStatus")   # cabin air: humidity, PM2.5
 _FUELS  = (*_ADD, "fuelStatus")
 _DRIVE  = (*_ADD, "drivingBehaviourStatus")
 
@@ -220,6 +221,12 @@ SENSOR_SPECS: tuple[tuple, ...] = (
     ("range",               "Electric Range",       (*_EV,    "distanceToEmptyOnBatteryOnly"),         UnitOfLength.KILOMETERS,          SensorDeviceClass.DISTANCE,    "int",   None),
     ("total_mileage",       "Total Mileage",        (*_MAINT, "odometer"),                             UnitOfLength.KILOMETERS,          SensorDeviceClass.DISTANCE,    "float", None),
     ("interior_temp",       "Interior Temperature", (*_CLIM,  "interiorTemp"),                         UnitOfTemperature.CELSIUS,        SensorDeviceClass.TEMPERATURE, "float", None),
+    # Promoted from full exposure (#43). The only candidate on that list
+    # needing no decode: a plain percentage, read 52 on one real EX5 and 27
+    # on another, both plausible cabin values. Its neighbour
+    # `interiorPM25Level` reads 0 on both, which cannot be told apart from
+    # "not fitted", so it stays a raw diagnostic until a car shows it moving.
+    ("cabin_humidity",      "Cabin Humidity",       (*_POLL,  "relHumSts"),                            PERCENTAGE,                       SensorDeviceClass.HUMIDITY,    "float", None),
     ("exterior_temp",       "Exterior Temperature", (*_CLIM,  "exteriorTemp"),                         UnitOfTemperature.CELSIUS,        SensorDeviceClass.TEMPERATURE, "float", None),
     ("speed",               "Speed",                (*_BASIC, "speed"),                                UnitOfSpeed.KILOMETERS_PER_HOUR,  SensorDeviceClass.SPEED,       "float", None),
     ("engine_state",        "Engine State",         (*_BASIC, "engineStatus"),                         None,                             None,                          "map",   _ENGINE_STATE_MAP),

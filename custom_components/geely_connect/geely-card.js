@@ -141,6 +141,15 @@
   const RAPID_HEAT_HINT = "Rapid warming: the car's own preset - drives the "
     + "setpoint to its maximum and heats both front seats, plus the steering "
     + "wheel where fitted";
+  /* Read off the card by an owner who compared it with his car's screen and
+   * reported the integration as wrong by a factor of two (#50). Both numbers
+   * were right: this row is the average since the car was new, and a car
+   * screen almost always shows the current trip. A real payload has the two
+   * 48% apart in the same poll. The label now says which one this is, and the
+   * tooltip says where the other one lives. */
+  const LIFETIME_HINT = "Average since the car was new. Your car's screen "
+    + "usually shows the current trip instead, which reads lower - that is "
+    + "the Trip Consumption entity, not this one.";
   const RAPID_COOL_HINT = "Rapid cooling: the car's own preset - drives the "
     + "setpoint to its minimum, ventilates both front seats and cracks the windows";
   /* The steering-wheel command is a capture of the official app's own button,
@@ -1360,7 +1369,8 @@
       if (!st && !opts.value) return "";
       const value = opts.value != null ? opts.value
         : OK(st) ? this._fmt(st) : "—";
-      return `<div class="row ${opts.accent ? "accent" : ""} ${opts.warn ? "warn" : ""}">
+      const title = opts.title ? ` title="${esc(opts.title)}"` : "";
+      return `<div class="row ${opts.accent ? "accent" : ""} ${opts.warn ? "warn" : ""}"${title}>
           <span>${esc(label)}</span><b>${esc(value)}</b></div>`;
     }
 
@@ -1807,7 +1817,7 @@
           <div class="grid sec">
             ${this._row("Odometer", this._st("sensor.total_mileage"))}
             ${this._row("Trip meter", this._st("sensor.trip_meter"))}
-            ${this._row("Consumption", this._st("sensor.average_consumption"))}
+            ${this._row("Lifetime avg", this._st("sensor.average_consumption"), { title: LIFETIME_HINT })}
             ${this._row("Efficiency", this._st("sensor.efficiency"))}
             ${this._row("12 V battery", this._st("sensor.12v_battery"))}
             ${this._row("Service in", days, {
@@ -2267,7 +2277,7 @@
           <div class="grid sec">
             ${this._row("Odometer", this._st("sensor.total_mileage"))}
             ${this._row("Trip meter", this._st("sensor.trip_meter"))}
-            ${this._row("Consumption", this._st("sensor.average_consumption"))}
+            ${this._row("Lifetime avg", this._st("sensor.average_consumption"), { title: LIFETIME_HINT })}
             ${this._row("Efficiency", this._st("sensor.efficiency"))}
             ${this._row("12 V battery", this._st("sensor.12v_battery"))}
             ${this._row("Service in", days, {

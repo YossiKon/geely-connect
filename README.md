@@ -33,7 +33,7 @@ polished setup on top.
 ## ✨ Highlights
 
 - 🔒 **Security-first** - verified TLS plus public-key pinning.
-- 📊 **Everything enabled** - all 75 entities are on from the start (88 on a
+- 📊 **Everything enabled** - all 76 entities are on from the start (89 on a
   hybrid), no duplicates, nothing to switch on by hand.
 - 🧮 **Computed extras** - charging power, charge completion time, range at full
   charge and efficiency, none of which the car reports itself.
@@ -402,6 +402,7 @@ always be compared instead of one of them looking like a bug.
 | Entity | Description |
 |---|---|
 | Interior Temperature | Cabin temp (°C) |
+| Cabin Humidity | Relative humidity inside the car (%), from the same block as the cabin air readings |
 | Exterior Temperature | Outside temp (°C) - **treat with suspicion**, see [Known limitations](#%EF%B8%8F-known-limitations). Owners of both the Starray and the EX5 have measured it ten degrees out |
 | Steering Wheel Heating | On / off, on the trims that have it. The reading was measured on a real car: 1 means heating at any level, 2 means off. A car that reports **0** does not have the feature and the entity says unknown rather than a confident "off" - the evidence is a comparison across models: an EX5 whose capability catalogue does advertise a heated wheel reads **2** with it switched off, while three Starrays read **0**. The app's own command was captured and **confirmed to turn the wheel on** ([#4](https://github.com/YossiKon/geely-connect/issues/4)), so there is also a controllable **Steering Wheel Heat** switch (and a card button) reading the same field |
 
@@ -1054,7 +1055,7 @@ enabling. Everything the car reports, plus the computed extras above.
 
 The one thing that varies by car is propulsion: the thirteen fuel and engine
 entities are created only for a car with a tank, so a battery-electric EX5 gets
-75 entities and a PHEV gets 88. That's a decision made once at startup from your
+76 entities and a PHEV gets 89. That's a decision made once at startup from your
 account's `powerType` plus the car's own telemetry - there is no option to set.
 
 The only thing not created is the raw full-exposure pass (see below), because
