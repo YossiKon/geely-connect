@@ -54,6 +54,7 @@ from .const import (
 )
 from .helpers import minutes_or_none as _minutes_or_none
 from .helpers import walk as _walk
+from .helpers import speed_is_stale
 
 # Keys that represent a tire pressure (raw value is kPa; converted per user unit).
 _TIRE_KEYS = {"tire_pressure_fl", "tire_pressure_fr", "tire_pressure_rl", "tire_pressure_rr"}
@@ -672,8 +673,7 @@ class GeelySensor(CoordinatorEntity, _AutoPrecision):
             # unknown instead, the same convention `steerWhlHeatingSts` = 0
             # uses for an unhelpful value. A trim that never reports the flag
             # is unaffected - only an explicit falsy value gates the sensor.
-            valid = _walk(self.coordinator.data or {}, (*_BASIC, "speedValidity"))
-            if valid is not None and str(valid).strip().lower() in ("false", "0"):
+            if speed_is_stale(_walk(self.coordinator.data or {}, _BASIC)):
                 return None
         if self._key == "charger_connected" and val == "Plugged in"                and _is_charging(self.coordinator.data or {}):
             # DC fast charge holds the raw field at 1 for the whole session

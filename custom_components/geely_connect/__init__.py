@@ -64,7 +64,8 @@ from .const import (
     SERIES_TO_FRIENDLY_NAME,
     region_config,
 )
-from .helpers import password_decrypt, vehicle_metadata, schedule_refresh
+from .helpers import (password_decrypt, vehicle_metadata, schedule_refresh,
+                      speed_is_stale)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -275,10 +276,19 @@ def _poll_flags(d: dict) -> tuple[bool, bool]:
     # mid-fast-charge is exactly when polling should stay fast.
     from .sensor import _is_charging
     charging = _is_charging(d)
-    try:
-        moving = float(basic.get("speed")) > 0
-    except (TypeError, ValueError):
+    # A speed the car disowns is not motion. #51 taught the sensor to publish
+    # unknown when speedValidity is false; this is the other half the issue
+    # (#44) called out, and the one with teeth: _poll_flags reads the raw
+    # field, so a stale non-zero reading would hold the FAST poll interval on
+    # a parked car and - through the card's driving lock, which follows the
+    # same composite - grey out every button with a "Driving" banner.
+    if speed_is_stale(basic):
         moving = False
+    else:
+        try:
+            moving = float(basic.get("speed")) > 0
+        except (TypeError, ValueError):
+            moving = False
     # Speed legitimately reads 0 while a trip is under way - every red light,
     # every queue - and treating that as "parked" cost the fast interval at
     # the exact moment live data matters most (#21). The ignition/ready state

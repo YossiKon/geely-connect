@@ -289,3 +289,26 @@ def translate_control_errors(logger, label: str, log_msg: str = "", *log_args):
         if log_msg:
             logger.exception(log_msg, *log_args)
         raise HomeAssistantError(f"Geely {label} failure: {e}") from e
+
+
+def speed_is_stale(basic: dict | None) -> bool:
+    """Is `speed` in this basicVehicleStatus a value the car disowns?
+
+    `speedValidity` sits next to `speed`, and when it goes false the number is
+    whatever the car last put there. On a parked EX5 the pair reads 0.0 with
+    the flag false, so they agree by coincidence - but a stale non-zero reading
+    is real motion as far as anything downstream can tell (#44).
+
+    Only an EXPLICIT falsy value counts. A trim that never reports the flag
+    behaves exactly as before, which is what keeps this from silently blanking
+    the speed on cars nobody has tested.
+
+    One rule, one place, because two callers act on it and they must not
+    drift: the sensor publishes unknown, and the poller must not read a
+    disowned number as driving - it decides the poll interval and, through
+    the driving lock, whether the card's buttons work at all.
+    """
+    if not isinstance(basic, dict):
+        return False
+    flag = basic.get("speedValidity")
+    return flag is not None and str(flag).strip().lower() in ("false", "0")

@@ -426,3 +426,45 @@ def test_a_refresh_press_forces_the_position_wake_too():
     assert "if was_driving or forced or ((cyc - 1) % _POSITION_EVERY == 0):" in src
     assert src.count('poll_state.get("force_secondary", False)') == 1, (
         "forced is read twice; the two gates can disagree about one press")
+
+
+def test_a_disowned_speed_does_not_read_as_driving():
+    """#51 taught the SENSOR to publish unknown when speedValidity is false.
+    This is the half with teeth: _poll_flags reads the raw field, so a stale
+    non-zero speed would hold the fast interval on a parked car and - through
+    the card's driving lock, which follows the same composite - grey out every
+    button behind a "Driving" banner."""
+    m = _coordinator_module()
+    stale = _status(speed="50")
+    stale["vehicleStatus"]["basicVehicleStatus"]["speedValidity"] = "false"
+    assert m._poll_flags(stale)[1] is False, "a disowned speed read as motion"
+
+
+def test_a_valid_speed_still_reads_as_driving():
+    m = _coordinator_module()
+    live = _status(speed="50")
+    live["vehicleStatus"]["basicVehicleStatus"]["speedValidity"] = "true"
+    assert m._poll_flags(live)[1] is True
+    # And a trim that never reports the flag keeps the old behaviour.
+    assert m._poll_flags(_status(speed="50"))[1] is True
+
+
+def test_a_disowned_speed_does_not_silence_a_running_car():
+    """The guard removes one input, not the composite: a car whose ignition is
+    on is still driving even when its speed field is disowned, which is what
+    stops this from re-opening the #21 hole from the other side."""
+    m = _coordinator_module()
+    d = _status(speed="50", engine="engine_running")
+    d["vehicleStatus"]["basicVehicleStatus"]["speedValidity"] = "false"
+    assert m._poll_flags(d)[1] is True
+
+
+def test_both_speed_readers_share_one_rule():
+    """Two callers act on speedValidity - the sensor and the poller - and a
+    rule copied into both is a rule that drifts. There is one predicate."""
+    import io, os
+    from conftest import PKG
+    for name in ("sensor.py", "__init__.py"):
+        src = io.open(os.path.join(PKG, name), encoding="utf-8").read()
+        assert "speed_is_stale" in src, name
+        assert '"speedValidity"' not in src, f"{name} re-implements the rule"
