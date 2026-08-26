@@ -468,3 +468,26 @@ def test_both_speed_readers_share_one_rule():
         src = io.open(os.path.join(PKG, name), encoding="utf-8").read()
         assert "speed_is_stale" in src, name
         assert '"speedValidity"' not in src, f"{name} re-implements the rule"
+
+
+def test_a_disowned_speed_cannot_pin_super_eco_to_its_fast_lane():
+    """The two things v1.44.0 shipped meet here, and the meeting is the point.
+
+    A stale non-zero speed reads as driving, and driving takes the FAST
+    interval - so on the mode sold as "barely polls", one disowned field
+    would have pinned a parked car to a five-minute cadence indefinitely,
+    which is the exact opposite of what the owner chose. Verified against the
+    real ladder rather than the flags alone, because that is where the cost
+    lands."""
+    m = _coordinator_module()
+    const = load("const")
+    p = const.POLL_PROFILES["super_eco"]
+    stale = _status(speed="60")
+    stale["vehicleStatus"]["basicVehicleStatus"]["speedValidity"] = "false"
+    with _at_hour(m, 12):
+        secs = m._adaptive_interval(stale, 3, p).total_seconds()
+    assert secs == p["cap"], "a disowned speed dragged Super Eco into fast polling"
+    # And a car that really is moving still gets the fast lane on this mode.
+    live = _status(speed="60")
+    live["vehicleStatus"]["basicVehicleStatus"]["speedValidity"] = "true"
+    assert m._adaptive_interval(live, 0, p).total_seconds() == p["fast"]
