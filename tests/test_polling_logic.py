@@ -374,3 +374,55 @@ def test_manual_mode_really_does_fetch_everything_every_sync():
                 assert fires == list(range(1, span)), (name, key, fires)
             else:
                 assert fires[1] == 1 + n, (name, key, fires)
+
+
+# ----------------------------------------------------------- super eco ---
+
+def test_super_eco_starts_where_eco_ends():
+    """The mode's promise in one relation: its BASE equals Eco's CAP, so the
+    quietest Eco ever gets is where Super Eco begins, and every step of its
+    ladder sits at or above Eco's ceiling."""
+    const = load("const")
+    se, eco = const.POLL_PROFILES["super_eco"], const.POLL_PROFILES["eco"]
+    assert se["base"] == eco["cap"]
+    assert se["cap"] > se["base"]
+    assert se["fast"] > eco["fast"], "even its fast lane is gentler than Eco's"
+
+
+def test_super_eco_is_always_gentler_than_eco():
+    m = _coordinator_module()
+    const = load("const")
+    with _at_hour(m, 12):
+        parked = _status(speed="0")
+        for streak in (0, 1, 3, 8):
+            se = m._adaptive_interval(parked, streak, const.POLL_PROFILES["super_eco"])
+            eco = m._adaptive_interval(parked, streak, const.POLL_PROFILES["eco"])
+            assert se > eco, streak
+
+
+def test_super_eco_wakes_the_car_rarely_but_not_never():
+    """position_every drives the PAI wake, which reaches the car itself, and a
+    mode sold as frugal must be frugal with the car's battery too: at the cap
+    this is one wake every two days. It stays finite - the mode still updates
+    on its own, which is what separates it from Manual."""
+    const = load("const")
+    p = const.POLL_PROFILES["super_eco"]
+    assert p["position_every"] * p["cap"] >= 48 * 3600, "wakes more than every 2 days"
+    assert not p.get("manual"), "Super Eco must keep a timer"
+    # Rare polls should each carry value: the state block rides an already
+    # open session, so it is not rationed the way Eco rations it.
+    assert p["secondary_every"] <= 2
+
+
+def test_a_refresh_press_forces_the_position_wake_too():
+    """Refresh Data's contract is "everything, now", and in Super Eco a manual
+    pull is the advertised way to a fresh GPS fix - the parked cadence is one
+    wake in days. The forced flag must reach the position gate, not only the
+    secondary one, and must be read ONCE per cycle so one press cannot answer
+    two gates differently."""
+    import io, os
+    from conftest import PKG
+    src = io.open(os.path.join(PKG, "__init__.py"), encoding="utf-8").read()
+    assert "if was_driving or forced or ((cyc - 1) % _POSITION_EVERY == 0):" in src
+    assert src.count('poll_state.get("force_secondary", False)') == 1, (
+        "forced is read twice; the two gates can disagree about one press")

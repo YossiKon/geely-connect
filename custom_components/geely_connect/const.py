@@ -134,6 +134,19 @@ CONF_EXTERIOR_TEMP_OFFSET = "exterior_temp_offset"
 #   position_every  = wake the car for fresh GPS every Nth cycle when parked
 #   manual          = no timer at all; data is fetched only when you ask
 POLL_PROFILES: dict[str, dict] = {
+    # Super Eco: data still arrives on its own, but barely. Its BASE equals
+    # Eco's CAP - the quietest Eco ever gets is where this mode starts - and
+    # two idle polls reach a two-hour ceiling, so a parked car costs ~12
+    # sessions a day against Eco's ~48. Deliberate choices behind the other
+    # two numbers:
+    #   secondary_every 2 - polls this rare should each carry value; the
+    #     state block is one extra GET on a session that is already open,
+    #     so rationing it here saves nothing (Manual's reasoning, halved).
+    #   position_every 24 - the PAI position refresh WAKES THE CAR, and a
+    #     mode sold as frugal must be frugal with the car's battery too:
+    #     at the cap this is one wake every two days. Driving still fetches
+    #     position every cycle, and Refresh Data forces one on demand.
+    "super_eco": {"base": 1800, "fast": 300, "cap": 7200, "secondary_every": 2, "position_every": 24},
     "eco":    {"base": 300, "fast": 90, "cap": 1800, "secondary_every": 6, "position_every": 12},
     "normal": {"base": 90,  "fast": 30, "cap": 900,  "secondary_every": 4, "position_every": 6},
     "live":   {"base": 45,  "fast": 15, "cap": 300,  "secondary_every": 3, "position_every": 3},
@@ -145,6 +158,7 @@ POLL_PROFILES: dict[str, dict] = {
                "position_every": 1, "manual": True},
 }
 POLL_MODES: dict[str, str] = {
+    "super_eco": "🌙 Super Eco (rarely polls; Refresh Data any time)",
     "eco":    "🔋 Eco (fewest interruptions)",
     "normal": "⚖️ Normal (balanced)",
     "live":   "⚡ Live (freshest, polls most)",

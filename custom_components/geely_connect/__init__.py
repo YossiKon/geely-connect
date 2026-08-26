@@ -473,9 +473,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         was_charging, was_driving = _poll_flags(prev)
 
         # Position wake (PAI) is expensive and actually wakes the car, so we do
-        # NOT fire it every cycle. Only while driving, or once every Nth cycle
-        # when parked. The rest of the time we serve the last-known GPS.
-        if was_driving or ((cyc - 1) % _POSITION_EVERY == 0):
+        # NOT fire it every cycle. Only while driving, once every Nth cycle
+        # when parked - or when the user pressed Refresh Data, whose contract
+        # is "everything, now". That last leg matters most in Super Eco, where
+        # the parked cadence is one wake in days and a manual pull is the
+        # advertised way to get a fresh fix on demand.
+        forced = poll_state.get("force_secondary", False)
+        if was_driving or forced or ((cyc - 1) % _POSITION_EVERY == 0):
             try:
                 await _call_with_retry(api.request_position_refresh)
             except GeelyAuthError as e:
@@ -564,7 +568,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # "fetch everything on every sync". Manual users got no vehicle-state
         # block and no position at all, and the const.py comment promising the
         # opposite made it invisible.
-        forced = poll_state.get("force_secondary", False)
+        # `forced` was read before the position wake above; not re-read here so
+        # one press means one consistent answer across both gates.
         if forced or charging or was_charging or ((cyc - 1) % _SECONDARY_EVERY == 0):
             try:
                 state_resp = await _call_with_retry(api.vehicle_status_state)

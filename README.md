@@ -40,7 +40,7 @@ polished setup on top.
 - ⛽ **Hybrids and PHEVs** - fuel level and range, engine state, oil and coolant,
   the tank flap, and the lifetime split between petrol and battery kilometres,
   all added automatically when the car has a tank.
-- 🔋 **Efficient polling** with selectable modes (Eco / Normal / Live / Manual),
+- 🔋 **Efficient polling** with selectable modes (Super Eco / Eco / Normal / Live / Manual),
   changeable at any time.
 - 🌍 **EU, North-American and APAC** backends, detected from the vehicle.
 - 🗣️ **Translated setup** - the configuration dialogs are in English, Hebrew,
@@ -563,6 +563,7 @@ profile at setup:
 
 | Mode | Charging / driving | Parked (base → cap) | Secondary data | GPS wake |
 |---|---|---|---|---|
+| 🌙 **Super Eco** - barely polls | every 5 min | 30 min → 2 h | every 2nd cycle | every 24th |
 | 🔋 **Eco** - fewest interruptions | every 90 s | 300 s → 30 min | every 6th cycle | every 12th |
 | ⚖️ **Normal** - balanced | every 30 s | 90 s → 15 min | every 4th cycle | every 6th |
 | ⚡ **Live** - freshest | every 15 s | 45 s → 5 min | every 3rd cycle | every 3rd |
@@ -570,6 +571,22 @@ profile at setup:
 
 The mode is **not fixed at setup** - change it any time from **Configure** on
 the device page (see *Changing settings later* below).
+
+### 🌙 Super Eco - data still arrives, barely
+
+Sits between Eco and Manual: the integration keeps updating on its own, but its
+*starting* interval is where Eco tops out, and two quiet polls reach a two-hour
+ceiling - a parked car costs roughly a dozen sessions a day against Eco's
+~fifty. Because the GPS wake-up reaches the car itself, Super Eco fires it at
+most once per 24 cycles - one wake every two days on a parked car - so it is
+frugal with the car's 12 V battery, not just with your phone-app session.
+
+Whenever you want more than that, **Refresh Data** is the other half of the
+mode: a press fetches everything at once - status, the secondary state block,
+*and* a fresh GPS fix - in every mode, so an automation can pull on your
+schedule while the timer stays nearly silent. While charging or driving the
+mode speeds up by itself (every 5 minutes), because that is when the data is
+worth having.
 
 Everything is per-mode: the active-polling rate, the parked back-off, the cap,
 and how often secondary/GPS calls run.
@@ -1011,7 +1028,7 @@ project reports. Adding SA needs that area's app id and secret.
 ## 🎚️ Changing settings later
 
 Settings → Devices & Services → **Geely Connect** → **Configure** changes the
-**polling mode** (Eco / Normal / Live / Manual) and **tire-pressure unit** at
+**polling mode** (Super Eco / Eco / Normal / Live / Manual) and **tire-pressure unit** at
 any time - no reinstall, no restart. Changing the pressure unit also re-points
 the four existing tire sensors, so history is kept rather than restarting.
 
