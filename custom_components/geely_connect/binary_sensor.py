@@ -109,6 +109,28 @@ SPECS: tuple[tuple[str, str, tuple[str, ...], BinarySensorDeviceClass | None, tu
     # 0 unlocked. So 0 is the unlocked code here too, which with device_class
     # LOCK is what "on" has to mean.
     ("trunk_unlocked",       "Trunk Lock",        (*_SAFE, "trunkLockStatus"),              BinarySensorDeviceClass.LOCK,    ("0", 0)),
+    # The four individual door locks, on exactly the footing trunkLockStatus
+    # was added on. In a capture across a real lock/unlock cycle all four moved
+    # with `centralLockingStatus` and with each other - 1/1/1/1 while the car
+    # was locked, 0/0/0/0 while it was not - so 0 is the unlocked code here
+    # too, which with device_class LOCK is what "on" has to mean.
+    #
+    # The aggregate lock entity says whether the car is locked; these say
+    # which door is not, which is the question after a "car unlocked" alert.
+    # In the same capture the tailgate command moved trunkLockStatus 1 -> 0 -> 1
+    # while all four of these stayed 1, so they are genuinely per-door and not
+    # four copies of one flag.
+    ("door_lock_driver",     "Door Lock Driver",    (*_SAFE, "doorLockStatusDriver"),        BinarySensorDeviceClass.LOCK,    ("0", 0)),
+    ("door_lock_passenger",  "Door Lock Passenger", (*_SAFE, "doorLockStatusPassenger"),     BinarySensorDeviceClass.LOCK,    ("0", 0)),
+    ("door_lock_rear_left",  "Door Lock Rear Left", (*_SAFE, "doorLockStatusDriverRear"),    BinarySensorDeviceClass.LOCK,    ("0", 0)),
+    ("door_lock_rear_right", "Door Lock Rear Right", (*_SAFE, "doorLockStatusPassengerRear"), BinarySensorDeviceClass.LOCK,   ("0", 0)),
+    # The car's own booleans for charging and plugged-in, beside the entities
+    # derived from `statusOfChargerConnection` rather than replacing them. That
+    # field is the one that never reaches 3 on a DC fast charge (#10), so a
+    # plain bool from the same payload is worth having next to it - and being
+    # a JSON boolean there is nothing to decode and no code set to enumerate.
+    ("is_charging",          "Charging (reported)", (*_EV, "isCharging"),                    BinarySensorDeviceClass.BATTERY_CHARGING, (True, "true", "True")),
+    ("is_plugged_in",        "Plugged In (reported)", (*_EV, "isPluggedIn"),                 BinarySensorDeviceClass.PLUG,    (True, "true", "True")),
     # Park brake, on/off beside the mapped text sensor that names the code -
     # the same pairing `statusOfChargerConnection` already has (Charger Plug
     # here, Charger Connection there), and for the same reason: an automation
