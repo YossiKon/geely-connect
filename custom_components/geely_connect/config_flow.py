@@ -34,6 +34,7 @@ from .const import (
     CONF_PLATFORM,
     CONF_REGION,
     CONF_ZEEKR_ACCESS_TOKEN,
+    CONF_ZEEKR_ENC_VIN,
     CONF_ZEEKR_HF_EXPIRY,
     CONF_ZEEKR_HF_TOKEN,
     CONF_ZEEKR_PASSWORD,
@@ -524,6 +525,17 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 else:
                     raw = await self.hass.async_add_executor_job(
                         client.list_vehicles, client.user_id)
+                    if not raw:
+                        # Fail-only: an account migrated to the new app can
+                        # have an empty old-platform garage while its car is
+                        # listed on the new gateway. An account that lists
+                        # cars today cannot reach this.
+                        raw = await self.hass.async_add_executor_job(
+                            client.list_vehicles_bff)
+                        if raw:
+                            _LOGGER.info(
+                                "garage found on the new-platform "
+                                "ms-app-bff route")
                     self._vehicles = [v for v in raw if _valid_vin(vehicle_vin(v))]
                     if not self._vehicles:
                         errors["base"] = "no_vehicles"
@@ -708,10 +720,25 @@ class GeelyIntlOptionsFlow(config_entries.OptionsFlow):
             # when an entity is first registered, so afterwards the display
             # unit lives in the registry and nothing the integration reports
             # will move it.
+            if CONF_ZEEKR_ENC_VIN in user_input:
+                user_input[CONF_ZEEKR_ENC_VIN] = (
+                    user_input[CONF_ZEEKR_ENC_VIN] or "").strip()
             new_unit = user_input.get(CONF_PRESSURE_UNIT)
             if new_unit and new_unit != current.get(CONF_PRESSURE_UNIT):
                 _apply_pressure_unit(self.hass, entry, new_unit)
             return self.async_create_entry(title="", data=user_input)
+
+        # New-platform vehicles are addressed by an opaque per-vehicle
+        # token rather than the plain VIN, and it cannot be derived from
+        # anything stored here. Offered only where it applies, and only as
+        # an optional field: without it the entry behaves exactly as
+        # before, reading status from the old platform.
+        extra: dict[Any, Any] = {}
+        if current.get(CONF_PLATFORM, DEFAULT_PLATFORM) == PLATFORM_ZEEKR:
+            extra[vol.Optional(
+                CONF_ZEEKR_ENC_VIN,
+                default=current.get(CONF_ZEEKR_ENC_VIN) or "",
+            )] = str
 
         return self.async_show_form(
             step_id="init",
@@ -747,6 +774,7 @@ class GeelyIntlOptionsFlow(config_entries.OptionsFlow):
                     CONF_EXTERIOR_TEMP_OFFSET,
                     default=float(current.get(CONF_EXTERIOR_TEMP_OFFSET) or 0),
                 ): vol.All(vol.Coerce(float), vol.Range(min=-30, max=30)),
+                **extra,
             }),
         )
 

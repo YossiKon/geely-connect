@@ -641,13 +641,16 @@ class ZeekrClient:
         # identifier per client instance.
         self.timezone: str = "UTC"
         self.hf_device_id = uuid.uuid4().hex
+        # Opaque per-vehicle token the new gateway wants in `x-vin`; see
+        # CONF_ZEEKR_ENC_VIN. Empty = new-platform vehicle calls unused.
+        self.enc_vin: str = ""
 
     # ---- transport ----------------------------------------------------------
 
     def _request(self, method: str, path: str, *, body: bytes = b"",
                  signed: bool = True, urlname: str | None = None,
                  query: str = "", extra: dict | None = None,
-                 signer: str = "v2") -> dict:
+                 signer: str = "v2", bearer: bool = False) -> dict:
         p = urlparse(self.gateway)
         port = p.port or (443 if p.scheme == "https" else 80)
         nonce = _make_nonce()
@@ -669,10 +672,17 @@ class ZeekrClient:
         # interceptor adds it before nj/h signs), so attach it before
         # computing X-SIGNATURE. Signer v2's canonical never includes it.
         if self.access_token:
-            headers["Authorization"] = self.access_token
+            headers["Authorization"] = (
+                f"Bearer {self.access_token}" if bearer else self.access_token)
         if signer == "snc":
             # snc stack (ms-user-auth): derived app identity + the header set
             # the app's own SignInterceptor signs (nj/a.java + nj/h.java).
+            # The app uses a UUID nonce on this gateway rather than the
+            # 32-char random string the other legs use, and it is inside
+            # the signed canonical.
+            nonce = str(uuid.uuid4())
+            if self.enc_vin:
+                headers["x-vin"] = self.enc_vin
             headers.update({
                 "X-APP-ID": SNC_APP_ID,
                 "X-PROJECT-ID": SNC_PROJECT_ID,
@@ -872,6 +882,51 @@ class ZeekrClient:
         if isinstance(data, list):
             return [v for v in data if isinstance(v, dict)]
         return []
+
+    def list_vehicles_bff(self) -> list[dict]:
+        """Garage read on the NEW gateway.
+
+        The old platform is authoritative for accounts whose vehicle still
+        lives there. An account migrated to the new app can have an empty
+        old-platform garage while the car is plainly visible in the new app -
+        for those, the new gateway carries an `ms-app-bff` mirror of the same
+        route. Response shape matches the old one (data list of vehicle
+        records), so the caller is unchanged.
+        """
+        if not self.access_token:
+            raise ZeekrAuthError("not logged in (no new-platform session)")
+        resp = self._request(
+            "GET", "/ms-app-bff/api/v4.0/veh/vehicle-list",
+            query="needSharedCar=true", signer="snc")
+        data = resp.get("data")
+        if isinstance(data, list):
+            return [v for v in data if isinstance(v, dict)]
+        if isinstance(data, dict):
+            for key in ("list", "records", "vehicles", "vehicleList"):
+                val = data.get(key)
+                if isinstance(val, list):
+                    return [v for v in val if isinstance(v, dict)]
+        return []
+
+    def vehicle_status_new_resp(self) -> dict:
+        """Live status from the NEW gateway, for vehicles that live there.
+
+        GET /ms-vehicle-status/api/v1.0/vehicle/status/latest?latest=false&target=new
+        addressed by the `x-vin` token. The body is the same
+        {basicVehicleStatus, additionalVehicleStatus, ...} content the old
+        platform returns, but WITHOUT the old platform's "vehicleStatus"
+        wrapper - the adapter restores that so every consumer is unchanged.
+
+        The bare access token is what this gateway accepts here; sending it as
+        "Bearer <token>" is rejected with 079020 Invalid token.
+        """
+        if not self.access_token:
+            raise ZeekrAuthError("not logged in (no new-platform session)")
+        if not self.enc_vin:
+            raise ZeekrAuthError("no x-vin vehicle token configured")
+        return self._request(
+            "GET", "/ms-vehicle-status/api/v1.0/vehicle/status/latest",
+            query="latest=false&target=new", signer="snc")
 
     def list_vehicles(self, user_id: str) -> list[dict]:
         """GET /device-platform/api/v4.0/veh/vehicle-list?needSharedCar=true
