@@ -75,11 +75,15 @@ def _wrap_vehicle_status(data: Any) -> Any:
         return data
     if "basicVehicleStatus" not in data and "additionalVehicleStatus" not in data:
         return data
-    wrapped = dict(data)
-    wrapped["vehicleStatus"] = {
-        k: v for k, v in data.items()
-        if k in ("basicVehicleStatus", "additionalVehicleStatus", "updateTime")
-    }
+    # MOVE the keys rather than copying them. A copy leaves a second path to
+    # every field - basicVehicleStatus.* as well as
+    # vehicleStatus.basicVehicleStatus.* - and the full-exposure sensor sweep
+    # skips only curated paths, which all start "vehicleStatus.". Every
+    # duplicate therefore becomes an extra raw diagnostic entity: roughly two
+    # hundred of them on this car, each a twin of one already on the list.
+    moved = ("basicVehicleStatus", "additionalVehicleStatus", "updateTime")
+    wrapped = {k: v for k, v in data.items() if k not in moved}
+    wrapped["vehicleStatus"] = {k: v for k, v in data.items() if k in moved}
     return wrapped
 
 

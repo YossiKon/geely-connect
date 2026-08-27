@@ -135,9 +135,10 @@ def test_wrapper_restores_the_old_platform_nesting():
           ["electricVehicleStatus"])
     assert basic["engineStatus"] == "engine-off"
     assert ev["chargeLevel"] == "92.0"
-    # Nothing is moved, so top-level readers keep working.
-    assert wrapped["updateTime"] == 1787817174561
-    # And it is ALSO carried inside vehicleStatus, where Car Reported At walks
+    # Moved, not copied: a second path to the same field would become a second
+    # raw diagnostic entity under full exposure.
+    assert "updateTime" not in wrapped
+    # It lives inside vehicleStatus, where Car Reported At walks
     # for it (vehicleStatus.updateTime). Without this the staleness sensor is
     # blank on every new-platform car - #24's failure with the one indicator
     # of it switched off (#53).
