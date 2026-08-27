@@ -50,12 +50,16 @@ def test_zeekr_platform_secrets_are_masked_but_the_expiry_stays_readable():
     out = api.redact({
         "zeekr_access_token": TOKEN, "zeekr_refresh_token": TOKEN,
         "zeekr_hf_token": TOKEN, "zeekr_password": "MyReal-Passw0rd!",
+        # The per-vehicle x-vin token: with a session it addresses AND controls
+        # the car, so it is a capability secret and must be masked like the rest.
+        "zeekr_enc_vin": "b2FzZGtqYXNkb2lqYXNkb2lqYXNkMTIzNDU2Nzg=",
         "zeekr_hf_expiry": 1786000000, "platform": "zeekr",
     })
     for k in ("zeekr_access_token", "zeekr_refresh_token", "zeekr_hf_token",
-              "zeekr_password"):
+              "zeekr_password", "zeekr_enc_vin"):
         assert out[k] == "***redacted***", f"{k} survived as {out[k]!r}"
     assert TOKEN not in json.dumps(out)
+    assert "b2FzZGtq" not in json.dumps(out), "the x-vin token leaked"
     assert out["zeekr_hf_expiry"] == 1786000000  # not a secret
     assert out["platform"] == "zeekr"
 

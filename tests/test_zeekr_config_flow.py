@@ -97,6 +97,13 @@ class _FakeClient:
                  "appModelCode": "E245-J1", "engineType": "BEV"}
                 for _ in range(self._n)]
 
+    def list_vehicles_bff(self):
+        # The new-platform garage probe, fired only when list_vehicles is
+        # empty. By default a car found on the old platform means this is
+        # never reached; a fake with an empty old garage returns empty here
+        # too unless it is specifically modelling a migrated account.
+        return []
+
 
 def _zeekr_login_input(over=None):
     data = {"email": "user@example.com", "password": "hunter2",
@@ -178,6 +185,29 @@ def test_zeekr_login_with_no_vehicles_shows_an_error():
     asyncio.run(flow.async_step_user({"platform": "zeekr"}))
     res = asyncio.run(flow.async_step_zeekr_login(_zeekr_login_input()))
     assert res["type"] == "form" and res["errors"]["base"] == "no_vehicles"
+
+
+def test_a_migrated_account_is_found_on_the_new_platform_garage():
+    """The new fallback: an account migrated to the new app can have an empty
+    OLD-platform garage while its car is listed on the new gateway. When
+    list_vehicles is empty, the ms-app-bff probe runs, and a car there completes
+    setup instead of failing with no_vehicles. An account that lists a car on
+    the old platform never reaches this branch."""
+    cf, flow = _flow()
+
+    class _Migrated(_FakeClient):
+        def list_vehicles(self, user_id):
+            return []                      # old platform: empty
+
+        def list_vehicles_bff(self):
+            return [{"vin": FAKE_VIN, "nickName": "Migrated EX5",
+                     "appModelCode": "E22H-GP", "engineType": "BEV"}]
+
+    cf._zeekr_login_password = lambda e, p, c: _Migrated()
+    asyncio.run(flow.async_step_user({"platform": "zeekr"}))
+    res = asyncio.run(flow.async_step_zeekr_login(_zeekr_login_input()))
+    assert res["type"] == "create_entry", res
+    assert res["data"]["vin"] == FAKE_VIN
 
 
 def test_zeekr_login_with_multiple_vehicles_picks_one():

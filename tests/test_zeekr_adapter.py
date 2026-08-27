@@ -42,7 +42,20 @@ def _make_adapter(password: str = "", hf_token: str = "mock-hf",
             "powerLevel": 98}}}}
     c.control_resp = lambda vin, body: {
         "code": "1000", "data": {"result": {"code": 1000}}}
+    # _renew_hf calls login_tsp, which re-mints BOTH sessions - the HF JWT and
+    # the new-platform access token. Renewing only the HF side left
+    # access_token frozen and stranded new-platform users on 079021 (the fix
+    # that came with the new-gateway status read). The stub mirrors the real
+    # superset: it sets the HF token AND a fresh access token, so a test can
+    # assert the access token actually moved. login_hf stays stubbed too, since
+    # login_tsp calls it in production.
     c.login_hf = lambda token_value: setattr(c, "hf_token", "mock-hf-new")
+
+    def _login_tsp(token_value):
+        c.hf_token = "mock-hf-new"
+        c.access_token = "mock-at-new"
+
+    c.login_tsp = _login_tsp
     return a, c
 
 
@@ -248,3 +261,44 @@ def test_control_error_mapping():
         assert False, "expected GeelyAuthError"
     except ad.GeelyAuthError:
         pass
+
+
+def test_a_vehicle_without_the_new_token_reads_the_old_path_unchanged():
+    """The safety invariant for every existing user: no x-vin token means the
+    new-gateway status read is never touched. `enc_vin` is empty for every
+    entry created before this field existed, so vehicle_status() must fall
+    straight through to the old-platform call, byte-for-byte as before -
+    including the old success code and the old envelope nesting."""
+    a, c = _make_adapter()
+    assert c.enc_vin == "", "a fresh adapter must default to the old path"
+    seen = {"old": 0, "new": 0}
+
+    def _old(vin, user_id=None):
+        seen["old"] += 1
+        return {"code": "1000", "data": {"vehicleStatus": {"basicVehicleStatus": {
+            "powerLevel": 77}}}}
+
+    def _new():
+        seen["new"] += 1
+        raise AssertionError("the new-gateway read must not run without a token")
+
+    c.vehicle_status_resp = _old
+    c.vehicle_status_new_resp = _new
+    st = a.vehicle_status()
+    assert seen == {"old": 1, "new": 0}
+    assert st["code"] == "1000", "the old success code was rewritten"
+    assert st["data"]["vehicleStatus"]["basicVehicleStatus"]["powerLevel"] == 77
+
+
+def test_a_vehicle_with_the_new_token_reads_the_new_gateway():
+    """The other side of the gate: once the owner supplies the token, the
+    new-gateway read is used, its "000000" is translated to 1000, and its
+    flattened payload is re-nested so every downstream consumer is unchanged."""
+    a, c = _make_adapter()
+    c.enc_vin = "opaque-token"
+    c.vehicle_status_new_resp = lambda: {"code": "000000", "data": {
+        "basicVehicleStatus": {"powerLevel": 55},
+        "additionalVehicleStatus": {"electricVehicleStatus": {}}}}
+    st = a.vehicle_status()
+    assert st["code"] == 1000, "000000 was not translated"
+    assert st["data"]["vehicleStatus"]["basicVehicleStatus"]["powerLevel"] == 55, st

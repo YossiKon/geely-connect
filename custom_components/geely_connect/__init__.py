@@ -50,6 +50,7 @@ from .const import (
     CONF_VEHICLE_SERIES,
     CONF_VIN,
     CONF_ZEEKR_ACCESS_TOKEN,
+    CONF_ZEEKR_ENC_VIN,
     CONF_ZEEKR_HF_EXPIRY,
     CONF_ZEEKR_HF_TOKEN,
     CONF_ZEEKR_PASSWORD,
@@ -407,6 +408,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             # http.client raise on every HF request.
             timezone=hass.config.time_zone or "UTC",
             hf_expiry=int(d.get(CONF_ZEEKR_HF_EXPIRY) or 0),
+            # Options win over entry data so the token can be pasted or
+            # corrected from Configure without re-adding the integration.
+            enc_vin=(entry.options.get(CONF_ZEEKR_ENC_VIN)
+                     or d.get(CONF_ZEEKR_ENC_VIN) or ""),
         )
     else:
         # Entries created before regions were tracked carry no CONF_REGION and

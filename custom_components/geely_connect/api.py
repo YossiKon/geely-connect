@@ -126,6 +126,11 @@ _SECRET_KEYS: set = {
     # safelist can know the names first. `zeekr_hf_expiry` is a timestamp, not
     # a secret, and is deliberately absent so it stays readable.
     "zeekraccesstoken", "zeekrrefreshtoken", "zeekrhftoken", "zeekrpassword",
+    # The new platform's opaque per-vehicle `x-vin` token (CONF_ZEEKR_ENC_VIN).
+    # With a live session it both addresses AND controls the car, so it is a
+    # capability secret, not just an identifier - redacted like the tokens
+    # above. Normalised form, matched by both passes; see diagnostics._REDACT.
+    "zeekrencvin",
     # The IDaaS user-center session token as it appears on the wire (the new
     # platform's login responses carry it as `tokenValue`). No path folds a
     # successful login body into a log today, but masking it is a cheap hedge -

@@ -48,6 +48,32 @@ def _looks_authy(text: str) -> bool:
     return any(h in low for h in _AUTH_HINTS)
 
 
+def _wrap_vehicle_status(data: Any) -> Any:
+    """Give the new gateway's status payload the old platform's nesting.
+
+    Old platform:  data = {"vehicleStatus": {basicVehicleStatus,
+                            additionalVehicleStatus}, "updateTime": ...}
+    New gateway:   data = {basicVehicleStatus, additionalVehicleStatus,
+                            "updateTime": ...}
+
+    Every consumer reads through the "vehicleStatus" level, so without this the
+    entire entity set reads unknown while the payload sits right there - and
+    the few entities that read top-level fields keep working, which makes the
+    symptom look like anything but a missing key. The wrapper is added without
+    moving anything, so both spellings resolve.
+    """
+    if not isinstance(data, dict) or "vehicleStatus" in data:
+        return data
+    if "basicVehicleStatus" not in data and "additionalVehicleStatus" not in data:
+        return data
+    wrapped = dict(data)
+    wrapped["vehicleStatus"] = {
+        k: v for k, v in data.items()
+        if k in ("basicVehicleStatus", "additionalVehicleStatus")
+    }
+    return wrapped
+
+
 class ZeekrAdapter:
     """GeelyApi-shaped wrapper around ZeekrClient for the new platform."""
 
@@ -56,7 +82,7 @@ class ZeekrAdapter:
                  hf_token: str = "", vehicle_model: str = "",
                  password: str = "", country_code: str = "AU",
                  timezone: str = "UTC", hf_expiry: int = 0,
-                 gateway: str = GATEWAY) -> None:
+                 gateway: str = GATEWAY, enc_vin: str = "") -> None:
         self.vin = vin
         self.user_id = user_id
         self._email = email
@@ -72,6 +98,9 @@ class ZeekrAdapter:
         self._client.refresh_token = refresh_token
         self._client.user_id = user_id
         self._client.hf_token = hf_token or None
+        # Set only for vehicles that live on the new platform; selects the
+        # new-gateway status path in vehicle_status() below.
+        self._client.enc_vin = enc_vin or ""
         # Set when a silent HF renewal happened; the coordinator persists the
         # new token + expiry into the config entry after the next poll.
         self.hf_dirty = False
@@ -95,13 +124,23 @@ class ZeekrAdapter:
 
     def _renew_hf(self) -> None:
         """The app's silent renewal, mirrored: password -> IDaaS tokenValue ->
-        client-2 tspCode -> old-platform session/secure -> new HF JWT."""
+        tspCode -> both sessions re-minted.
+
+        This re-mints the new-platform access token as well as the HF JWT.
+        Renewing only the HF side leaves `access_token` frozen at whatever
+        the config entry holds, and that token is single-session
+        server-side: once the phone app signs in, the stored one is
+        superseded and every new-gateway call answers `079021 The account
+        is currently logged in elsewhere` permanently, because nothing
+        ever replaces it. login_tsp re-mints the snc session and calls
+        login_hf itself, so one call recovers both.
+        """
         if not self._password:
             raise ZeekrAuthError(
                 "no stored password for HF renewal - reauthenticate")
         token_value = ZeekrIdaas(country=self._country_code).login_by_email_password(
             self._email, self._password)
-        self._client.login_hf(token_value)
+        self._client.login_tsp(token_value)
         self._hf_expiry_ts = int(time.time()) + self._client.hf_expires_in
         self.hf_dirty = True
 
@@ -138,7 +177,21 @@ class ZeekrAdapter:
 
     def vehicle_status(self) -> dict:
         """Full response (code/data/...) so the coordinator's success-code
-        check works unchanged against the real gateway codes."""
+        check works unchanged against the real gateway codes.
+
+        A vehicle with an `x-vin` token lives on the new platform, where
+        the old one answers 8060 (VIN unknown); read it from the new
+        gateway instead, then normalise the envelope so nothing
+        downstream has to know which platform answered.
+        """
+        if self._client.enc_vin:
+            resp = self._authed(self._client.vehicle_status_new_resp)
+            if isinstance(resp, dict):
+                # This gateway reports success as "000000", not 1000.
+                if str(resp.get("code")) in ("000000", "0"):
+                    resp = {**resp, "code": 1000}
+                resp = {**resp, "data": _wrap_vehicle_status(resp.get("data"))}
+            return resp
         return self._authed(self._client.vehicle_status_resp,
                             self.vin, self.user_id)
 

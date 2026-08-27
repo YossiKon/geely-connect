@@ -81,7 +81,8 @@
         "data": {
           "poll_mode": "Polling mode",
           "pressure_unit": "Tire pressure unit",
-          "full_exposure": "Expose every raw field (adds ~180 diagnostic entities)"
+          "full_exposure": "Expose every raw field (adds ~180 diagnostic entities)",
+          "zeekr_enc_vin": "Vehicle token for the new platform (x-vin) - advanced, leave blank unless you have it"
         }
       }
     }
