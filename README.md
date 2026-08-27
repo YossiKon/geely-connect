@@ -33,7 +33,7 @@ polished setup on top.
 ## ✨ Highlights
 
 - 🔒 **Security-first** - verified TLS plus public-key pinning.
-- 📊 **Everything enabled** - all 76 entities are on from the start (89 on a
+- 📊 **Everything enabled** - all 83 entities are on from the start (96 on a
   hybrid), no duplicates, nothing to switch on by hand.
 - 🧮 **Computed extras** - charging power, charge completion time, range at full
   charge and efficiency, none of which the car reports itself.
@@ -1057,10 +1057,15 @@ per-trim pack sizes.
 **Everything is on from the start** - nothing is hidden and nothing needs
 enabling. Everything the car reports, plus the computed extras above.
 
-The one thing that varies by car is propulsion: the thirteen fuel and engine
+The main thing that varies by car is propulsion: the thirteen fuel and engine
 entities are created only for a car with a tank, so a battery-electric EX5 gets
-76 entities and a PHEV gets 89. That's a decision made once at startup from your
+83 entities and a PHEV gets 96. That's a decision made once at startup from your
 account's `powerType` plus the car's own telemetry - there is no option to set.
+
+Two more - `Charging (reported)` and `Plugged In (reported)` - are built only for
+a car read through the new Geely EM platform, because the old platform's payload
+does not carry those two fields at all. A car on the new platform therefore gets
+85, or 98 with a tank.
 
 The only thing not created is the raw full-exposure pass (see below), because
 those are duplicates of the curated entities by definition. Two aggregates that
