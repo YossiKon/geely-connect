@@ -52,7 +52,7 @@ def _wrap_vehicle_status(data: Any) -> Any:
     """Give the new gateway's status payload the old platform's nesting.
 
     Old platform:  data = {"vehicleStatus": {basicVehicleStatus,
-                            additionalVehicleStatus}, "updateTime": ...}
+                            additionalVehicleStatus, "updateTime": ...}}
     New gateway:   data = {basicVehicleStatus, additionalVehicleStatus,
                             "updateTime": ...}
 
@@ -67,9 +67,16 @@ def _wrap_vehicle_status(data: Any) -> Any:
     if "basicVehicleStatus" not in data and "additionalVehicleStatus" not in data:
         return data
     wrapped = dict(data)
+    # `updateTime` belongs inside the wrapper too. It is the CAR's own stamp on
+    # the snapshot - as opposed to our poll clock - the old platform nests it
+    # there, and `Car Reported At` reads it from there. Left only at the top
+    # level it resolved to nothing, so that sensor read unknown on every
+    # new-platform car, silently disabling the one entity whose whole purpose
+    # (#24) is to reveal that a parked car has stopped reporting and the cloud
+    # is replaying an old snapshot.
     wrapped["vehicleStatus"] = {
         k: v for k, v in data.items()
-        if k in ("basicVehicleStatus", "additionalVehicleStatus")
+        if k in ("basicVehicleStatus", "additionalVehicleStatus", "updateTime")
     }
     return wrapped
 

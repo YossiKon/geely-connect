@@ -138,6 +138,16 @@ def test_wrapper_restores_the_old_platform_nesting():
     assert wrapped["updateTime"] == 1787817174561
 
 
+def test_the_cars_own_clock_lands_where_car_reported_at_reads_it():
+    """`updateTime` is the CAR's stamp on the snapshot, and the old platform
+    nests it inside vehicleStatus - which is where sensor._reported_at looks.
+    Left only at the top level it resolved to nothing, so `Car Reported At`
+    read unknown on every new-platform car: the one entity whose purpose is to
+    show that the cloud is replaying a stale snapshot (#24)."""
+    wrapped = adapter._wrap_vehicle_status(_STATUS_DATA)
+    assert wrapped["vehicleStatus"]["updateTime"] == 1787817174561
+
+
 def test_wrapper_leaves_everything_else_alone():
     old_shape = {"vehicleStatus": {"basicVehicleStatus": {}}, "updateTime": 1}
     assert adapter._wrap_vehicle_status(old_shape) is old_shape
