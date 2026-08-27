@@ -29,6 +29,7 @@ explicitly unimplemented until the primary path is proven live.
 # Scott Lorien (@scottaki) in pull request #33. See NOTICE.txt.
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
@@ -36,6 +37,8 @@ from .api import GeelyAuthError, GeelyControlError
 from .zeekr_client import (
     GATEWAY, ZeekrApiError, ZeekrAuthError, ZeekrClient, ZeekrIdaas,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 _AUTH_HINTS = (
     "token", "auth", "login", "session", "expired", "unauthor",
@@ -46,6 +49,114 @@ _AUTH_HINTS = (
 def _looks_authy(text: str) -> bool:
     low = text.lower()
     return any(h in low for h in _AUTH_HINTS)
+
+
+# Capability codes on the new platform, mapped to the old catalogue's
+# functionIds. Every row is justified by the vendor's own `functionName` label
+# carried in the same payload, quoted here so the reasoning is checkable
+# rather than remembered.
+_CAPABILITY_CODES: dict[str, str] = {
+    # plainly-named codes the old catalogue also uses
+    "remote_control_lock_2":   "remote_control_lock_2",
+    "remote_control_unlock_2": "remote_control_unlock_2",
+    "remote_charge_2":         "remote_charge_2",
+    "honk_flash":              "honk_flash",
+    "parking_comfortable_2":   "parking_comfortable_2",
+    "remote_purification":     "remote_purification",
+    # service-shaped codes, read from their labels
+    "C_RDU_2_2": "remote_control_open_2",       # 远程解锁-控制设备_后备箱 (tailgate)
+    "C_RDU_2_3": "remote_control_unlock_2",     # 远程解锁-控制设备_车门 (doors)
+    "C_RWS_1":   "remote_control_ventilate_2",  # 远程车窗微开 (window vent)
+    "C_RWS_1_5": "remote_control_window_2",     # 远程车窗关闭 (windows)
+    "C_RHL_1":   "honk_flash",                  # 远程闪灯鸣笛
+    "C_RHL_2":   "honk_flash",                  # 单独闪灯
+    "C_RHL_3":   "honk_flash",                  # 单独鸣笛
+    # climate: several codes all mean "this car has remote climate"
+    "remote_climate_control": "remote_climate_control_2",  # ZK空调服务不区分命令
+    "C_PAA_1":  "remote_climate_control_2",     # 智能温控_PAA空调
+    "C_PAA_12": "remote_climate_control_2",     # 智能温控入口
+    "C_ZAF_1":  "remote_climate_control_2",     # 环境调节_空调远控指令
+}
+
+# Seat-heat positions, from the codes that name one seat each.
+_SEAT_HEAT_POSITIONS: dict[str, str] = {
+    "C_PAA_5_1": "front-left",    # …PAA座椅加热支持的位置_主驾
+    "C_PAA_5_2": "front-right",   # …PAA座椅加热支持的位置_副驾
+    "V_ZYJRZH_1_3": "front-left",   # 远程座椅加热转换-座椅位置_左前
+    "V_ZYJRZH_1_4": "front-right",  # 远程座椅加热转换-座椅位置_右前
+}
+
+_WHEEL_HEAT_CODE = "C_PAA_6"      # …PAA是否支持方向盘加热
+
+
+def _enabled_row(row: dict) -> bool:
+    """`paramValueUse` is the enable flag; "N"/"0"/blank mean not available."""
+    use = row.get("paramValueUse")
+    if use is None:
+        return False
+    text = str(use).strip()
+    return bool(text) and text.upper() not in ("N", "0", "FALSE", "NO")
+
+
+def translate_capabilities(rows: list[dict]) -> list[dict]:
+    """New-platform catalogue -> the entry shape capabilities.py parses.
+
+    The rule is deliberately asymmetric, because the two platforms describe a
+    car at different resolutions:
+
+      * a feature is ENABLED when a code for it is present, and
+      * absence means "not fitted" ONLY for the features this catalogue
+        actually enumerates.
+
+    The distinction matters. The catalogue lists seat-heat positions one code
+    per seat, so no seat-vent code is real evidence the car has none. But the
+    climate entry is labelled 空调服务不区分命令 - "the AC service does not
+    distinguish commands" - so it cannot say whether defrost exists, and
+    reading its silence as "no defrost" would remove a control that works.
+    Anything in that second class is left to the permissive default rather
+    than being switched off on absence.
+
+    An empty or unrecognised catalogue returns [] - the caller then keeps
+    today's all-features behaviour, so this can never be worse than before.
+    """
+    if not rows:
+        return []
+    live = {r.get("functionCode") for r in rows if _enabled_row(r)}
+    if not live:
+        return []
+
+    ids: set[str] = {_CAPABILITY_CODES[c] for c in live if c in _CAPABILITY_CODES}
+    entries: list[dict] = []
+
+    seats = sorted({pos for code, pos in _SEAT_HEAT_POSITIONS.items() if code in live})
+    if "remote_climate_control_2" in ids:
+        params = [
+            # The service is undifferentiated, so defrost and AC are asserted
+            # rather than discovered - see the docstring.
+            {"nameKey": "climate_devices", "config": "AC;defrost"},
+        ]
+        if seats:
+            params.append({"nameKey": "dpt_heat_loc", "config": ",".join(seats)})
+        if _WHEEL_HEAT_CODE in live:
+            params.append({"nameKey": "steel_wheel_heating", "config": "true"})
+        if "remote_control_ventilate_2" in ids:
+            params.append({"nameKey": "window_ventilation", "config": "true"})
+        entries.append({"functionId": "remote_climate_control_2",
+                        "valueEnable": True, "paramsJson": params})
+        ids.discard("remote_climate_control_2")
+
+    if "remote_control_unlock_2" in ids:
+        targets = ["door"]
+        if "C_RDU_2_2" in live:
+            targets.append("trunk")
+        if "C_RDU_2_1" in live:            # 前备箱 (frunk)
+            targets.append("hood")
+        entries.append({"functionId": "remote_control_unlock_2", "valueEnable": True,
+                        "paramsJson": [{"nameKey": "door", "config": ",".join(targets)}]})
+        ids.discard("remote_control_unlock_2")
+
+    entries.extend({"functionId": fid, "valueEnable": True} for fid in sorted(ids))
+    return entries
 
 
 def _wrap_vehicle_status(data: Any) -> Any:
@@ -245,10 +356,25 @@ class ZeekrAdapter:
         )
 
     def fetch_capabilities(self) -> list[dict]:
-        # Legacy /geelyTCAccess/tcservices/capability has a new-platform
-        # sibling but its shape is unverified; an empty catalog is the
-        # documented best-effort default (all-features view).
-        return []
+        """The catalogue, translated into the shape capabilities.py parses.
+
+        Only vehicles addressed by an x-vin token can be asked; everything
+        else keeps the previous behaviour of an empty catalogue, which
+        capabilities.py reads as the permissive all-features view. A failure
+        here is deliberately swallowed for the same reason: losing the
+        catalogue must cost a car its feature *filtering*, never its entities.
+        """
+        if not self._client.enc_vin:
+            return []
+        try:
+            rows = self._authed(self._client.capabilities_new)
+        except (ZeekrAuthError, ZeekrApiError, GeelyAuthError) as err:
+            _LOGGER.debug("new-platform capability fetch failed: %s", err)
+            return []
+        entries = translate_capabilities(rows or [])
+        _LOGGER.debug("new-platform capabilities: %d row(s) -> %d entry/entries",
+                      len(rows or []), len(entries))
+        return entries
 
     # ---- platform surface --------------------------------------------------
 

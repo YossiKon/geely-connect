@@ -908,6 +908,29 @@ class ZeekrClient:
                     return [v for v in val if isinstance(v, dict)]
         return []
 
+    def capabilities_new(self) -> list[dict]:
+        """The new platform's capability catalogue for this vehicle.
+
+        GET /ms-vehicle-capability/api/v1.0/vehicle/function/model/info with no
+        query at all - the vehicle comes from the x-vin header. Rows look like
+
+            {"functionCategory": "remote_control",
+             "functionCode": "C_RDU_2_2", "functionName": "远程解锁-控制设备_后备箱",
+             "paramCode": null, "paramValueUse": "Y", ...}
+
+        Returned raw; zeekr_adapter translates it into the shape capabilities.py
+        parses.
+        """
+        if not self.access_token:
+            raise ZeekrAuthError("not logged in (no new-platform session)")
+        if not self.enc_vin:
+            raise ZeekrAuthError("no x-vin vehicle token configured")
+        resp = self._request(
+            "GET", "/ms-vehicle-capability/api/v1.0/vehicle/function/model/info",
+            query="", signer="snc")
+        data = resp.get("data")
+        return [r for r in data if isinstance(r, dict)] if isinstance(data, list) else []
+
     def vehicle_status_new_resp(self) -> dict:
         """Live status from the NEW gateway, for vehicles that live there.
 
