@@ -25,8 +25,8 @@ POLYFILL = os.path.join(HERE, "fixtures",
                         "scoped-custom-element-registry.js").replace("\\", "/")
 CARD_TAGS = ("geely-card", "geely-card-compact", "geely-card-top",
              "geely-card-mini", "geely-card-strip")
-# The mini card deliberately shows no bar and no percentage on any car: it is a
-# range, a status and three buttons. Cards that do show them:
+# The mini card deliberately shows no BAR on any car - it is a range, a status
+# and three buttons, with one head-row line for the readings. Cards with bars:
 BAR_TAGS = ("geely-card", "geely-card-compact", "geely-card-top",
             "geely-card-strip")
 
@@ -51,6 +51,11 @@ window.mkHass = (opts) => {
   put(`sensor.${P}_tire_front_right`, "240", { unit_of_measurement: "kPa" });
   put(`sensor.${P}_tire_rear_left`, "260", { unit_of_measurement: "kPa" });
   put(`sensor.${P}_tire_rear_right`, "280", { unit_of_measurement: "kPa" });
+  // Both small cards print this in their head row (#52); omit it with
+  // noInteriorTemp to exercise the half-missing case.
+  if (!opts.noInteriorTemp) {
+    put(`sensor.${P}_interior_temperature`, "21.4", { unit_of_measurement: "°C" });
+  }
   put(`lock.${P}_doors`, "locked");
   put(`binary_sensor.${P}_door_driver`, opts.driverDoor || "off");
   put(`binary_sensor.${P}_door_passenger`, "off");
@@ -1604,3 +1609,54 @@ def test_the_consumption_row_says_it_is_the_lifetime_one():
         # The tooltip has to name where the other figure lives, or the label
         # only tells half the story.
         assert "Trip Consumption" in r["title"], (tag, r)
+
+
+# ------------------- #52: each small card's head row was missing a half
+
+def _head_line(tag, **hass_opts):
+    """The single line of readings in a small card's head row."""
+    return _mount(tag, """(() => {
+        const sel = el.shadowRoot.querySelector(".head .temp, .head .micro");
+        return sel ? sel.textContent.replace(/\s+/g, " ").trim() : null;
+    })()""", **hass_opts)
+
+
+def test_the_mini_card_shows_the_battery_percentage():
+    """An owner asked for it as "the most important data point for me", and he
+    was right that it was missing: the mini carried the cabin reading and no
+    percentage, while the compact carried the percentage and no cabin reading
+    (#52). No bar is added - that part of the mini's design is untouched."""
+    line = _head_line("geely-card-mini")
+    assert "61%" in line, line
+    assert "21° in" in line, line
+    bars = _mount("geely-card-mini", "el.shadowRoot.querySelectorAll('.bar').length")
+    assert bars == 0, "the mini grew a bar it is not supposed to have"
+
+
+def test_the_compact_card_shows_the_cabin_temperature():
+    line = _head_line("geely-card-compact")
+    assert "61%" in line, line
+    assert "21° in" in line, line
+
+
+def test_a_missing_reading_leaves_no_stray_separator():
+    """Either half can be absent - a car that has not reported a cabin temp,
+    or a percentage that is unknown - and the line must not read "61% ·" with
+    nothing after it."""
+    for tag in ("geely-card-mini", "geely-card-compact"):
+        line = _mount(tag, """(() => {
+            const sel = el.shadowRoot.querySelector(".head .temp, .head .micro");
+            return sel ? sel.textContent.replace(/\s+/g, " ").trim() : null;
+        })()""", noInteriorTemp=True)
+        assert "·" not in line, (tag, line)
+        assert line.strip().endswith("%"), (tag, line)
+
+
+def test_the_compact_card_watches_what_its_head_row_prints():
+    """The render is skipped when the watched signature is unchanged, so a
+    value drawn but unwatched freezes on screen - the bug that froze the door
+    count and the charging label on these same two cards."""
+    src = _source(os.path.join(PKG, "geely-card.js"))
+    compact = src[src.index("class GeelyCardCompact"):src.index("class GeelyCard extends")]
+    assert '"sensor.interior_temperature"' in compact, (
+        "the compact card prints the cabin temp without watching it")

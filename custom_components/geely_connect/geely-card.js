@@ -1534,6 +1534,10 @@
   class GeelyCardCompact extends GeelyCardBase {
     _watched() {
       return ["sensor.battery", "sensor.electric_range", "sensor.charger_connection",
+        // Watched because the head row prints it (#52). A value the card
+        // draws but does not watch freezes on screen - the render is
+        // skipped whenever the signature is unchanged.
+        "sensor.interior_temperature",
         "sensor.charging_power", "lock.doors", "climate.climate", "switch.defrost",
         "binary_sensor.door_driver", "binary_sensor.door_passenger",
         "binary_sensor.door_rear_left", "binary_sensor.door_rear_right",
@@ -1550,6 +1554,10 @@
       const batt = s.battery == null ? "—" : Math.round(s.battery);
       const split = this._rangeSplit(s);
       const driving = this._isDriving();
+      // #52: the compact card carried the percentages and no cabin
+      // reading; the mini carried the reading and no percentages. Each
+      // head row was missing the half the other one had.
+      const inTemp = NUM(this._st("sensor.interior_temperature"));
       const climateOn = s.climate && s.climate.state !== "off";
       const defrost = this._st("switch.defrost");
       const online = this._st("binary_sensor.connected");
@@ -1585,7 +1593,10 @@
               <i class="dot ${online && online.state === "off" ? "off" : ""}"></i>
               ${esc(this._title())}
             </div>
-            <span class="micro">${this._levels(s, batt)}</span>
+            <span class="micro">${[
+              this._levels(s, batt),
+              inTemp == null ? "" : Math.round(inTemp) + "° in",
+            ].filter(Boolean).join(" · ")}</span>
           </div>
           <div class="hero">
             <div>
@@ -2043,7 +2054,10 @@
               <i class="dot ${online && online.state === "off" ? "off" : ""}"></i>
               <em>${esc(this._title())}</em>
             </div>
-            <span class="temp">${temp != null ? Math.round(temp) + "° in" : ""}</span>
+            <span class="temp">${[
+              s.battery == null ? "" : Math.round(s.battery) + "%",
+              temp == null ? "" : Math.round(temp) + "° in",
+            ].filter(Boolean).join(" · ")}</span>
           </div>
           <div class="mid">
             <span class="num n ${OK(s.range) ? "" : "unavail"}">${range}</span><span class="u">${esc(UNIT(s.range) || "km")}</span>

@@ -238,8 +238,8 @@ dashboard, **Add card**, and search "Geely":
 |---|---|
 | **Geely Card** (`custom:geely-card`) | The full cockpit: range and battery up top, the EX5 silhouette that glows while charging and flags every opening, one-tap Lock / Unlock / Climate / Defrost / Vent / Trunk / Find / Sync, a full climate panel (temperature, rapid heat / cool, seat heating and cooling, fresh air, sunroof and shade), charging and schedule toggles with editable start / end times, links that navigate you to wherever the car is parked, then charging, tires, trip and service health - each block hides itself when the car doesn't report it |
 | **Geely Card (top view)** (`custom:geely-card-top`) | The car from above: tire pressure beside each wheel, bold live status on every door, the hood, the sunroof and the trunk - with the same header, actions and climate panel. The driver's door follows your market automatically (right-hand-drive countries show it on the right; `rhd: true/false` in the card config overrides) |
-| **Geely Card (compact)** (`custom:geely-card-compact`) | The essentials in one tile: battery, range, status chips - and Lock, Unlock, rapid Heat / Cool, Defrost and Trunk |
-| **Geely Card (mini)** (`custom:geely-card-mini`) | A small square: range, cabin temperature, status, a lock button that follows the car (locked offers Unlock, unlocked offers Lock), and one-tap quick heat / quick cool |
+| **Geely Card (compact)** (`custom:geely-card-compact`) | The essentials in one tile: battery and cabin temperature in the header, range, status chips - and Lock, Unlock, rapid Heat / Cool, Defrost and Trunk |
+| **Geely Card (mini)** (`custom:geely-card-mini`) | A small square: range, battery and cabin temperature in the header, status, a lock button that follows the car (locked offers Unlock, unlocked offers Lock), and one-tap quick heat / quick cool |
 | **Geely Card (strip)** (`custom:geely-card-strip`) | One row: range, battery and lock state, with lock, rapid heat / cool, trunk and find as icon buttons - for the top of a dashboard or a narrow column |
 
 | Full | Top view |
