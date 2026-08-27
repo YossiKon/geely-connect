@@ -44,10 +44,26 @@ def _decode_coord(raw: Any, *, max_abs: float) -> float | None:
         v = float(raw)
     except (TypeError, ValueError):
         return None
-    for divisor in (_ARC_MS_PER_DEGREE, 1e6, 1.0):
-        candidate = v / divisor
-        if abs(candidate) <= max_abs:
-            return candidate
+    # Two real formats, disambiguated by magnitude rather than by "first
+    # divisor that fits" - which was wrong in both directions (#53):
+    #
+    #   - the old platform sends arc-milliseconds (deg x 3,600,000);
+    #   - the new gateway sends plain decimal degrees.
+    #
+    # A value already inside the degree range IS degrees: an arc-ms reading
+    # small enough to pass as degrees would be within 5e-5 deg of Null Island,
+    # not a real location. Everything larger is arc-ms. The previous code also
+    # tried a 1e6 (microdegree) divisor, and that is what made it fragile: a
+    # tropical arc-ms latitude like -84,780,000 (Sao Paulo, -23.55) divided by
+    # 1e6 gives -84.78, a *valid* latitude, so the wrong interpretation won -
+    # a Brazilian car (there are several on this tracker) would have jumped
+    # 60 degrees. No platform is known to send microdegrees, so that divisor
+    # is gone and the ambiguity with it.
+    if abs(v) <= max_abs:
+        return v
+    candidate = v / _ARC_MS_PER_DEGREE
+    if abs(candidate) <= max_abs:
+        return candidate
     return None
 
 

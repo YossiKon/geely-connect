@@ -573,6 +573,30 @@ def test_tracker_rejects_coordinates_outside_the_valid_degree_range():
     _need_ha()
     t = _make_tracker(_pos_data(latitude="999999999999", longitude="-999999999999"))
     assert t.latitude is None and t.longitude is None
+
+
+def test_tracker_reads_the_new_platforms_plain_degrees():
+    """The new gateway sends decimal degrees, not arc-milliseconds. The old
+    decoder tried the arc-ms divisor first and -33.49/3.6e6 is 9e-06 - a valid
+    latitude - so a migrated car reported itself off West Africa while every
+    other entity was correct (#53)."""
+    _need_ha()
+    t = _make_tracker(_pos_data(latitude="-33.49", longitude="151.2"))
+    assert abs(t.latitude + 33.49) < 1e-9, t.latitude
+    assert abs(t.longitude - 151.2) < 1e-9, t.longitude
+
+
+def test_tracker_keeps_tropical_arc_ms_coordinates_correct():
+    """The regression the naive fix (most-specific divisor first) would have
+    caused: a tropical arc-ms coordinate is small enough that dividing by 1e6
+    yields a valid-looking degree. Sao Paulo at -23.55, -46.63 in arc-ms must
+    still decode to itself, not to -84.78, -167.87."""
+    _need_ha()
+    arc = 3_600_000.0
+    t = _make_tracker(_pos_data(latitude=str(-23.55 * arc),
+                                longitude=str(-46.63 * arc)))
+    assert abs(t.latitude + 23.55) < 1e-6, t.latitude
+    assert abs(t.longitude + 46.63) < 1e-6, t.longitude
     # Just past the pole: no divisor interpretation fits, so None - not a wrap.
     t = _make_tracker(_pos_data(latitude="324000001", longitude="648000001"))
     assert t.latitude is None and t.longitude is None
