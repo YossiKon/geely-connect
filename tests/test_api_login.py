@@ -543,6 +543,41 @@ def test_an_empty_garage_falls_back_to_the_korean_v1_endpoint():
     assert session.calls[1][2] == session.calls[0][2]
 
 
+def test_the_vehicle_list_leaves_a_diagnosable_trail_without_leaking_vins():
+    """#32 again, from lanpup: an owner hit "no vehicles", turned DEBUG on, and
+    the discovery step logged nothing at all. It now logs record counts at
+    each stage - and counts only, never the records, which carry the VIN."""
+    if not _deps():
+        skip("requests not installed")
+    import logging
+    api = _api()
+
+    records = []
+
+    class _Capture(logging.Handler):
+        def emit(self, r):
+            records.append(r.getMessage())
+
+    logger = logging.getLogger(api.__name__)
+    h = _Capture()
+    logger.addHandler(h)
+    old_level = logger.level
+    logger.setLevel(logging.DEBUG)
+    try:
+        # v2 empty, KR fallback also empty: the case that used to be silent.
+        session = _Session({"data": []}, {"data": []})
+        with _SessionPatch(api, session):
+            assert api.list_vehicles("tok-1", "u-1", "AU") == []
+    finally:
+        logger.removeHandler(h)
+        logger.setLevel(old_level)
+
+    joined = " | ".join(records)
+    assert "v2/controlCars returned 0" in joined, joined
+    assert "fallback" in joined.lower(), joined
+    assert FAKE_VIN not in joined, "a VIN reached the log"
+
+
 def test_a_broken_fallback_still_reports_an_empty_garage():
     """An account that genuinely owns no cars must get the config flow's
     "no_vehicles" message, not a stack trace out of the fallback."""

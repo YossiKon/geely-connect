@@ -1700,15 +1700,23 @@ def list_vehicles(cidpsso_token: str, user_id: str | None = None,
               headers=headers, timeout=20)
     j = r.json()
     vehicles = j.get("data") or []
+    # Counts only - never the records, which carry the VIN. This is the trail a
+    # "no vehicles" setup failure left nothing of before (#32): an owner with
+    # DEBUG on saw the error and no reason for it.
+    _LOGGER.debug("vehicle-list v2/controlCars returned %d record(s)", len(vehicles))
     if vehicles:
         return vehicles
     # Same session, same headers, same pinned transport - only the host and the
     # API version differ, and both hosts already carry this token elsewhere in
     # this file. The v1 reply wraps the same `data` list.
     try:
+        _LOGGER.debug("v2 empty; trying the APAC v1/listControlCars fallback")
         r = s.get(f"{APAC_APP_HOST}/cidpcar/vehicleOwner/v1/listControlCars",
                   headers=headers, timeout=20)
-        return r.json().get("data") or []
+        fb = r.json().get("data") or []
+        _LOGGER.debug("APAC v1/listControlCars fallback returned %d record(s)",
+                      len(fb))
+        return fb
     except Exception as e:  # noqa: BLE001
         # A dead fallback must not turn "you own no cars" into a stack trace:
         # the caller's empty-list path already says the right thing.

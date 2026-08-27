@@ -308,6 +308,13 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                                 )
                             )
                             all_v = [v for v in (all_v_raw or []) if _valid_vin(v.get("vin"))]
+                            # Counts, not records (VIN). Before this the empty
+                            # case set no_vehicles with no log at all, so an
+                            # owner with DEBUG on had nothing to go on (#32).
+                            _LOGGER.debug(
+                                "vehicle discovery: %d record(s) returned, "
+                                "%d with a valid VIN",
+                                len(all_v_raw or []), len(all_v))
                             if all_v_raw and not all_v:
                                 _LOGGER.error("all vehicles had malformed VINs; aborting")
                         except Exception:
