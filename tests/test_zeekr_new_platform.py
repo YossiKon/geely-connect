@@ -67,7 +67,26 @@ def _start_gateway(seen: list[dict]):
                 data = _CAP_DATA
             else:
                 data = _LIST_DATA
-            body = {"code": "000000", "msg": "ok", "data": data}
+            self._reply({"code": "000000", "msg": "ok", "data": data})
+
+        def do_POST(self):  # noqa: N802 - BaseHTTPRequestHandler's spelling
+            length = int(self.headers.get("Content-Length") or 0)
+            body = self.rfile.read(length)
+            headers = {k.lower(): v for k, v in self.headers.items()}
+            want = zc.snc_sign(
+                method="POST",
+                url=f"http://127.0.0.1:{self.server.server_address[1]}{self.path}",
+                headers=dict(self.headers), body=body)
+            seen.append({
+                "path": self.path,
+                "body": json.loads(body or b"{}"),
+                "x_vin": headers.get("x-vin"),
+                "signature_ok": headers.get("x-signature") == want,
+            })
+            self._reply({"code": "000000", "msg": "ok",
+                         "data": {"sessionId": "abc123"}})
+
+        def _reply(self, body):
             raw = json.dumps(body).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -267,3 +286,81 @@ def test_status_read_refuses_without_a_session():
         pass
     else:  # pragma: no cover - only on a regression
         raise AssertionError("status read ran without a session")
+
+
+def test_the_control_route_sends_the_captured_envelope():
+    """control_new_resp is the shared transport for every new-platform command:
+    POST /ms-remote-control/v1.0/remoteControl/control, no /api/ segment,
+    serviceParameters nested under `setting`, vehicle addressed by x-vin, and
+    the body inside the signed canonical."""
+    seen: list[dict] = []
+    srv = _start_gateway(seen)
+    try:
+        c = _client(srv)
+        c.enc_vin = "ENC-VIN-TOKEN=="
+        resp = c.control_new_resp("RDL", "start",
+                                  [{"key": "door", "value": "all"}])
+    finally:
+        srv.shutdown()
+    sent = seen[-1]
+    assert sent["path"] == "/ms-remote-control/v1.0/remoteControl/control"
+    assert sent["body"] == {
+        "command": "start", "serviceId": "RDL",
+        "setting": {"serviceParameters": [{"key": "door", "value": "all"}]}}
+    assert sent["x_vin"] == "ENC-VIN-TOKEN=="
+    assert sent["signature_ok"], "the body must be inside the signed canonical"
+    assert resp["data"]["sessionId"] == "abc123"
+
+
+def test_a_command_with_no_parameters_still_sends_the_list():
+    seen: list[dict] = []
+    srv = _start_gateway(seen)
+    try:
+        c = _client(srv)
+        c.enc_vin = "ENC-VIN-TOKEN=="
+        c.control_new_resp("RHL", "start")
+    finally:
+        srv.shutdown()
+    assert seen[-1]["body"]["setting"] == {"serviceParameters": []}
+
+
+def test_the_control_route_refuses_to_run_unauthenticated():
+    """A command must never leave without both a session and a vehicle token."""
+    seen: list[dict] = []
+    srv = _start_gateway(seen)
+    try:
+        no_session = _client(srv)
+        no_session.access_token = ""
+        no_session.enc_vin = "ENC-VIN-TOKEN=="
+        no_token = _client(srv)          # authenticated, but no x-vin
+        for c in (no_session, no_token):
+            try:
+                c.control_new_resp("RDL", "start")
+            except zc.ZeekrAuthError:
+                pass
+            else:  # pragma: no cover - only reached on a regression
+                raise AssertionError("a command ran without credentials")
+    finally:
+        srv.shutdown()
+    assert not seen, "must not reach the gateway without credentials"
+
+
+def test_the_position_wake_sends_the_captured_pai_request():
+    """request_position_refresh is the whole point of the transport here: the
+    map-open locator, serviceId PAI with a single pai=1 parameter (the legacy
+    operation=4 is rejected on this gateway). It acquires a position; it cannot
+    move the car."""
+    seen: list[dict] = []
+    srv = _start_gateway(seen)
+    try:
+        c = _client(srv)
+        c.enc_vin = "ENC-VIN-TOKEN=="
+        c.control_new_resp("PAI", "start", [{"key": "pai", "value": "1"}])
+    finally:
+        srv.shutdown()
+    sent = seen[-1]
+    assert sent["path"] == "/ms-remote-control/v1.0/remoteControl/control"
+    assert sent["body"] == {
+        "command": "start", "serviceId": "PAI",
+        "setting": {"serviceParameters": [{"key": "pai", "value": "1"}]}}
+    assert sent["signature_ok"]

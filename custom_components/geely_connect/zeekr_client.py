@@ -931,6 +931,34 @@ class ZeekrClient:
         data = resp.get("data")
         return [r for r in data if isinstance(r, dict)] if isinstance(data, list) else []
 
+    def control_new_resp(self, service_id: str, command: str,
+                         parameters: list[dict] | None = None) -> dict:
+        """Send a command on the NEW gateway (capture-verified).
+
+        POST /ms-remote-control/v1.0/remoteControl/control - note no `/api/`
+        segment on this service, and a much smaller body than the old
+        platform's: no creator, operationScheduling, timestamp, userId or vin,
+        and serviceParameters nested under `setting`. The vehicle is
+        identified by the `x-vin` header alone.
+
+            {"command": "start", "serviceId": "RDL",
+             "setting": {"serviceParameters": [{"key": "door",
+                                                "value": "all"}]}}
+        -> {"code": "000000", "data": {"sessionId": "..."}}
+        """
+        if not self.access_token:
+            raise ZeekrAuthError("not logged in (no new-platform session)")
+        if not self.enc_vin:
+            raise ZeekrAuthError("no x-vin vehicle token configured")
+        body = {
+            "command": command,
+            "serviceId": service_id,
+            "setting": {"serviceParameters": parameters or []},
+        }
+        return self._request(
+            "POST", "/ms-remote-control/v1.0/remoteControl/control",
+            body=json.dumps(body).encode(), signer="snc")
+
     def vehicle_status_new_resp(self) -> dict:
         """Live status from the NEW gateway, for vehicles that live there.
 

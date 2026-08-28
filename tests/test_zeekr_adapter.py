@@ -331,3 +331,26 @@ def test_a_catalogue_that_cannot_be_fetched_keeps_every_entity():
 
     c.capabilities_new = _boom
     assert a.fetch_capabilities() == []
+
+
+def test_position_refresh_sends_the_pai_wake_on_the_new_platform():
+    """With an x-vin token, request_position_refresh fires the PAI locator
+    through the control transport - serviceId PAI, pai=1 - which is what makes
+    a new-platform car's map refresh at all."""
+    a, c = _make_adapter()
+    c.enc_vin = "opaque-token"
+    sent = []
+    c.control_new_resp = lambda sid, cmd, params=None: (
+        sent.append((sid, cmd, params)) or {"code": "000000", "data": {}})
+    a.request_position_refresh()
+    assert sent == [("PAI", "start", [{"key": "pai", "value": "1"}])], sent
+
+
+def test_position_refresh_is_a_no_op_without_a_token():
+    """A vehicle with no x-vin token is on the old platform (or unconfigured);
+    the legacy client owns its PAI, so this side must not reach the car."""
+    a, c = _make_adapter()   # enc_vin defaults to ""
+    called = []
+    c.control_new_resp = lambda *a_, **k: called.append(1) or {}
+    assert a.request_position_refresh() == {}
+    assert called == [], "must not send a new-platform command without a token"

@@ -321,19 +321,31 @@ class ZeekrAdapter:
                             self.vin, self.user_id)
 
     def request_position_refresh(self) -> dict:
-        """PAI wake (serviceId PAI / operation 4 / pai 1) on the legacy client.
+        """Wake the car for a fresh GPS fix (PAI - position acquisition).
 
-        Deliberately a no-op on the new platform: the coordinator fires this
-        automatically on the first poll and on every driving cycle, and the
-        control write path here is NOT live-verified on this backend (only door
-        lock/unlock is). Auto-sending an unproven command to the car on a timer
-        is exactly what the maintainer avoids, so until the PAI write is
-        confirmed we serve the position already in the status payload and skip
-        the active wake. The body it would send is kept for when it is proven:
+        The new gateway never streams position: the status payload carries the
+        last *located* fix and only refreshes when something asks the car for
+        one, which is why a migrated car's map could sit hours stale while every
+        other value was live (#53). The Geely app fires this on every map open.
 
-          {command: start, serviceId: PAI, serviceParameters:
-             [{operation: 4}, {pai: 1}], userId, timestamp}
+        Capture-verified on the new gateway (2026-08-29): the request is
+        serviceId PAI with a single `pai=1` parameter, sent through the same
+        control route as any other new-platform command. The legacy
+        `operation=4` parameter is rejected here (037000 parameter incorrect),
+        so only `pai=1` is sent. PAI *acquires* a position - there is no
+        variant of it that moves or opens the car - so unlike the lock/unlock
+        mapping its failure mode is benign.
+
+            {"command": "start", "serviceId": "PAI",
+             "setting": {"serviceParameters": [{"key": "pai", "value": "1"}]}}
+
+        The gateway ACKs immediately; the fresh fix lands in the status payload
+        a few seconds later, which the next poll reads. On a vehicle without an
+        x-vin token this stays a no-op, exactly as before.
         """
+        if self._client.enc_vin:
+            return self._authed(self._client.control_new_resp, "PAI", "start",
+                                [{"key": "pai", "value": "1"}])
         return {}
 
     def vehicle_status_state(self) -> dict:
