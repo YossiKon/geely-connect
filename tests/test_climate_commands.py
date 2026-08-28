@@ -632,3 +632,34 @@ def test_a_visibly_running_rapid_is_left_alone():
         assert e.hvac_mode == c.HVACMode.HEAT_COOL
     finally:
         c.schedule_refresh = orig
+
+
+def test_the_rapid_silence_notice_is_created_and_survives_a_failure():
+    """The real _notify_rapid_silence, both paths: it raises a persistent
+    notification, and a failure creating it must not propagate - the state
+    cleanup that runs before it has to stand."""
+    _ha()
+    e, api, c = _entity(data=_status(interior="30.0"))
+
+    # Success path: capture the persistent_notification call.
+    from homeassistant.components import persistent_notification
+    created = []
+    orig = persistent_notification.async_create
+    persistent_notification.async_create = (
+        lambda hass, message, **kw: created.append((message, kw)))
+    try:
+        e._notify_rapid_silence("cooling")
+    finally:
+        persistent_notification.async_create = orig
+    assert created and "rapid cooling" in created[0][0]
+    assert created[0][1]["notification_id"].startswith("geely_rapid_")
+
+    # Failure path: a raising async_create is swallowed, not propagated.
+    persistent_notification.async_create = orig
+    def _boom(*a, **k):
+        raise RuntimeError("notification backend down")
+    persistent_notification.async_create = _boom
+    try:
+        e._notify_rapid_silence("warming")   # must not raise
+    finally:
+        persistent_notification.async_create = orig

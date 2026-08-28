@@ -229,3 +229,41 @@ def test_the_catalogue_refuses_to_run_unauthenticated():
     finally:
         srv.shutdown()
     assert not seen, "must not reach the gateway without credentials"
+
+
+def test_bff_garage_guards_and_shapes():
+    """The edge paths of the new-platform garage read: it refuses without a
+    session, and it unwraps a dict-shaped reply (some gateways return the
+    records under a `list`/`records` key rather than as the top-level array)."""
+    c = zc.ZeekrClient(email="", password="", gateway="https://unused.invalid")
+
+    # No session -> refuse before any request.
+    c.access_token = ""
+    try:
+        c.list_vehicles_bff()
+    except zc.ZeekrAuthError:
+        pass
+    else:  # pragma: no cover - only on a regression
+        raise AssertionError("bff read ran without a session")
+
+    c.access_token = "test-access-token"
+    # Dict-wrapped: records under a key.
+    c._request = lambda *a, **k: {"data": {"list": [{"vin": FAKE_VIN}, "junk"]}}
+    assert c.list_vehicles_bff() == [{"vin": FAKE_VIN}], "dict-wrapped list not unwrapped"
+    # A dict with no recognised key -> empty, not an error.
+    c._request = lambda *a, **k: {"data": {"nothing": "useful"}}
+    assert c.list_vehicles_bff() == []
+
+
+def test_status_read_refuses_without_a_session():
+    """The other guard on the live read - no access token means no request,
+    the pair to the missing-x-vin guard already covered."""
+    c = zc.ZeekrClient(email="", password="", gateway="https://unused.invalid")
+    c.access_token = ""
+    c.enc_vin = "ENC-VIN-TOKEN=="
+    try:
+        c.vehicle_status_new_resp()
+    except zc.ZeekrAuthError:
+        pass
+    else:  # pragma: no cover - only on a regression
+        raise AssertionError("status read ran without a session")

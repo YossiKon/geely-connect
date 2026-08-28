@@ -931,3 +931,20 @@ def test_every_command_switch_carries_the_hold():
     for cls in (sw.GeelySwitch, sw.GeelyGCleanSwitch, sw.GeelyDefrostSwitch,
                 sw.GeelyWindowVentilationSwitch):
         assert issubclass(cls, sw._OptimisticHold), cls.__name__
+
+
+def test_the_hold_writes_state_when_the_entity_is_on_hass():
+    """_write_held_state is guarded because tests drive bare entities, but on a
+    real entity (hass set) it must actually push the held state so the toggle
+    shows its requested value at once rather than waiting for the next poll."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    sw = load("switch")
+    hass, b = _bundle(_status(climate={"defrost": "false"}))
+    ent = sw.GeelyDefrostSwitch(hass, b)
+    ent.hass = hass                      # as if added to Home Assistant
+    writes = []
+    ent.async_write_ha_state = lambda: writes.append(1)
+    ent._hold(True)
+    ent._write_held_state()
+    assert writes == [1], "the held state was not written on a live entity"

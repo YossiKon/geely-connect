@@ -300,3 +300,38 @@ def test_manual_is_offered_in_the_options_not_only_at_setup():
     res = asyncio.run(flow.async_step_user(None))
     marker = next(k for k in res["data_schema"].schema if str(k) == "poll_mode")
     assert "manual" in res["data_schema"].schema[marker].container
+
+
+def test_a_zeekr_entry_gets_the_x_vin_field_and_strips_it_on_save():
+    """New-platform entries get the optional x-vin token field in the options
+    form, and a pasted value is trimmed on save. A non-zeekr entry never sees
+    the field, so the two are tested together."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    cf, flow = _flow()
+    const = load("const")
+
+    class Entry:
+        entry_id = "z1"
+        data = {"poll_mode": "normal", "pressure_unit": "psi",
+                const.CONF_PLATFORM: const.PLATFORM_ZEEKR}
+        options: dict = {}
+
+    entry = Entry()
+    opts = cf.GeelyIntlOptionsFlow()
+    opts.handler = entry.entry_id
+    flow.hass.config_entries.async_get_known_entry = lambda _id: entry
+    opts.hass = flow.hass
+    opts.async_show_form = flow.async_show_form
+    opts.async_create_entry = lambda **kw: {"type": "create_entry", **kw}
+
+    # The field appears for a zeekr entry (line that builds `extra`).
+    res = asyncio.run(opts.async_step_init(None))
+    keys = {str(k) for k in res["data_schema"].schema}
+    assert const.CONF_ZEEKR_ENC_VIN in keys, keys
+
+    # And a pasted value is stripped on save.
+    saved = asyncio.run(opts.async_step_init({
+        "poll_mode": "normal", "pressure_unit": "psi",
+        const.CONF_ZEEKR_ENC_VIN: "  TOKEN==  "}))
+    assert saved["data"][const.CONF_ZEEKR_ENC_VIN] == "TOKEN=="

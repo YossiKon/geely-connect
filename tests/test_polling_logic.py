@@ -491,3 +491,13 @@ def test_a_disowned_speed_cannot_pin_super_eco_to_its_fast_lane():
     live = _status(speed="60")
     live["vehicleStatus"]["basicVehicleStatus"]["speedValidity"] = "true"
     assert m._adaptive_interval(live, 0, p).total_seconds() == p["fast"]
+
+
+def test_speed_is_stale_tolerates_a_non_dict():
+    """The guard for a payload that has no basicVehicleStatus dict at all -
+    reached when the block is missing or malformed, and it must read 'not
+    stale' rather than raise."""
+    helpers = load("helpers")
+    assert helpers.speed_is_stale(None) is False
+    assert helpers.speed_is_stale("not a dict") is False
+    assert helpers.speed_is_stale([]) is False
