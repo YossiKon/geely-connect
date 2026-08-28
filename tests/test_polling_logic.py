@@ -60,6 +60,18 @@ def test_charging_is_detected_from_the_connection_status():
         assert m._poll_flags(_status(charger=other))[0] is False, other
 
 
+def test_the_odometer_reads_through_junk_without_raising():
+    """It gates the position wake, so anything unreadable has to mean "no
+    proof" rather than an exception on the poll path."""
+    m = _coordinator_module()
+    assert m._odometer(_status(odo="2174.5")) == 2174.5
+    for junk in (None, "", "n/a", [], {}, "not a number"):
+        assert m._odometer(_status(odo=junk)) is None, junk
+    for not_a_payload in (None, "", [], 7):
+        assert m._odometer(not_a_payload) is None, not_a_payload
+    assert m._odometer({}) is None
+
+
 def test_driving_is_any_positive_speed():
     m = _coordinator_module()
     assert m._poll_flags(_status(speed="42"))[1] is True
@@ -423,7 +435,7 @@ def test_a_refresh_press_forces_the_position_wake_too():
     import io, os
     from conftest import PKG
     src = io.open(os.path.join(PKG, "__init__.py"), encoding="utf-8").read()
-    assert "if was_driving or forced or ((cyc - 1) % _POSITION_EVERY == 0):" in src
+    assert "woke = was_driving or forced or moved or timer_due" in src
     assert src.count('poll_state.get("force_secondary", False)') == 1, (
         "forced is read twice; the two gates can disagree about one press")
 

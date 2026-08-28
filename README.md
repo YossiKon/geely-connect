@@ -568,11 +568,19 @@ profile at setup:
 
 | Mode | Charging / driving | Parked (base → cap) | Secondary data | GPS wake |
 |---|---|---|---|---|
-| 🌙 **Super Eco** - barely polls | every 5 min | 30 min → 2 h | every 2nd cycle | every 24th |
-| 🔋 **Eco** - fewest interruptions | every 90 s | 300 s → 30 min | every 6th cycle | every 12th |
-| ⚖️ **Normal** - balanced | every 30 s | 90 s → 15 min | every 4th cycle | every 6th |
-| ⚡ **Live** - freshest | every 15 s | 45 s → 5 min | every 3rd cycle | every 3rd |
+| 🌙 **Super Eco** - barely polls | every 5 min | 30 min → 2 h | every 2nd cycle | when it moves |
+| 🔋 **Eco** - fewest interruptions | every 90 s | 300 s → 30 min | every 6th cycle | when it moves |
+| ⚖️ **Normal** - balanced | every 30 s | 90 s → 15 min | every 4th cycle | when it moves |
+| ⚡ **Live** - freshest | every 15 s | 45 s → 5 min | every 3rd cycle | when it moves |
 | ✋ **Manual** - you sync | never | never | on every sync | on every sync |
+
+**"When it moves"** means the GPS wake fires while the car is driving, once more
+on the poll after it parks - so the parked location is always the last thing
+recorded - and again if the odometer moves without the integration seeing the
+trip. A car that has not moved is never woken to be asked where it is, however
+long it sits. (A car whose odometer cannot be read keeps the old per-cycle
+cadence, and **Refresh Data** forces a fix in any mode - which is also the
+answer for a car that is towed rather than driven.)
 
 The mode is **not fixed at setup** - change it any time from **Configure** on
 the device page (see *Changing settings later* below).
@@ -582,8 +590,8 @@ the device page (see *Changing settings later* below).
 Sits between Eco and Manual: the integration keeps updating on its own, but its
 *starting* interval is where Eco tops out, and two quiet polls reach a two-hour
 ceiling - a parked car costs roughly a dozen sessions a day against Eco's
-~fifty. Because the GPS wake-up reaches the car itself, Super Eco fires it at
-most once per 24 cycles - one wake every two days on a parked car - so it is
+~fifty. Because the GPS wake-up reaches the car itself, it fires only when the
+car has actually moved, so a car parked for a fortnight is never woken at all -
 frugal with the car's 12 V battery, not just with your phone-app session.
 
 Whenever you want more than that, **Refresh Data** is the other half of the
