@@ -173,9 +173,13 @@ everything else.
   **branch**, not releases, and has no version to compare against. Fix it once:
   ⋮ → **Redownload** → pick a version such as `v1.4.0` from the dropdown. Every
   later release then shows up as a normal update.
-- Conversely, choosing **main** in that same dropdown tracks the branch, so
-  every push is available immediately without waiting for a release - handy
-  while a change is being tested.
+- **A tagged release is the reliable way to update.** Older HACS also let you
+  pick **main** from that dropdown to track the branch ahead of a release, but
+  HACS 2.x is release-oriented and that option may not be there - if your
+  Redownload list stops at a version older than the newest tag, that is why,
+  not a fault in your setup. When a fix lands on `main` and you need it before
+  the next release, the honest answer is that it ships with that release;
+  ping the issue if you are blocked on one.
 
 ---
 
