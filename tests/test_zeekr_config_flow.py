@@ -420,3 +420,27 @@ def test_reconfigure_choosing_legacy_goes_to_the_legacy_form():
     flow.hass.config_entries.async_get_entry = lambda eid: entry
     res = asyncio.run(flow.async_step_reconfigure({"platform": "legacy"}))
     assert res["type"] == "form" and res["step_id"] == "user", res
+
+
+def test_zeekr_options_show_and_normalize_x_vin():
+    cf, flow = _flow()
+    entry = type("_Entry", (), {
+        "entry_id": "e1",
+        "data": {"platform": "zeekr", "poll_mode": "normal",
+                 "pressure_unit": "psi", "full_exposure": False,
+                 "zeekr_enc_vin": "old-value"},
+        "options": {},
+    })()
+    opts = cf.GeelyIntlOptionsFlow()
+    opts.handler = entry.entry_id
+    flow.hass.config_entries.async_get_known_entry = lambda _id: entry
+    opts.hass = flow.hass
+    opts.async_show_form = flow.async_show_form
+    opts.async_create_entry = flow.async_create_entry
+    form = asyncio.run(opts.async_step_init(None))
+    assert any(str(key) == "zeekr_enc_vin" for key in form["data_schema"].schema)
+    result = asyncio.run(opts.async_step_init({
+        "poll_mode": "normal", "pressure_unit": "psi",
+        "full_exposure": False, "zeekr_enc_vin": "  fake-override  ",
+    }))
+    assert result["data"]["zeekr_enc_vin"] == "fake-override"

@@ -210,3 +210,43 @@ def test_a_blank_x_vin_option_clears_a_stale_data_override():
     assert ok is True
     assert api.kw["enc_vin"] == ""
     assert api.kw["new_platform_vehicle"] is True
+
+
+def test_the_optimistic_switch_writes_state_when_attached():
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    sw = load("switch")
+    entity = sw._OptimisticHold()
+    writes = []
+    entity.hass = object()
+    entity.async_write_ha_state = lambda: writes.append(True)
+    entity._write_held_state()
+    assert writes == [True]
+
+
+def test_rapid_silence_notification_is_best_effort():
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    climate = load("climate")
+    from homeassistant.components import persistent_notification
+
+    entity = climate.GeelyClimate.__new__(climate.GeelyClimate)
+    entity._hass = object()
+    entity._vin = FAKE_VIN
+    calls = []
+    original = persistent_notification.async_create
+    persistent_notification.async_create = lambda *args, **kwargs: calls.append((args, kwargs))
+    try:
+        entity._notify_rapid_silence("cooling")
+    finally:
+        persistent_notification.async_create = original
+    assert calls and calls[0][1]["title"] == "Geely: rapid command not confirmed"
+
+    def fail_notification(*args, **kwargs):
+        raise RuntimeError("notification unavailable")
+
+    persistent_notification.async_create = fail_notification
+    try:
+        entity._notify_rapid_silence("warming")
+    finally:
+        persistent_notification.async_create = original

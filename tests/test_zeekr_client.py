@@ -25,7 +25,8 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 
-from conftest import FAKE_VIN, load
+from conftest import FAKE_VIN, have_homeassistant, load
+from run import skip
 
 zc = load("zeekr_client")
 
@@ -925,3 +926,39 @@ def test_derive_x_vin_rejects_an_empty_vin():
         assert False, "empty VIN must be rejected before encryption"
     except ValueError as exc:
         assert str(exc) == "VIN must be a non-empty string"
+
+
+def test_bff_garage_handles_nested_lists_and_missing_vehicle_data():
+    c = zc.ZeekrClient("user@example.com", "pw", gateway="https://unused.invalid")
+    c.access_token = "mock-at"
+    c._request = lambda *args, **kwargs: {"data": {"records": [{"vin": FAKE_VIN}]}}
+    assert c.list_vehicles_bff() == [{"vin": FAKE_VIN}]
+    c._request = lambda *args, **kwargs: {"data": {}}
+    assert c.list_vehicles_bff() == []
+
+
+def test_new_gateway_guards_require_access_token_and_x_vin():
+    c = zc.ZeekrClient("user@example.com", "pw", gateway="https://unused.invalid")
+    try:
+        c.list_vehicles_bff()
+        assert False, "BFF garage must require the new-platform token"
+    except zc.ZeekrAuthError:
+        pass
+    c.access_token = "mock-at"
+    try:
+        c.vehicle_status_new_resp()
+        assert False, "new-platform status must require x-vin"
+    except zc.ZeekrAuthError:
+        pass
+    c2 = zc.ZeekrClient("user@example.com", "pw", gateway="https://unused.invalid")
+    try:
+        c2.vehicle_status_new_resp()
+        assert False, "new-platform status must require access token"
+    except zc.ZeekrAuthError:
+        pass
+
+
+def test_speed_staleness_rejects_non_dict_input():
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    assert load("helpers").speed_is_stale(None) is False
