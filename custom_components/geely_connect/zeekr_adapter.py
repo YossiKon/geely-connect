@@ -52,15 +52,24 @@ def _wrap_vehicle_status(data: Any) -> Any:
     """Give the new gateway's status payload the old platform's nesting.
 
     Old platform:  data = {"vehicleStatus": {basicVehicleStatus,
-                            additionalVehicleStatus}, "updateTime": ...}
+                            additionalVehicleStatus, updateTime}}
     New gateway:   data = {basicVehicleStatus, additionalVehicleStatus,
-                            "updateTime": ...}
+                            updateTime}
 
     Every consumer reads through the "vehicleStatus" level, so without this the
     entire entity set reads unknown while the payload sits right there - and
     the few entities that read top-level fields keep working, which makes the
     symptom look like anything but a missing key. The wrapper is added without
     moving anything, so both spellings resolve.
+
+    `updateTime` is carried in too, and it is not cosmetic: it is the car's own
+    stamp on the snapshot, which Car Reported At walks for at
+    vehicleStatus.updateTime. On a real old-platform car it lives INSIDE
+    vehicleStatus; the new gateway flattens it to the top level, so leaving it
+    out blanked the one sensor whose whole job is to reveal a stale snapshot -
+    exactly #24's failure, where a parked Geely stops reporting and the cloud
+    keeps serving the last fix. Found on #53: a car that had driven 18 km still
+    read `home` with nothing saying the data was old.
     """
     if not isinstance(data, dict) or "vehicleStatus" in data:
         return data
@@ -69,7 +78,7 @@ def _wrap_vehicle_status(data: Any) -> Any:
     wrapped = dict(data)
     wrapped["vehicleStatus"] = {
         k: v for k, v in data.items()
-        if k in ("basicVehicleStatus", "additionalVehicleStatus")
+        if k in ("basicVehicleStatus", "additionalVehicleStatus", "updateTime")
     }
     return wrapped
 

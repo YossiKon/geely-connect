@@ -16,7 +16,8 @@ import json
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-from conftest import FAKE_VIN, load
+from conftest import FAKE_VIN, have_homeassistant, load
+from run import skip
 
 zc = load("zeekr_client")
 adapter = load("zeekr_adapter")
@@ -136,6 +137,26 @@ def test_wrapper_restores_the_old_platform_nesting():
     assert ev["chargeLevel"] == "92.0"
     # Nothing is moved, so top-level readers keep working.
     assert wrapped["updateTime"] == 1787817174561
+    # And it is ALSO carried inside vehicleStatus, where Car Reported At walks
+    # for it (vehicleStatus.updateTime). Without this the staleness sensor is
+    # blank on every new-platform car - #24's failure with the one indicator
+    # of it switched off (#53).
+    assert wrapped["vehicleStatus"]["updateTime"] == 1787817174561
+
+
+def test_the_staleness_sensor_reads_the_wrapped_timestamp():
+    """End to end: the car's own stamp reaches Car Reported At after wrapping.
+    The sensor walks vehicleStatus.updateTime; a new-platform payload only has
+    it top-level until the wrapper carries it in."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    import datetime
+    sensor = load("sensor")
+    wrapped = adapter._wrap_vehicle_status(_STATUS_DATA)
+    at = sensor._reported_at(wrapped)
+    assert isinstance(at, datetime.datetime), at
+    # 1787817174561 ms -> a real 2026 instant, not None.
+    assert at.year == 2026, at
 
 
 def test_wrapper_leaves_everything_else_alone():
