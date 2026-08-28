@@ -64,13 +64,15 @@ class _Hass:
         return None
 
 
-def _build_all(**bundle_extra):
+def _build_all(entry=None, **bundle_extra):
     """Set up every platform and return {platform: [entities]}.
 
     `bundle_extra` overrides entries in the hass.data bundle - that is how the
     propulsion verdict reaches the platforms, so it is how the gating is tested.
+    `entry` overrides the config entry itself, for gates that read the entry
+    rather than the bundle.
     """
-    hass, entry = _Hass(), _Entry()
+    hass, entry = _Hass(), entry or _Entry()
     hass.data["geely_connect"] = {"e1": {
         "api": object(), "coordinator": _Coord(), "vin": FAKE_VIN,
         "device_name": "Geely EX5 (0000)", "capabilities": {}, **bundle_extra}}
@@ -195,6 +197,56 @@ def test_a_missing_or_unknown_verdict_keeps_the_charging_entities():
     for extra in ({}, {"propulsion": p.classify(None, None)}):
         got = _keys(_build_all(**extra))
         assert _CHARGING_KEYS <= got, _CHARGING_KEYS - got
+
+
+_NEW_PLATFORM_KEYS = frozenset({"bs_is_charging", "bs_is_plugged_in"})
+
+# Added by the same change as the two above, and present in BOTH platforms'
+# payloads - a gate that swept these up would delete six live entities from
+# every existing install.
+_BOTH_PLATFORM_KEYS = frozenset({
+    "bs_door_lock_driver", "bs_door_lock_passenger", "bs_door_lock_rear_left",
+    "bs_door_lock_rear_right", "trip_meter_2", "discharge_current",
+    "discharge_voltage",
+})
+
+
+def _new_platform_entry():
+    e = _Entry()
+    e.data = {"vin": FAKE_VIN, "pressure_unit": "psi", "platform": "zeekr"}
+    e.options = {"zeekr_enc_vin": "1eNc0d3d="}
+    return e
+
+
+def test_the_reported_charging_booleans_are_new_platform_only():
+    """`isCharging` / `isPluggedIn` are in the new platform's payload only, so
+    an old-platform car must not be given two tiles that can never say
+    anything."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    leaked = _keys(_build_all()) & _NEW_PLATFORM_KEYS
+    assert leaked == set(), leaked
+    got = _keys(_build_all(entry=_new_platform_entry()))
+    assert _NEW_PLATFORM_KEYS <= got, _NEW_PLATFORM_KEYS - got
+
+
+def test_the_gate_is_the_token_not_the_platform_name():
+    """A zeekr entry with no x-vin token still polls the legacy status path and
+    gets the legacy fields, so the token is what the gate has to read."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    e = _Entry()
+    e.data = {"vin": FAKE_VIN, "pressure_unit": "psi", "platform": "zeekr"}
+    leaked = _keys(_build_all(entry=e)) & _NEW_PLATFORM_KEYS
+    assert leaked == set(), leaked
+
+
+def test_the_platform_gate_takes_only_those_two_entities():
+    """The seven other fields promoted alongside them are on both platforms."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    got = _keys(_build_all())          # the default entry is an old-platform one
+    assert _BOTH_PLATFORM_KEYS <= got, _BOTH_PLATFORM_KEYS - got
 
 
 def test_full_exposure_keeps_fields_whose_curated_twin_was_not_built():

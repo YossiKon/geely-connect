@@ -19,7 +19,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import CONF_ZEEKR_ENC_VIN, DOMAIN
 from .helpers import walk as _walk
 
 _SAFE = ("vehicleStatus", "additionalVehicleStatus", "drivingSafetyStatus")
@@ -109,6 +109,29 @@ SPECS: tuple[tuple[str, str, tuple[str, ...], BinarySensorDeviceClass | None, tu
     # 0 unlocked. So 0 is the unlocked code here too, which with device_class
     # LOCK is what "on" has to mean.
     ("trunk_unlocked",       "Trunk Lock",        (*_SAFE, "trunkLockStatus"),              BinarySensorDeviceClass.LOCK,    ("0", 0)),
+    # The four individual door locks, on exactly the footing trunkLockStatus
+    # was added on. In a capture across a real lock/unlock cycle all four moved
+    # with `centralLockingStatus` and with each other - 1/1/1/1 while the car
+    # was locked, 0/0/0/0 while it was not - so 0 is the unlocked code here
+    # too, which with device_class LOCK is what "on" has to mean.
+    #
+    # The aggregate lock entity says whether the car is locked; these say
+    # which door is not, which is the question after a "car unlocked" alert.
+    # In the same capture the tailgate command moved trunkLockStatus 1 -> 0 -> 1
+    # while all four of these stayed 1, so they are genuinely per-door and not
+    # four copies of one flag.
+    ("door_lock_driver",     "Door Lock Driver",    (*_SAFE, "doorLockStatusDriver"),        BinarySensorDeviceClass.LOCK,    ("0", 0)),
+    ("door_lock_passenger",  "Door Lock Passenger", (*_SAFE, "doorLockStatusPassenger"),     BinarySensorDeviceClass.LOCK,    ("0", 0)),
+    ("door_lock_rear_left",  "Door Lock Rear Left", (*_SAFE, "doorLockStatusDriverRear"),    BinarySensorDeviceClass.LOCK,    ("0", 0)),
+    ("door_lock_rear_right", "Door Lock Rear Right", (*_SAFE, "doorLockStatusPassengerRear"), BinarySensorDeviceClass.LOCK,   ("0", 0)),
+    # The car's own booleans for charging and plugged-in, beside the entities
+    # derived from `statusOfChargerConnection` rather than replacing them. That
+    # field is the one that never reaches 3 on a DC fast charge (#10), so a
+    # plain bool from the same payload is worth having next to it - and being
+    # a JSON boolean there is nothing to decode and no code set to enumerate.
+    # New-platform only - see _NEW_PLATFORM_ONLY.
+    ("is_charging",          "Charging (reported)", (*_EV, "isCharging"),                    BinarySensorDeviceClass.BATTERY_CHARGING, (True, "true", "True")),
+    ("is_plugged_in",        "Plugged In (reported)", (*_EV, "isPluggedIn"),                 BinarySensorDeviceClass.PLUG,    (True, "true", "True")),
     # Park brake, on/off beside the mapped text sensor that names the code -
     # the same pairing `statusOfChargerConnection` already has (Charger Plug
     # here, Charger Connection there), and for the same reason: an automation
@@ -164,6 +187,18 @@ HYBRID_SPECS: tuple[tuple[str, str, tuple[str, ...], BinarySensorDeviceClass | N
 )
 
 
+# Built only for a car whose status comes from the new platform. A real
+# old-platform payload carries neither field, so on an old-platform car these
+# two could only ever read unknown - a tile that never says anything is worse
+# than no tile.
+#
+# The gate is the x-vin token rather than the entry's platform, because the
+# token is what decides which status endpoint is read: a zeekr entry without
+# one still polls the legacy path and gets the legacy fields
+# (ZeekrAdapter.vehicle_status). Everything else added alongside these two -
+# the four door locks, the second trip meter, the discharge pair - is in both
+# platforms' payloads and is deliberately NOT gated.
+_NEW_PLATFORM_ONLY = frozenset({"is_charging", "is_plugged_in"})
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entities: AddEntitiesCallback) -> None:
@@ -174,10 +209,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
     verdict = bundle.get("propulsion")
     specs = SPECS + (HYBRID_SPECS if verdict and verdict.has_tank else ())
     charges = verdict.charges if verdict else True
+    # Options win over entry data, the same way __init__ builds the adapter,
+    # so a token pasted into Configure takes effect on reload.
+    new_platform = bool(entry.options.get(CONF_ZEEKR_ENC_VIN)
+                        or entry.data.get(CONF_ZEEKR_ENC_VIN))
     entities: list[BinarySensorEntity] = [
         GeelyBinarySensor(coordinator, vin, device_name, *s) for s in specs
         # No socket, no plug sensor - see Verdict.charges.
-        if charges or s[0] != "charger_plugged_in"
+        if (charges or s[0] != "charger_plugged_in")
+        # No x-vin token, no new-platform payload - see _NEW_PLATFORM_ONLY.
+        and (new_platform or s[0] not in _NEW_PLATFORM_ONLY)
     ]
     # Connectivity: is the integration currently reaching the car's cloud?
     entities.append(GeelyConnectivity(coordinator, vin, device_name))

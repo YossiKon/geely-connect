@@ -237,6 +237,15 @@ SENSOR_SPECS: tuple[tuple, ...] = (
     ("12v_voltage",         "12V Voltage",          (*_MAINT, "mainBatteryStatus", "voltage"),         UnitOfElectricPotential.VOLT,     SensorDeviceClass.VOLTAGE,     "float", None),
     ("avg_consumption",     "Average Consumption",  (*_EV,    "averPowerConsumption"),                 "kWh/100km",                      _ENERGY_DISTANCE,              "float", None),
     ("trip_meter",          "Trip Meter",           (*_RUN,   "tripMeter1"),                           UnitOfLength.KILOMETERS,          SensorDeviceClass.DISTANCE,    "float", None),
+    # The second trip meter, beside the first. Same object, same units - it
+    # read 167.4 against tripMeter1's own value on a real car, both plainly km.
+    ("trip_meter_2",        "Trip Meter 2",         (*_RUN,   "tripMeter2"),                           UnitOfLength.KILOMETERS,          SensorDeviceClass.DISTANCE,    "float", None),
+    # Vehicle-to-load. The discharge pair mirrors the charge pair exactly -
+    # same object, same names with disCharge for charge - so the units carry
+    # over without needing a decode. Both read 0.0 with nothing plugged in,
+    # which is the honest reading rather than an absent one.
+    ("discharge_current",   "Discharge Current",    (*_EV,    "disChargeIAct"),                        UnitOfElectricCurrent.AMPERE,     SensorDeviceClass.CURRENT,     "float", None),
+    ("discharge_voltage",   "Discharge Voltage",    (*_EV,    "disChargeUAct"),                        UnitOfElectricPotential.VOLT,     SensorDeviceClass.VOLTAGE,     "float", None),
     ("avg_speed",           "Average Speed",        (*_RUN,   "avgSpeed"),                             UnitOfSpeed.KILOMETERS_PER_HOUR,  SensorDeviceClass.SPEED,       "float", None),
     # Tyre temperatures, from the same TPMS sensors as the pressures below.
     # Present in every payload and read by nothing until now. Worth having on
