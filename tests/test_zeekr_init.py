@@ -209,3 +209,4 @@ def test_a_blank_x_vin_option_clears_a_stale_data_override():
     ok, _, _, api = _setup_zeekr(m, entry=entry)
     assert ok is True
     assert api.kw["enc_vin"] == ""
+    assert api.kw["new_platform_vehicle"] is True
