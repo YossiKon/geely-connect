@@ -67,6 +67,7 @@ def _zeekr_entry():
             "vehicle_nickname": "My EX5", "vehicle_series": "E245-J1",
             "vehicle_model_code": "E245-J1", "vehicle_color": "White",
             "vehicle_power_type": "BEV",
+            "zeekr_new_platform": True,
             "pressure_unit": "kPa", "poll_mode": "normal",
         },
         options={},
@@ -173,6 +174,7 @@ def test_zeekr_entry_builds_the_adapter_with_its_tokens():
     assert kw["timezone"] == "Europe/Berlin", \
         "the HA time zone must drive the HF timezone header"
     assert kw["vehicle_model"] == "E245-J1"
+    assert kw["new_platform_vehicle"] is True
 
 
 def test_zeekr_hf_renewal_is_persisted_into_the_entry():
@@ -197,3 +199,13 @@ def test_zeekr_hf_renewal_is_persisted_into_the_entry():
     n = len(hass.config_entries.updates)
     asyncio.run(_FakeCoordinator.instance.refresh())
     assert len(hass.config_entries.updates) == n, "spurious entry update"
+
+
+def test_a_blank_x_vin_option_clears_a_stale_data_override():
+    m = _mod()
+    entry = _zeekr_entry()
+    entry.data["zeekr_enc_vin"] = "stale-owner-supplied-value"
+    entry.options = {"zeekr_enc_vin": ""}
+    ok, _, _, api = _setup_zeekr(m, entry=entry)
+    assert ok is True
+    assert api.kw["enc_vin"] == ""

@@ -130,7 +130,7 @@ _SECRET_KEYS: set = {
     # With a live session it both addresses AND controls the car, so it is a
     # capability secret, not just an identifier - redacted like the tokens
     # above. Normalised form, matched by both passes; see diagnostics._REDACT.
-    "zeekrencvin",
+    "zeekrencvin", "xvin", "encvin",
     # The IDaaS user-center session token as it appears on the wire (the new
     # platform's login responses carry it as `tokenValue`). No path folds a
     # successful login body into a log today, but masking it is a cheap hedge -

@@ -27,14 +27,17 @@ class _StubIdaas:
 
 
 def _make_adapter(password: str = "", hf_token: str = "mock-hf",
-                  hf_expiry: int = 10 ** 15) -> ad.ZeekrAdapter:
+                  hf_expiry: int = 10 ** 15,
+                  new_platform_vehicle: bool = False,
+                  enc_vin: str = "") -> ad.ZeekrAdapter:
     """Adapter with a stubbed client surface; returns (adapter, client)."""
     a = ad.ZeekrAdapter(
         email="user@example.com", vin=FAKE_VIN, user_id="mock-uid",
         access_token="mock-at", refresh_token="mock-rt",
         hf_token=hf_token, vehicle_model="E245-J1",
         password=password, country_code="AU", timezone="UTC",
-        hf_expiry=hf_expiry, gateway="https://unused.invalid")
+        hf_expiry=hf_expiry, gateway="https://unused.invalid",
+        new_platform_vehicle=new_platform_vehicle, enc_vin=enc_vin)
     c = a._client
     c.hf_token = hf_token or None
     c.vehicle_status_resp = lambda vin, user_id=None: {
@@ -302,3 +305,20 @@ def test_a_vehicle_with_the_new_token_reads_the_new_gateway():
     st = a.vehicle_status()
     assert st["code"] == 1000, "000000 was not translated"
     assert st["data"]["vehicleStatus"]["basicVehicleStatus"]["powerLevel"] == 55, st
+
+
+def test_new_platform_marker_derives_x_vin_from_the_ordinary_vin():
+    a, c = _make_adapter(new_platform_vehicle=True)
+    assert c.enc_vin == zc.derive_x_vin(FAKE_VIN)
+
+
+def test_explicit_x_vin_override_wins_over_derivation():
+    supplied = "owner-supplied-fake-x-vin"
+    _, c = _make_adapter(new_platform_vehicle=True, enc_vin=supplied)
+    assert c.enc_vin == supplied
+
+
+def test_explicit_x_vin_override_is_used_without_the_source_marker():
+    supplied = "owner-supplied-fake-x-vin"
+    _, c = _make_adapter(new_platform_vehicle=False, enc_vin=supplied)
+    assert c.enc_vin == supplied

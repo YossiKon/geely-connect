@@ -35,6 +35,7 @@ from typing import Any
 from .api import GeelyAuthError, GeelyControlError
 from .zeekr_client import (
     GATEWAY, ZeekrApiError, ZeekrAuthError, ZeekrClient, ZeekrIdaas,
+    derive_x_vin,
 )
 
 _AUTH_HINTS = (
@@ -91,7 +92,8 @@ class ZeekrAdapter:
                  hf_token: str = "", vehicle_model: str = "",
                  password: str = "", country_code: str = "AU",
                  timezone: str = "UTC", hf_expiry: int = 0,
-                 gateway: str = GATEWAY, enc_vin: str = "") -> None:
+                 gateway: str = GATEWAY, new_platform_vehicle: bool = False,
+                 enc_vin: str = "") -> None:
         self.vin = vin
         self.user_id = user_id
         self._email = email
@@ -108,8 +110,11 @@ class ZeekrAdapter:
         self._client.user_id = user_id
         self._client.hf_token = hf_token or None
         # Set only for vehicles that live on the new platform; selects the
-        # new-gateway status path in vehicle_status() below.
-        self._client.enc_vin = enc_vin or ""
+        # new-gateway status path in vehicle_status() below. An explicit value
+        # remains an override for future app-version changes.
+        self._client.enc_vin = enc_vin or (
+            derive_x_vin(vin) if new_platform_vehicle else ""
+        )
         # Set when a silent HF renewal happened; the coordinator persists the
         # new token + expiry into the config entry after the next poll.
         self.hf_dirty = False

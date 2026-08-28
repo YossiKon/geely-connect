@@ -53,6 +53,7 @@ from .const import (
     CONF_ZEEKR_ENC_VIN,
     CONF_ZEEKR_HF_EXPIRY,
     CONF_ZEEKR_HF_TOKEN,
+    CONF_ZEEKR_NEW_PLATFORM,
     CONF_ZEEKR_PASSWORD,
     CONF_ZEEKR_REFRESH_TOKEN,
     DEFAULT_COUNTRY_CODE,
@@ -393,6 +394,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # what Home Assistant now warns about.
         zeekr_password = await hass.async_add_executor_job(
             password_decrypt, hass, d.get(CONF_ZEEKR_PASSWORD) or "")
+        configured_enc_vin = (
+            entry.options.get(CONF_ZEEKR_ENC_VIN)
+            if CONF_ZEEKR_ENC_VIN in entry.options
+            else d.get(CONF_ZEEKR_ENC_VIN)
+        ) or ""
         api = ZeekrAdapter(
             email=d.get(CONF_EMAIL) or "",
             vin=d[CONF_VIN],
@@ -409,9 +415,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             timezone=hass.config.time_zone or "UTC",
             hf_expiry=int(d.get(CONF_ZEEKR_HF_EXPIRY) or 0),
             # Options win over entry data so the token can be pasted or
-            # corrected from Configure without re-adding the integration.
-            enc_vin=(entry.options.get(CONF_ZEEKR_ENC_VIN)
-                     or d.get(CONF_ZEEKR_ENC_VIN) or ""),
+            # corrected from Configure without re-adding the integration. An
+            # explicitly blank option clears a stale data-level override.
+            enc_vin=configured_enc_vin,
+            new_platform_vehicle=bool(d.get(CONF_ZEEKR_NEW_PLATFORM, False)),
         )
     else:
         # Entries created before regions were tracked carry no CONF_REGION and

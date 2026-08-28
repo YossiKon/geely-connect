@@ -911,3 +911,17 @@ def test_vehicle_record_helpers_tail_branches():
     assert zc.vehicle_vin({"vin": ""}) is None
     assert zc.vehicle_nickname({}) == ""
     assert zc.vehicle_nickname({"nickname": 0}) == ""
+
+
+def test_derive_x_vin_uses_the_fake_vin_vector():
+    assert zc.derive_x_vin(FAKE_VIN) == (
+        "WiKxSxxI5XwF/OLDvgdzNabt3Iz963eR5dFKNGObuG8="
+    )
+
+
+def test_derive_x_vin_rejects_an_empty_vin():
+    try:
+        zc.derive_x_vin("")
+        assert False, "empty VIN must be rejected before encryption"
+    except ValueError as exc:
+        assert str(exc) == "VIN must be a non-empty string"

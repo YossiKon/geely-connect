@@ -254,6 +254,36 @@ def _safe_detail(raw: bytes | str, limit: int = 200) -> str:
         return "<non-JSON body omitted>"
 
 
+# Package-level material used by the Geely EM 1.1.0 app's local VIN transform.
+# These are protocol constants, not account credentials; retain the app version
+# here because a future app release may rotate or change the transform.
+_X_VIN_APP_VERSION = "1.1.0"
+_X_VIN_KEY = b"a01a6db985a2f5d4"
+_X_VIN_IV = b"ed446b8b8845013d"
+
+
+def derive_x_vin(vin: str) -> str:
+    """Return the app-compatible ``x-vin`` header for an ordinary VIN.
+
+    The Geely EM app stores the ordinary VIN and applies AES-128-CBC with
+    PKCS#5/PKCS#7 padding, then standard Base64 without line wrapping. The
+    package material is versioned above and is not tied to a user's account.
+    """
+    if not isinstance(vin, str) or not vin:
+        raise ValueError("VIN must be a non-empty string")
+    try:
+        from Crypto.Cipher import AES
+        from Crypto.Util.Padding import pad
+    except ImportError as exc:  # pragma: no cover - dependency is in manifest
+        raise ZeekrApiError(
+            "pycryptodome is required for x-vin derivation"
+        ) from exc
+    cipher = AES.new(_X_VIN_KEY, AES.MODE_CBC, iv=_X_VIN_IV)
+    padded = pad(vin.encode("utf-8"), AES.block_size)
+    encrypted = cipher.encrypt(padded)
+    return base64.b64encode(encrypted).decode("ascii")
+
+
 def _make_nonce() -> str:
     """Mirror the app's nonce shape: 3hex-12hex 7alnum 13ts (cosmetic, unique)."""
     prefix = "".join(random.choices(_NONCE_HEX, k=3))

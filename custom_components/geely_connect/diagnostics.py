@@ -38,10 +38,10 @@ _REDACT = {
     # single point that has to be right. `zeekr_hf_expiry` is a timestamp and
     # stays visible on purpose.
     "zeekr_access_token", "zeekr_refresh_token", "zeekr_hf_token", "zeekr_password",
-    # The new platform's per-vehicle x-vin token - a capability secret that
+    # The new platform's per-vehicle x-vin token is a capability secret that
     # addresses and controls the car. redact() (the first pass) already masks
     # it by normalised name; this is the belt to that pass's braces.
-    "zeekr_enc_vin",
+    "zeekr_enc_vin", "x-vin", "x_vin", "enc_vin",
 }
 
 

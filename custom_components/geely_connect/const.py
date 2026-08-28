@@ -94,9 +94,10 @@ CONF_ZEEKR_HF_TOKEN     = "zeekr_hf_token"
 CONF_ZEEKR_HF_EXPIRY    = "zeekr_hf_expiry"
 # The new platform addresses a vehicle by an opaque per-vehicle token in
 # the `x-vin` header rather than by the plain VIN. It is stable per car but
-# derived inside the app, so it is supplied by the owner rather than
-# computed; empty means "stay on the old-platform status path".
+# derived inside the app, so an explicit override remains supported for
+# compatibility; new-platform garage discovery can derive it automatically.
 CONF_ZEEKR_ENC_VIN      = "zeekr_enc_vin"
+CONF_ZEEKR_NEW_PLATFORM = "zeekr_new_platform"
 CONF_ZEEKR_PASSWORD     = "zeekr_password"
 CONF_STORE_PASSWORD     = "store_password"
 

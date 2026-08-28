@@ -37,6 +37,7 @@ from .const import (
     CONF_ZEEKR_ENC_VIN,
     CONF_ZEEKR_HF_EXPIRY,
     CONF_ZEEKR_HF_TOKEN,
+    CONF_ZEEKR_NEW_PLATFORM,
     CONF_ZEEKR_PASSWORD,
     CONF_ZEEKR_REFRESH_TOKEN,
     CONF_STORE_PASSWORD,
@@ -165,6 +166,7 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._platform_default: str | None = None
         self._zeekr_hf_token: str | None = None
         self._zeekr_password: str | None = None
+        self._zeekr_new_platform = False
         # Set when this flow is a re-auth. We update the existing entry's
         # token instead of creating a new one in that case.
         self._reauth_entry: config_entries.ConfigEntry | None = None
@@ -530,6 +532,7 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     _LOGGER.error("zeekr login returned a malformed user_id; aborting")
                     errors["base"] = "unknown"
                 else:
+                    self._zeekr_new_platform = False
                     raw = await self.hass.async_add_executor_job(
                         client.list_vehicles, client.user_id)
                     if not raw:
@@ -539,6 +542,7 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         # cars today cannot reach this.
                         raw = await self.hass.async_add_executor_job(
                             client.list_vehicles_bff)
+                        self._zeekr_new_platform = bool(raw)
                         if raw:
                             _LOGGER.info(
                                 "garage found on the new-platform "
@@ -623,6 +627,7 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return self.async_abort(reason="reauth_account_mismatch")
             new_data = dict(entry.data)
             new_data[CONF_PLATFORM] = PLATFORM_ZEEKR
+            new_data[CONF_ZEEKR_NEW_PLATFORM] = self._zeekr_new_platform
             new_data[CONF_ZEEKR_ACCESS_TOKEN] = tokens[0]
             new_data[CONF_ZEEKR_REFRESH_TOKEN] = tokens[1]
             new_data[CONF_ZEEKR_HF_TOKEN] = self._zeekr_hf_token or ""
@@ -664,6 +669,7 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             title=title,
             data={
                 CONF_PLATFORM:            PLATFORM_ZEEKR,
+                CONF_ZEEKR_NEW_PLATFORM:  self._zeekr_new_platform,
                 CONF_EMAIL:               self._email,
                 CONF_COUNTRY_CODE:        self._country_code,
                 CONF_VIN:                 vin,
@@ -735,11 +741,10 @@ class GeelyIntlOptionsFlow(config_entries.OptionsFlow):
                 _apply_pressure_unit(self.hass, entry, new_unit)
             return self.async_create_entry(title="", data=user_input)
 
-        # New-platform vehicles are addressed by an opaque per-vehicle
-        # token rather than the plain VIN, and it cannot be derived from
-        # anything stored here. Offered only where it applies, and only as
-        # an optional field: without it the entry behaves exactly as
-        # before, reading status from the old platform.
+        # New-platform vehicles are addressed by an x-vin token rather than the
+        # plain VIN. BFF-discovered vehicles derive it automatically; the
+        # optional field remains available for app-version changes or an
+        # explicitly supplied value.
         extra: dict[Any, Any] = {}
         if current.get(CONF_PLATFORM, DEFAULT_PLATFORM) == PLATFORM_ZEEKR:
             extra[vol.Optional(

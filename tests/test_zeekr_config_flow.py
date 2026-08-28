@@ -153,6 +153,7 @@ def test_zeekr_login_creates_a_stamped_entry_without_storing_the_password():
     assert data["zeekr_access_token"] == "mock-at"
     assert data["zeekr_hf_token"] == "mock-hf"
     assert data["zeekr_password"] == "", "store_password=False must not store it"
+    assert data["zeekr_new_platform"] is False
 
 
 def test_zeekr_login_stores_the_password_when_consented():
@@ -208,6 +209,7 @@ def test_a_migrated_account_is_found_on_the_new_platform_garage():
     res = asyncio.run(flow.async_step_zeekr_login(_zeekr_login_input()))
     assert res["type"] == "create_entry", res
     assert res["data"]["vin"] == FAKE_VIN
+    assert res["data"]["zeekr_new_platform"] is True
 
 
 def test_zeekr_login_with_multiple_vehicles_picks_one():
