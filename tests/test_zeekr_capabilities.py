@@ -86,6 +86,14 @@ def test_disabled_rows_do_not_enable_anything():
         assert adapter.translate_capabilities(rows) == []
 
 
+def test_a_row_with_no_enable_flag_at_all_enables_nothing():
+    """`paramValueUse` is absent on some rows rather than "N" - a missing flag
+    is not an enabled feature."""
+    row = _row("honk_flash")
+    row["paramValueUse"] = None
+    assert adapter.translate_capabilities([row]) == []
+
+
 def test_an_empty_or_unknown_catalogue_stays_permissive():
     """Returning [] makes capabilities.py fall back to the all-features view,
     so a car whose catalogue we cannot read keeps every entity it has today."""

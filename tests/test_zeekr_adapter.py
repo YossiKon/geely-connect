@@ -302,3 +302,32 @@ def test_a_vehicle_with_the_new_token_reads_the_new_gateway():
     st = a.vehicle_status()
     assert st["code"] == 1000, "000000 was not translated"
     assert st["data"]["vehicleStatus"]["basicVehicleStatus"]["powerLevel"] == 55, st
+
+
+def test_the_capability_catalogue_is_fetched_and_translated():
+    a, c = _make_adapter()
+    c.enc_vin = "opaque-token"
+    c.capabilities_new = lambda: [
+        {"functionCode": "remote_climate_control", "paramValueUse": "Y"},
+        {"functionCode": "C_PAA_5_1", "paramValueUse": "Y"},
+        {"functionCode": "C_PAA_6", "paramValueUse": "Y"},
+    ]
+    entries = a.fetch_capabilities()
+    climate = [e for e in entries if e["functionId"] == "remote_climate_control_2"]
+    assert climate, entries
+    params = {p["nameKey"]: p["config"] for p in climate[0]["paramsJson"]}
+    assert params["dpt_heat_loc"] == "front-left"
+    assert params["steel_wheel_heating"] == "true"
+
+
+def test_a_catalogue_that_cannot_be_fetched_keeps_every_entity():
+    """Losing the catalogue must cost a car its feature *filtering*, never its
+    entities - an empty list is capabilities.py's permissive all-features view."""
+    a, c = _make_adapter()
+    c.enc_vin = "opaque-token"
+
+    def _boom():
+        raise zc.ZeekrApiError("code=8500 server internal error")
+
+    c.capabilities_new = _boom
+    assert a.fetch_capabilities() == []

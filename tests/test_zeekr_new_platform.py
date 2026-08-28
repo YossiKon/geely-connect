@@ -32,6 +32,11 @@ _STATUS_DATA = {
     "updateTime": 1787817174561,
 }
 _LIST_DATA = [{"vin": FAKE_VIN, "nickName": "EX5", "tboxPlatform": "1"}]
+_CAP_DATA = [
+    {"functionCategory": "remote_control", "functionCode": "honk_flash",
+     "functionName": "远程闪灯鸣笛", "paramValueUse": "Y"},
+    "not a row",
+]
 
 
 def _start_gateway(seen: list[dict]):
@@ -56,8 +61,13 @@ def _start_gateway(seen: list[dict]):
                 "nonce": headers.get("x-api-signature-nonce", ""),
                 "signature_ok": headers.get("x-signature") == want,
             })
-            body = {"code": "000000", "msg": "ok",
-                    "data": _STATUS_DATA if "ms-vehicle-status" in path else _LIST_DATA}
+            if "ms-vehicle-status" in path:
+                data = _STATUS_DATA
+            elif "ms-vehicle-capability" in path:
+                data = _CAP_DATA
+            else:
+                data = _LIST_DATA
+            body = {"code": "000000", "msg": "ok", "data": data}
             raw = json.dumps(body).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -166,3 +176,56 @@ def test_wrapper_leaves_everything_else_alone():
     assert adapter._wrap_vehicle_status({"a": 1}) == {"a": 1}
     assert adapter._wrap_vehicle_status(None) is None
     assert adapter._wrap_vehicle_status("not a dict") == "not a dict"
+
+
+def test_capability_catalogue_is_read_with_no_query():
+    """The vehicle comes from the x-vin header, so the route takes no query at
+    all - asking it with ?vin= is what made this endpoint look unreachable."""
+    seen: list[dict] = []
+    srv = _start_gateway(seen)
+    try:
+        c = _client(srv)
+        c.enc_vin = "ENC-VIN-TOKEN=="
+        rows = c.capabilities_new()
+    finally:
+        srv.shutdown()
+    sent = seen[-1]
+    assert sent["path"] == (
+        "/ms-vehicle-capability/api/v1.0/vehicle/function/model/info")
+    assert sent["query"] == ""
+    assert sent["x_vin"] == "ENC-VIN-TOKEN=="
+    assert sent["signature_ok"]
+    # Non-dict entries in the list are dropped rather than handed on.
+    assert [r["functionCode"] for r in rows] == ["honk_flash"]
+
+
+def test_a_catalogue_that_is_not_a_list_reads_as_empty():
+    """A gateway answering with something other than a list of rows leaves the
+    catalogue empty, which capabilities.py reads as the permissive all-features
+    view rather than as a car with no features."""
+    c = zc.ZeekrClient(email="", password="", gateway="https://unused.invalid")
+    c.access_token = "test-access-token"
+    c.enc_vin = "ENC-VIN-TOKEN=="
+    c._request = lambda *a, **k: {"data": {"unexpected": "shape"}}
+    assert c.capabilities_new() == []
+
+
+def test_the_catalogue_refuses_to_run_unauthenticated():
+    """Both guards: no session, and no vehicle token."""
+    seen: list[dict] = []
+    srv = _start_gateway(seen)
+    try:
+        no_session = _client(srv)
+        no_session.access_token = ""
+        no_session.enc_vin = "ENC-VIN-TOKEN=="
+        no_token = _client(srv)          # authenticated, but no x-vin
+        for c in (no_session, no_token):
+            try:
+                c.capabilities_new()
+            except zc.ZeekrAuthError:
+                pass
+            else:  # pragma: no cover - only reached on a regression
+                raise AssertionError("the catalogue ran without credentials")
+    finally:
+        srv.shutdown()
+    assert not seen, "must not reach the gateway without credentials"
