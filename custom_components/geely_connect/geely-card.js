@@ -1592,7 +1592,7 @@
         .hero .u { font-size:13px; color: var(--secondary-text-color); margin-left:3px; }
         .hero .sub { margin-top:4px; }
         .battpct { font-weight:700; color: var(--primary-text-color);
-                   line-height:1.05; margin-bottom:1px; }
+                   line-height:1; margin:-4px 0 2px; }
         .carwrap { flex:1; max-width:300px; margin-left:auto; }
         </style>
         <div class="shell">
