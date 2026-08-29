@@ -959,6 +959,24 @@ class ZeekrClient:
             "POST", "/ms-remote-control/v1.0/remoteControl/control",
             body=json.dumps(body).encode(), signer="snc")
 
+    def set_smart_temp_new(self, setting: dict, command: str = "immediately") -> dict:
+        """Rapid warm/cool on the NEW gateway (capture-verified 2026-08-29).
+
+        A separate endpoint from the control route - POST
+        /ms-remote-control/v1.0/remoteControl/setSmartTemp - and a different
+        body: serviceId PAA with an object `setting` (not the serviceParameters
+        list every other command uses). The app bundles cabin AC + seat
+        heat/vent + steering wheel into this one call.
+        """
+        if not self.access_token:
+            raise ZeekrAuthError("not logged in (no new-platform session)")
+        if not self.enc_vin:
+            raise ZeekrAuthError("no x-vin vehicle token configured")
+        body = {"command": command, "serviceId": "PAA", "setting": setting}
+        return self._request(
+            "POST", "/ms-remote-control/v1.0/remoteControl/setSmartTemp",
+            body=json.dumps(body).encode(), signer="snc")
+
     def vehicle_status_new_resp(self) -> dict:
         """Live status from the NEW gateway, for vehicles that live there.
 

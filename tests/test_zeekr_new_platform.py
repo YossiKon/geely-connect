@@ -364,3 +364,43 @@ def test_the_position_wake_sends_the_captured_pai_request():
         "command": "start", "serviceId": "PAI",
         "setting": {"serviceParameters": [{"key": "pai", "value": "1"}]}}
     assert sent["signature_ok"]
+
+
+def test_set_smart_temp_sends_the_paa_body_to_its_own_endpoint():
+    """Rapid climate is a separate route from /control - setSmartTemp with
+    serviceId PAA and an object setting - addressed by x-vin, body signed."""
+    seen: list[dict] = []
+    srv = _start_gateway(seen)
+    try:
+        c = _client(srv)
+        c.enc_vin = "ENC-VIN-TOKEN=="
+        c.set_smart_temp_new({"ac": "true", "temp": "28.5", "sw": "true"})
+    finally:
+        srv.shutdown()
+    sent = seen[-1]
+    assert sent["path"] == "/ms-remote-control/v1.0/remoteControl/setSmartTemp"
+    assert sent["body"] == {
+        "command": "immediately", "serviceId": "PAA",
+        "setting": {"ac": "true", "temp": "28.5", "sw": "true"}}
+    assert sent["x_vin"] == "ENC-VIN-TOKEN=="
+    assert sent["signature_ok"], "the body must be inside the signed canonical"
+
+
+def test_set_smart_temp_refuses_to_run_unauthenticated():
+    seen: list[dict] = []
+    srv = _start_gateway(seen)
+    try:
+        no_session = _client(srv)
+        no_session.access_token = ""
+        no_session.enc_vin = "ENC-VIN-TOKEN=="
+        no_token = _client(srv)          # authenticated, but no x-vin
+        for c in (no_session, no_token):
+            try:
+                c.set_smart_temp_new({"ac": "true"})
+            except zc.ZeekrAuthError:
+                pass
+            else:  # pragma: no cover - only reached on a regression
+                raise AssertionError("setSmartTemp ran without credentials")
+    finally:
+        srv.shutdown()
+    assert not seen, "must not reach the gateway without credentials"
