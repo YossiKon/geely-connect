@@ -1562,11 +1562,17 @@
       const defrost = this._st("switch.defrost");
       const online = this._st("binary_sensor.connected");
 
+      // Header customisation (all opt-in; unset keeps today's layout).
+      const hideName = !!this._config.hide_name;
+      const battSize = Number(this._config.battery_size) || 0;  // px, 0 = off
+      const showParked = !!this._config.show_parked;
+
       const chips = [
         // First, and only while it is true: the compact card falls back to a
         // "Parked" chip when nothing else applies, which on a moving car was the
         // same contradiction as #25 on its bigger siblings.
         driving && `<span class="chip warn">Driving</span>`,
+        showParked && !driving && `<span class="chip">Parked</span>`,
         s.locked && `<span class="chip ${s.locked.state === "locked" ? "" : "warn"}">
             ${s.locked.state === "locked" ? "Locked" : "Unlocked"}</span>`,
         s.charging && `<span class="chip on">${iconFilled("bolt")} ${power != null ? power.toFixed(1) + " kW" : "Charging"}</span>`,
@@ -1584,6 +1590,8 @@
         .hero .n { font-size:44px; }
         .hero .u { font-size:13px; color: var(--secondary-text-color); margin-left:3px; }
         .hero .sub { margin-top:4px; }
+        .battpct { font-weight:700; color: var(--primary-text-color);
+                   line-height:1.05; margin-bottom:1px; }
         .carwrap { flex:1; max-width:300px; margin-left:auto; }
         </style>
         <div class="shell">
@@ -1591,15 +1599,16 @@
           <div class="head">
             <div class="title">
               <i class="dot ${online && online.state === "off" ? "off" : ""}"></i>
-              ${esc(this._title())}
+              ${hideName ? "" : esc(this._title())}
             </div>
             <span class="micro">${[
-              this._levels(s, batt),
+              battSize ? "" : this._levels(s, batt),
               inTemp == null ? "" : Math.round(inTemp) + "° in",
             ].filter(Boolean).join(" · ")}</span>
           </div>
           <div class="hero">
             <div>
+              ${battSize ? `<div class="battpct" style="font-size:${battSize}px">${batt}%</div>` : ""}
               <div class="num n ${OK(s.range) ? "" : "unavail"}">${range}<span class="u">${esc(UNIT(s.range) || "km")}</span></div>
               <div class="micro sub">${esc(this._rangeLabel(s))}</div>
               ${split ? `<div class="micro sub">${esc(split)}</div>` : ""}
@@ -1744,7 +1753,7 @@
             <div>
               <div class="title">
                 <i class="dot ${online && online.state === "off" ? "off" : ""}"></i>
-                ${esc(this._title())}
+                ${this._config.hide_name ? "" : esc(this._title())}
               </div>
               <div class="status ${s.charging ? "charging" : ""}">${esc(statusLine)}</div>
             </div>
@@ -2052,7 +2061,7 @@
           <div class="head">
             <div class="title">
               <i class="dot ${online && online.state === "off" ? "off" : ""}"></i>
-              <em>${esc(this._title())}</em>
+              <em>${this._config.hide_name ? "" : esc(this._title())}</em>
             </div>
             <span class="temp">${[
               s.battery == null ? "" : Math.round(s.battery) + "%",
@@ -2216,7 +2225,7 @@
             <div>
               <div class="title">
                 <i class="dot ${online && online.state === "off" ? "off" : ""}"></i>
-                ${esc(this._title())}
+                ${this._config.hide_name ? "" : esc(this._title())}
               </div>
               <div class="status ${s.charging ? "charging" : ""}">${esc(statusLine)}</div>
             </div>

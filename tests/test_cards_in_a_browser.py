@@ -1660,3 +1660,52 @@ def test_the_compact_card_watches_what_its_head_row_prints():
     compact = src[src.index("class GeelyCardCompact"):src.index("class GeelyCard extends")]
     assert '"sensor.interior_temperature"' in compact, (
         "the compact card prints the cabin temp without watching it")
+
+
+# ------------------------------------------- compact header customisation ---
+
+def test_hide_name_removes_the_title_text():
+    got = _mount("geely-card-compact", """{
+            withName: (el.shadowRoot.querySelector('.title')||{}).textContent
+                       ? el.shadowRoot.querySelector('.title').textContent.trim() : '',
+        }""")
+    assert got["withName"], got  # name present by default
+    got2 = _mount("geely-card-compact", """{
+            title: el.shadowRoot.querySelector('.title').textContent.trim(),
+            dot: !!el.shadowRoot.querySelector('.title .dot'),
+        }""", cfg={"hide_name": True})
+    assert got2["title"] == "", got2       # name gone
+    assert got2["dot"] is True, got2       # online dot kept
+
+
+def test_battery_size_promotes_the_percentage_above_the_range():
+    got = _mount("geely-card-compact", """{
+            battpct: (el.shadowRoot.querySelector('.battpct')||{}).textContent || null,
+            size: el.shadowRoot.querySelector('.battpct')
+                  ? getComputedStyle(el.shadowRoot.querySelector('.battpct')).fontSize : null,
+            microHasPct: /%/.test(el.shadowRoot.querySelector('.head .micro').textContent),
+        }""", cfg={"battery_size": 28})
+    assert got["battpct"] and got["battpct"].endswith("%"), got
+    assert got["size"] == "28px", got            # size is the configured value
+    assert got["microHasPct"] is False, got      # % moved out of the small line
+
+
+def test_no_battery_size_keeps_the_percentage_in_the_small_line():
+    got = _mount("geely-card-compact", """{
+            battpct: !!el.shadowRoot.querySelector('.battpct'),
+            microHasPct: /%/.test(el.shadowRoot.querySelector('.head .micro').textContent),
+        }""")
+    assert got["battpct"] is False, got
+    assert got["microHasPct"] is True, got
+
+
+def test_show_parked_adds_a_parked_chip_beside_locked():
+    got = _mount("geely-card-compact", """
+            [...el.shadowRoot.querySelectorAll('.chips .chip')].map(c => c.textContent.trim())
+        """, cfg={"show_parked": True})
+    assert "Parked" in got and "Locked" in got, got
+    # default: no standalone Parked chip while locked
+    got2 = _mount("geely-card-compact", """
+            [...el.shadowRoot.querySelectorAll('.chips .chip')].map(c => c.textContent.trim())
+        """)
+    assert "Parked" not in got2, got2
