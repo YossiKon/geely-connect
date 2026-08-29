@@ -1675,7 +1675,7 @@ def test_hide_name_removes_the_title_text():
             dot: !!el.shadowRoot.querySelector('.title .dot'),
         }""", cfg={"hide_name": True})
     assert got2["title"] == "", got2       # name gone
-    assert got2["dot"] is True, got2       # online dot kept
+    assert got2["dot"] is False, got2      # status dot removed with the name
 
 
 def test_battery_size_promotes_the_percentage_above_the_range():
@@ -1685,7 +1685,7 @@ def test_battery_size_promotes_the_percentage_above_the_range():
                   ? getComputedStyle(el.shadowRoot.querySelector('.battpct')).fontSize : null,
             microHasPct: /%/.test(el.shadowRoot.querySelector('.head .micro').textContent),
         }""", cfg={"battery_size": 28})
-    assert got["battpct"] and got["battpct"].endswith("%"), got
+    assert got["battpct"] and "%" in got["battpct"], got
     assert got["size"] == "28px", got            # size is the configured value
     assert got["microHasPct"] is False, got      # % moved out of the small line
 
@@ -1709,3 +1709,21 @@ def test_show_parked_adds_a_parked_chip_beside_locked():
             [...el.shadowRoot.querySelectorAll('.chips .chip')].map(c => c.textContent.trim())
         """)
     assert "Parked" not in got2, got2
+
+
+def test_the_battery_headline_carries_the_cabin_temp_beside_the_percent():
+    got = _mount("geely-card-compact", """
+            (el.shadowRoot.querySelector('.battpct')||{}).textContent || ''
+        """, cfg={"battery_size": 24})
+    assert "%" in got and "°" in got, got   # e.g. "84% · 21°"
+
+
+def test_battery_bold_can_be_turned_off():
+    bold = _mount("geely-card-compact", """
+            getComputedStyle(el.shadowRoot.querySelector('.battpct')).fontWeight
+        """, cfg={"battery_size": 24})
+    assert str(bold) in ("700", "bold"), bold
+    plain = _mount("geely-card-compact", """
+            getComputedStyle(el.shadowRoot.querySelector('.battpct')).fontWeight
+        """, cfg={"battery_size": 24, "battery_bold": False})
+    assert str(plain) in ("400", "normal"), plain

@@ -291,8 +291,9 @@ Everything else is optional:
 | `boot:` | by country | `true` labels the tailgate *Boot*, `false` *Trunk* |
 | `rhd:` | by country | `true` draws the driver on the right in the top view, `false` on the left |
 | `name:` | the device name | A different title for this card |
-| `hide_name:` | `false` | `true` removes the vehicle name from the header entirely (the online status dot stays) |
-| `battery_size:` | *unset* | Compact card only. A pixel size (e.g. `26`) shows the battery **percentage as a headline above the range** at that size, instead of small in the top-right - tune it to taste |
+| `hide_name:` | `false` | `true` removes the vehicle name **and the status dot** from the header |
+| `battery_size:` | *unset* | Compact card only. A pixel size (e.g. `26`) shows the battery **percentage as a headline above the range** at that size (with the cabin temperature beside it), instead of small in the top-right - tune it to taste |
+| `battery_bold:` | `true` | Set `false` to draw the battery-% headline in a regular weight instead of bold |
 | `show_parked:` | `false` | Compact card only. `true` adds a **Parked** chip next to Locked while the car is stationary, matching the full card's status |
 
 ```yaml

@@ -1566,6 +1566,7 @@
       const hideName = !!this._config.hide_name;
       const battSize = Number(this._config.battery_size) || 0;  // px, 0 = off
       const showParked = !!this._config.show_parked;
+      const battBold = this._config.battery_bold !== false;  // default bold
 
       const chips = [
         // First, and only while it is true: the compact card falls back to a
@@ -1598,17 +1599,16 @@
           ${this._drivingNotice()}
           <div class="head">
             <div class="title">
-              <i class="dot ${online && online.state === "off" ? "off" : ""}"></i>
-              ${hideName ? "" : esc(this._title())}
+              ${hideName ? "" : `<i class="dot ${online && online.state === "off" ? "off" : ""}"></i>${esc(this._title())}`}
             </div>
             <span class="micro">${[
               battSize ? "" : this._levels(s, batt),
-              inTemp == null ? "" : Math.round(inTemp) + "° in",
+              (battSize || inTemp == null) ? "" : Math.round(inTemp) + "° in",
             ].filter(Boolean).join(" · ")}</span>
           </div>
           <div class="hero">
             <div>
-              ${battSize ? `<div class="battpct" style="font-size:${battSize}px">${batt}%</div>` : ""}
+              ${battSize ? `<div class="battpct" style="font-size:${battSize}px${battBold ? "" : ";font-weight:400"}">${batt}%${inTemp == null ? "" : ` · ${Math.round(inTemp)}°`}</div>` : ""}
               <div class="num n ${OK(s.range) ? "" : "unavail"}">${range}<span class="u">${esc(UNIT(s.range) || "km")}</span></div>
               <div class="micro sub">${esc(this._rangeLabel(s))}</div>
               ${split ? `<div class="micro sub">${esc(split)}</div>` : ""}
@@ -1752,8 +1752,7 @@
           <div class="head">
             <div>
               <div class="title">
-                <i class="dot ${online && online.state === "off" ? "off" : ""}"></i>
-                ${this._config.hide_name ? "" : esc(this._title())}
+                ${this._config.hide_name ? "" : `<i class="dot ${online && online.state === "off" ? "off" : ""}"></i>${esc(this._title())}`}
               </div>
               <div class="status ${s.charging ? "charging" : ""}">${esc(statusLine)}</div>
             </div>
@@ -2224,8 +2223,7 @@
           <div class="head">
             <div>
               <div class="title">
-                <i class="dot ${online && online.state === "off" ? "off" : ""}"></i>
-                ${this._config.hide_name ? "" : esc(this._title())}
+                ${this._config.hide_name ? "" : `<i class="dot ${online && online.state === "off" ? "off" : ""}"></i>${esc(this._title())}`}
               </div>
               <div class="status ${s.charging ? "charging" : ""}">${esc(statusLine)}</div>
             </div>
