@@ -1591,8 +1591,7 @@
         .hero .n { font-size:44px; }
         .hero .u { font-size:13px; color: var(--secondary-text-color); margin-left:3px; }
         .hero .sub { margin-top:4px; }
-        .battpct { font-weight:700; color: var(--primary-text-color);
-                   line-height:1; margin:-4px 0 2px; }
+        .battpct { color: var(--primary-text-color); margin:-8px 0 2px; }
         .carwrap { flex:1; max-width:300px; margin-left:auto; }
         </style>
         <div class="shell">
@@ -1608,7 +1607,7 @@
           </div>
           <div class="hero">
             <div>
-              ${battSize ? `<div class="battpct" style="font-size:${battSize}px${battBold ? "" : ";font-weight:400"}">${batt}%${inTemp == null ? "" : ` · ${Math.round(inTemp)}°`}</div>` : ""}
+              ${battSize ? `<div class="battpct num" style="font-size:${battSize}px${battBold ? ";font-weight:700" : ""}">${batt}%${inTemp == null ? "" : ` · ${Math.round(inTemp)}°`}</div>` : ""}
               <div class="num n ${OK(s.range) ? "" : "unavail"}">${range}<span class="u">${esc(UNIT(s.range) || "km")}</span></div>
               <div class="micro sub">${esc(this._rangeLabel(s))}</div>
               ${split ? `<div class="micro sub">${esc(split)}</div>` : ""}
