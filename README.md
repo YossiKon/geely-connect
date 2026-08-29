@@ -296,11 +296,26 @@ Everything else is optional:
 | `battery_bold:` | `true` | Set `false` to draw the battery-% headline in a regular weight instead of bold |
 | `charge_time_format:` | `min` | How **Time to full** reads while charging: `min` (e.g. `249 min`) or `hm` for hours + minutes (e.g. `4h 9m`) |
 | `show_parked:` | `false` | Compact card only. `true` adds a **Parked** chip next to Locked while the car is stationary, matching the full card's status |
+| `car_image:` | *none* | Path or URL to your own photo of the car (e.g. `/local/geely/mycar.png` for a file in `config/www/geely/`). It replaces the drawn car while keeping the live overlay - headlights, tail lights, charge port and the open-panel markers. Transparent PNG/WebP, side-on, front to the left works best |
+| `car_image_hotspots:` | *sensible defaults* | Fine-tune where the overlay lights sit on your image, as percentages, if a different crop needs it - e.g. `{headlight: [8, 46], taillight: [94, 37], port: [86, 40]}` |
 
 ```yaml
 type: custom:geely-card
 nav: [apple, here]        # an iPhone with HERE WeGo on it
 nav_travel: walking       # you are walking to the car
+```
+
+**Your own car, and tap to expand.** By default the card draws a generic
+electric crossover. Point `car_image` at a photo of your actual car - colour and
+all - and it shows that instead, with the live indicators (lamps, charge port,
+open-panel markers) drawn on top so nothing is lost. Because the image is your
+own file under `config/www/`, it is untouched by add-on updates. On the compact
+summary card, tapping the car opens the full card in a pop-up, so a small tile
+can still reach every control.
+
+```yaml
+type: custom:geely-card-compact
+car_image: /local/geely/mycar.webp   # your photo in config/www/geely/
 ```
 
 #### The climate panel

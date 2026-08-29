@@ -294,6 +294,41 @@
       <circle class="ind ${open.hood ? "on" : ""}" cx="598" cy="116" r="7"/>
     </svg>`;
 
+  /* ------------------------------------------- the owner's own car ----- */
+  /* A photograph instead of the drawing. The drawing is live UI - lamps and
+   * open-panel markers - and a flat image is not, so the state is put back as
+   * an overlay: percentages of the image box rather than SVG coordinates, so
+   * one set of positions fits any side profile of roughly the same crop.
+   *
+   * Measured against a manufacturer side render, front at the LEFT, which is
+   * how these are almost always shot. `car_image_hotspots` overrides any of
+   * them for an image framed differently. */
+  const PHOTO_SPOTS = {
+    // Measured off the lamps themselves rather than judged by eye: the tail
+    // lamp from its red pixels, the headlight from the dark lens, the charge
+    // flap from the two vertical edges of its outline in the quarter panel.
+    headlight: [8.5, 45.5], taillight: [94.3, 37.3], port: [86.2, 39.5],
+    hood: [15, 38], front: [50, 37], rear: [75, 37], trunk: [91, 24],
+  };
+
+  const CAR_PHOTO = (cls, open, cfg, lamps) => {
+    const S = Object.assign({}, PHOTO_SPOTS, cfg.car_image_hotspots || {});
+    const at = (k) => `left:${S[k][0]}%; top:${S[k][1]}%`;
+    const lamp = (k, on) =>
+      `<i class="lamp ${k}${on ? " on" : ""}" style="${at(k)}"></i>`;
+    const ind = (k) =>
+      `<i class="pind${open[k] ? " on" : ""}" style="${at(k)}"></i>`;
+    return `
+      <div class="photo ${cls}">
+        <img src="${esc(cfg.car_image)}" alt="">
+        <span class="lamps">
+          ${lamp("headlight", lamps.head)}${lamp("taillight", lamps.tail)}
+          <i class="lamp port" style="${at("port")}"></i>
+          ${ind("hood")}${ind("front")}${ind("rear")}${ind("trunk")}
+        </span>
+      </div>`;
+  };
+
   const _WHEEL = `
       <circle class="tire" r="62"/>
       <circle class="disc" r="42"/>
@@ -502,6 +537,44 @@
     .num { font-weight: 200; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; line-height: 1; }
 
     .car { width: 100%; height: auto; display: block; }
+    /* The compact card's car is a doorway to the full one. */
+    .carwrap.expandable { cursor: pointer; border-radius: 10px; outline: none;
+      transition: transform .18s ease, filter .18s ease; }
+    .carwrap.expandable:hover { transform: translateY(-1px); filter: brightness(1.06); }
+    .carwrap.expandable:focus-visible { box-shadow: 0 0 0 2px ${ACCENT}; }
+    /* the photo variant - see CAR_PHOTO */
+    .photo { position: relative; width: 100%; line-height: 0; }
+    .photo img { width: 100%; height: auto; display: block; }
+    /* A wrong path must not leave lamps floating over a broken-image glyph. */
+    .photo.broken img { visibility: hidden; }
+    .photo.broken .lamps { display: none; }
+    .photo .lamps { position: absolute; inset: 0; pointer-events: none; }
+    .photo .lamp, .photo .pind {
+      position: absolute; transform: translate(-50%,-50%); border-radius: 50%;
+    }
+    .photo .lamp { opacity: 0; transition: opacity .45s ease; }
+    .photo .lamp.on { opacity: 1; }
+    .photo .lamp.headlight { width: 13%; height: 19%; filter: blur(2px);
+      background: radial-gradient(ellipse at center,
+        rgba(255,250,235,.95), rgba(205,230,255,.4) 45%, transparent 70%); }
+    .photo .lamp.taillight { width: 11%; height: 17%; filter: blur(2px);
+      background: radial-gradient(ellipse at center,
+        rgba(255,80,80,.95), rgba(225,40,40,.4) 45%, transparent 70%); }
+    .photo .lamp.port { width: 9%; height: 17%; filter: blur(1.5px);
+      background: radial-gradient(ellipse at center,
+        ${ACCENT}, transparent 65%); }
+    .photo.plugged .lamp.port { opacity: .4; }
+    .photo.braked .lamp.taillight { opacity: .38; }
+    .photo .lamp.taillight.on { opacity: 1; }
+    .photo.charging .lamp.port { opacity: 1; animation: geely-throb 1.9s ease-in-out infinite; }
+    .photo .pind { width: 13px; height: 13px; background: ${AMBER};
+      opacity: 0; transition: opacity .3s ease;
+      box-shadow: 0 0 9px 2px ${AMBER}; }
+    .photo .pind.on { opacity: 1; animation: geely-blink 1.4s ease infinite; }
+    @keyframes geely-throb {
+      0%,100% { opacity: 1; filter: blur(1.5px); }
+      50%     { opacity: .45; filter: blur(3px); }
+    }
     .car .shadow { fill: rgba(0,0,0,.28); }
     .car .glow { fill: transparent; transition: fill .5s ease; }
     .car .paint { fill: var(--geely-car-paint, url(#gp)); stroke: rgba(0,0,0,.18); stroke-width: 1.5; }
@@ -765,6 +838,18 @@
 
   /* ------------------------------------------------------------ base ----- */
 
+  // ::backdrop cannot be set inline, so the expand dialog's backdrop needs a
+  // real stylesheet rule. Injected once into the document head (the dialog
+  // lives in document.body, not a shadow root - see _openFullCard).
+  let _expandBackdropDone = false;
+  const _ensureExpandBackdropStyle = () => {
+    if (_expandBackdropDone) return;
+    _expandBackdropDone = true;
+    const st = document.createElement("style");
+    st.textContent = "dialog.geely-expand::backdrop{background:rgba(0,0,0,.62)}";
+    document.head.appendChild(st);
+  };
+
   class GeelyCardBase extends HTMLElement {
     static getStubConfig() { return {}; }
 
@@ -787,6 +872,14 @@
       // A pending arm-timeout must not fire a render on a removed card.
       clearTimeout(this._armedTimer);
       this._armed = null;
+      // The expand dialog lives in document.body, so it will not be removed
+      // with the card's own DOM - take it with us.
+      if (this._expandDialog) {
+        try { this._expandDialog.close(); } catch (e) { /* not open */ }
+        this._expandDialog.remove();
+        this._expandDialog = null;
+        this._expandCard = null;
+      }
     }
 
     setConfig(config) {
@@ -825,6 +918,12 @@
     _safeRender() {
       try {
         this._render();
+        this._wirePhoto();
+        this._wireExpand();
+        // A dialog left open must not freeze at the values it had when it opened.
+        if (this._expandCard && this._expandDialog && this._expandDialog.open) {
+          this._expandCard.hass = this._hass;
+        }
       } catch (err) {
         this.shadowRoot.innerHTML = `<style>${BASE_CSS}</style>
           <div class="shell"><p class="micro">Geely Card</p>
@@ -1410,6 +1509,103 @@
                 title="${esc(opts.title || label)}">${icon(ic)}<span>${esc(text)}</span></button>`;
     }
 
+    /* The car drawing, or the owner's own photo of it when `car_image` is set.
+     * The drawing carries live state, so the photo has to as well: headlamps
+     * while the car is moving, tail lamps while it is moving or held on the
+     * park brake, and the charge port lit from the same states that drive the
+     * drawing's port dot. */
+    _carBody(cls) {
+      const open = this._openMap();
+      if (!this._config.car_image) return CAR_SVG(cls, open);
+      const on = (d) => {
+        const st = this._st(`binary_sensor.${d}`);
+        return !!st && st.state === "on";
+      };
+      const driving = this._isDriving();
+      const plugged = on("charger_plug") || on("is_plugged_in");
+      // Two levels, the same shape as the charge port: full while the car is
+      // moving, a dim ember while it sits on the park brake. The brake is
+      // engaged the whole time a car is parked, so lighting it fully would
+      // leave the tail lamps burning in every screenshot of a stationary car.
+      const braked = on("park_brake_engaged");
+      return CAR_PHOTO(
+        `${cls}${plugged ? " plugged" : ""}${braked ? " braked" : ""}`,
+        open, this._config, { head: driving, tail: driving });
+    }
+
+    /* Tapping the car on a summary card opens the full card in a modal, rather
+     * than sending the user off to another view. The dialog hosts a real
+     * <geely-card>, so it is the same card with the same behaviour - not a
+     * second rendering of it that could drift. Built once, then kept fed with
+     * every hass update so it stays live while open. */
+    _wireExpand() {
+      const wrap = this.shadowRoot.querySelector(".carwrap.expandable");
+      if (!wrap || wrap.dataset.wired) return;
+      wrap.dataset.wired = "1";
+      const open = (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        this._openFullCard();
+      };
+      wrap.addEventListener("click", open);
+      wrap.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" || ev.key === " ") open(ev);
+      });
+    }
+
+    _openFullCard() {
+      if (!this._expandDialog) {
+        const dlg = document.createElement("dialog");
+        dlg.className = "geely-expand";
+        // Centre it ourselves with inline styles. The dialog is appended to
+        // document.body (below), not the shadow root, so the <style> in this
+        // card's shadow DOM does not reach it - and it MUST live outside the
+        // card, because a modal <dialog> promoted to the top layer centres
+        // against its containing block, and Lovelace's masonry/section layouts
+        // put a `transform` on an ancestor of the card. Inside the shadow root
+        // that transform becomes the containing block, so the dialog lands in
+        // a corner instead of the viewport. In document.body there is no such
+        // ancestor, and `inset:0; margin:auto` centres it on both axes.
+        dlg.style.cssText = [
+          "position:fixed", "inset:0", "margin:auto",
+          "width:min(520px,96vw)", "max-height:92vh", "overflow-y:auto",
+          "overscroll-behavior:contain", "border:none", "padding:0",
+          "background:transparent", "color:inherit",
+        ].join(";");
+        _ensureExpandBackdropStyle();
+        const card = document.createElement("geely-card");
+        try {
+          card.setConfig({ ...(this._config || {}) });
+        } catch (err) {
+          console.warn("geely-card: could not build the expanded card:", err);
+          return;
+        }
+        // Click the backdrop to dismiss. Escape is native to <dialog>.
+        dlg.addEventListener("click", (ev) => { if (ev.target === dlg) dlg.close(); });
+        dlg.appendChild(card);
+        document.body.appendChild(dlg);
+        this._expandDialog = dlg;
+        this._expandCard = card;
+      }
+      this._expandCard.hass = this._hass;
+      this._expandDialog.showModal();
+    }
+
+    /* An unreachable image must fail quietly rather than leaving lamps hovering
+     * over a broken-image glyph. Inline handlers are avoided because a strict
+     * CSP would drop them silently. */
+    _wirePhoto() {
+      const img = this.shadowRoot.querySelector(".photo img");
+      if (!img || img.dataset.wired) return;
+      img.dataset.wired = "1";
+      const fail = () => {
+        const box = img.closest(".photo");
+        if (box) box.classList.add("broken");
+      };
+      if (img.complete && img.naturalWidth === 0) fail();
+      img.addEventListener("error", fail, { once: true });
+    }
+
     _openMap() {
       const on = (d) => { const st = this._st(`binary_sensor.${d}`); return st && st.state === "on"; };
       return {
@@ -1637,7 +1833,8 @@
               <div class="micro sub">${esc(this._rangeLabel(s))}</div>
               ${split ? `<div class="micro sub">${esc(split)}</div>` : ""}
             </div>
-            <div class="carwrap">${CAR_SVG(s.charging ? "charging" : "", this._openMap())}</div>
+            <div class="carwrap expandable" role="button" tabindex="0"
+                 title="Open the full card">${this._carBody(s.charging ? "charging" : "")}</div>
           </div>
           <div style="margin:2px 0 10px">${this._bars(s)}</div>
           <div class="chips" style="margin-bottom:12px">${chips || `<span class="chip">${driving ? "Driving" : "Parked"}</span>`}</div>
@@ -1796,7 +1993,7 @@
           </div>
           ${this._bars(s)}
 
-          <div class="carwrap">${CAR_SVG(s.charging ? "charging" : "", this._openMap())}</div>
+          <div class="carwrap">${this._carBody(s.charging ? "charging" : "")}</div>
 
           <div class="actions" style="margin-top:8px">
             ${this._actBtn("lock", "Lock", "lock", { on: s.locked && s.locked.state === "locked" })}
