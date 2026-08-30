@@ -1,0 +1,165 @@
+blueprint:
+  name: Geely Connect - Charging countdown (live lock-screen notification)
+  description: >
+    A single ongoing notification that stays on your phone's lock screen while
+    the car charges: a live countdown timer, the finish time and the charging
+    power, plus a persistent charging icon in the status bar. It refreshes
+    itself silently as the estimate changes and is replaced by a one-line
+    summary when the session ends.
+
+
+    Android (Home Assistant Companion app) only for the full effect - the
+    ticking timer, the pinned status-bar icon and the "alert once" behaviour are
+    all Android notification features. On iOS you still get a notification that
+    refreshes and clears, just without the live timer or the ongoing pin.
+
+
+    The countdown is anchored to the **Charge Complete** timestamp, not to Time
+    To Full Charge. Charge Complete is an absolute clock time, so the phone can
+    tick it down smoothly between polls; Time To Full is only the figure from
+    the last poll and would freeze between them.
+  domain: automation
+  input:
+    connection_sensor:
+      name: Charger connection sensor
+      description: >
+        The car's Charger Connection sensor - the one that reads "Charging"
+        while a session is running (sensor.<your_car>_charger_connection).
+      selector:
+        entity:
+          domain: sensor
+    charge_complete_sensor:
+      name: Charge Complete sensor
+      description: >
+        The computed finish-time sensor (sensor.<your_car>_charge_complete).
+        The countdown counts down to this.
+      selector:
+        entity:
+          domain: sensor
+          device_class: timestamp
+    notify_target:
+      name: Notify service
+      description: >
+        Your phone's notify service, e.g. notify.mobile_app_pixel_9. It must be
+        a Home Assistant Companion app device for the live countdown.
+      default: notify.notify
+      selector:
+        text:
+    power_sensor:
+      name: Charging power sensor (optional)
+      description: >
+        Added to the message, e.g. "6.8 kW". Leave blank to leave it off.
+      default: ""
+      selector:
+        entity:
+          domain: sensor
+          device_class: power
+    range_sensor:
+      name: Range sensor (optional)
+      description: >
+        Shown when charging stops, e.g. "292 km range". Leave blank to leave it
+        off.
+      default: ""
+      selector:
+        entity:
+          domain: sensor
+    icon:
+      name: Status-bar icon
+      description: The small icon pinned in the status bar while charging.
+      default: mdi:ev-station
+      selector:
+        icon:
+    channel_name:
+      name: Notification channel
+      description: >
+        Android groups notifications by channel and remembers each channel's
+        settings. If you change the importance below, also change this name:
+        Android freezes a channel's importance once it exists and will not raise
+        or lower it, so a fresh name is the only way to apply the new level.
+      default: Car charging
+      selector:
+        text:
+    importance:
+      name: Importance
+      description: >
+        "default" shows on the lock screen (recommended). "low" is quieter, but
+        Android hides low-importance notifications from the lock screen. "high"
+        also pops a heads-up when the channel is first created.
+      default: default
+      selector:
+        select:
+          options:
+            - default
+            - low
+            - high
+
+variables:
+  connection_entity: !input connection_sensor
+  complete_entity: !input charge_complete_sensor
+  power_entity: !input power_sensor
+  range_entity: !input range_sensor
+  finish: >-
+    {{ as_timestamp(states(complete_entity), 0) | timestamp_custom('%-I:%M %p', true) }}
+  power_txt: >-
+    {% if power_entity not in [none, ''] and has_value(power_entity) %} · {{ states(power_entity) }} {{ state_attr(power_entity, 'unit_of_measurement') or 'kW' }}{% endif %}
+  range_txt: >-
+    {% if range_entity not in [none, ''] and has_value(range_entity) %}{{ states(range_entity) }} km range{% else %}Charging has stopped.{% endif %}
+
+trigger:
+  - platform: state
+    entity_id: !input connection_sensor
+  - platform: state
+    entity_id: !input charge_complete_sensor
+
+action:
+  - choose:
+      # ---- Charging, with a finish time: post / refresh the countdown -------
+      - conditions:
+          - condition: state
+            entity_id: !input connection_sensor
+            state: "Charging"
+          - condition: template
+            value_template: "{{ has_value(complete_entity) }}"
+        sequence:
+          - service: !input notify_target
+            data:
+              title: "🔌 Charging"
+              message: "Ready by {{ finish }}{{ power_txt }}"
+              data:
+                tag: geely_charging
+                channel: !input channel_name
+                importance: !input importance
+                alert_once: true       # sound once at start, silent refreshes
+                persistent: true       # pinned - not swipeable while charging
+                sticky: true           # survives a tap
+                visibility: public     # full content on the lock screen
+                notification_icon: !input icon
+                color: "#43A047"
+                chronometer: true
+                chronometer_countdown: true
+                when: "{{ as_timestamp(states(complete_entity), 0) | int }}"
+      # ---- Just left "Charging": one summary that replaces the pin ----------
+      # A one-shot message with the same tag overwrites the pinned countdown,
+      # so there is no separate "clear" step to race with the estimate blinking
+      # to unknown at the very end of a session.
+      - conditions:
+          - condition: template
+            value_template: >-
+              {{ trigger.entity_id == connection_entity
+                 and trigger.from_state is not none
+                 and trigger.from_state.state == 'Charging' }}
+        sequence:
+          - service: !input notify_target
+            data:
+              title: "✅ Charging stopped"
+              message: "{{ range_txt }}"
+              data:
+                tag: geely_charging
+                channel: !input channel_name
+                importance: !input importance
+                sticky: false
+                notification_icon: !input icon
+                color: "#43A047"
+
+mode: queued
+max: 10

@@ -206,3 +206,84 @@
           ({{ states('sensor.my_geely_ex5_electric_range') }} km) and the
           cable is not connected.
   mode: single
+
+- id: geely_charging_countdown_notification
+  alias: "Geely: charging countdown (lock-screen)"
+  description: >-
+    A single ongoing lock-screen notification while the car charges: a live
+    countdown timer, the finish time and charging power, and a charging icon
+    pinned in the status bar. It refreshes silently and is replaced by a
+    one-line summary when the session ends.
+
+    Android companion app only for the full effect - the ticking timer, the
+    status-bar pin and "alert once" are Android notification features. On iOS
+    you still get a notification that refreshes and clears, without the timer.
+  triggers:
+    - trigger: state
+      entity_id: sensor.my_geely_ex5_charger_connection
+    - trigger: state
+      entity_id: sensor.my_geely_ex5_charge_complete
+  actions:
+    - choose:
+        # Charging, with a finish time: post / refresh the countdown. The timer
+        # counts DOWN to Charge Complete - an absolute clock time, so the phone
+        # ticks it smoothly between polls. Do NOT anchor it to Time To Full
+        # Charge: that is the figure the car reported at the last poll and does
+        # not tick down between them, so it would freeze mid-count.
+        - conditions:
+            - condition: state
+              entity_id: sensor.my_geely_ex5_charger_connection
+              state: "Charging"
+            - condition: template
+              value_template: >-
+                {{ has_value('sensor.my_geely_ex5_charge_complete') }}
+          sequence:
+            - action: notify.mobile_app_your_phone
+              data:
+                title: "🔌 Charging"
+                message: >-
+                  Ready by
+                  {{ as_timestamp(states('sensor.my_geely_ex5_charge_complete'),
+                  0) | timestamp_custom('%-I:%M %p', true) }}
+                  · {{ states('sensor.my_geely_ex5_charging_power') }} kW
+                data:
+                  tag: geely_charging
+                  # Android freezes a channel's importance once it is created.
+                  # If you change "importance" below, also rename this channel.
+                  channel: Car charging
+                  importance: default    # TUNE: "low" hides it from the lock screen
+                  alert_once: true        # sound once at start, silent refreshes
+                  persistent: true
+                  sticky: true
+                  visibility: public
+                  notification_icon: mdi:ev-station
+                  color: "#43A047"
+                  chronometer: true
+                  chronometer_countdown: true
+                  when: >-
+                    {{ as_timestamp(states('sensor.my_geely_ex5_charge_complete'),
+                    0) | int }}
+        # Just left "Charging": a one-shot summary carrying the same tag
+        # overwrites the pinned countdown, so there is no separate "clear" step
+        # to race with the estimate blinking to unknown at the end of a session.
+        - conditions:
+            - condition: template
+              value_template: >-
+                {{ trigger.entity_id
+                == 'sensor.my_geely_ex5_charger_connection'
+                and trigger.from_state is not none
+                and trigger.from_state.state == 'Charging' }}
+          sequence:
+            - action: notify.mobile_app_your_phone
+              data:
+                title: "✅ Charging stopped"
+                message: >-
+                  {{ states('sensor.my_geely_ex5_electric_range') }} km of range.
+                data:
+                  tag: geely_charging
+                  channel: Car charging
+                  sticky: false
+                  notification_icon: mdi:ev-station
+                  color: "#43A047"
+  mode: queued
+  max: 10

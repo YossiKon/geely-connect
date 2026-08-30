@@ -639,9 +639,9 @@ automation:
 
 Other smart behaviour: **long-term statistics** (battery, range, consumption,
 pressures feed HA statistics + the Energy dashboard) and **ready-made
-Blueprints** in `blueprints/` (charging complete, low battery, door/trunk left
-open, tire pressure out of range, left unlocked away from home, pre-condition
-climate before departure).
+Blueprints** in `blueprints/` (charging complete, a live lock-screen charging
+countdown, low battery, door/trunk left open, tire pressure out of range, left
+unlocked away from home, pre-condition climate before departure).
 
 ---
 
@@ -662,7 +662,9 @@ one entry at a time through the automation editor's ⋮ → **Edit in YAML**.
 Replace `notify.mobile_app_your_phone` with your own notifier.
 
 - **`automations/charging.yaml`** - charge finished, charge nearly finished
-  (uses the Charge Complete timestamp), low battery, and "you forgot to plug in".
+  (uses the Charge Complete timestamp), a live lock-screen charging countdown
+  (ongoing notification with a ticking timer, Android companion app), low
+  battery, and "you forgot to plug in".
 - **`automations/security.yaml`** - something left open, left unlocked after
   leaving, windows open with rain forecast, and a bedtime check.
 - **`automations/comfort-and-maintenance.yaml`** - weekday pre-heat, hot-cabin
