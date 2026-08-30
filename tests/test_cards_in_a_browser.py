@@ -399,6 +399,16 @@ def test_a_car_stopped_at_a_light_is_still_driving():
         assert got["live"] in ([], ["refresh"]), (tag, got["live"])
 
 
+def test_the_new_platforms_hyphenated_engine_value_still_reads_as_driving():
+    """The real new-platform value is "engine-running" (hyphen); the driving set
+    uses "engine_running". Without normalising the separator, a moving car whose
+    speed field momentarily reads 0 between uploads flips to Parked - which is
+    exactly the flicker owners saw. Speed 0 + engine-running must stay Driving."""
+    for tag in ("geely-card", "geely-card-compact", "geely-card-mini"):
+        got = _mount(tag, _driving_probe(), speed="0", engine="engine-running")
+        assert "Driving" in got["text"], (tag, got)
+
+
 def test_a_trim_that_never_reports_an_engine_state_falls_back_to_speed():
     """`engine_state` is absent on some trims, where the test has to reduce to
     the old speed check rather than concluding "parked" for ever."""

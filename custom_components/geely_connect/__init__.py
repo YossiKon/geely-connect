@@ -296,7 +296,10 @@ def _poll_flags(d: dict) -> tuple[bool, bool]:
     # stays on through those stops, so a running car counts as driving even
     # at a standstill. On a trim that never reports it this reduces to the
     # old speed test.
-    engine = str(basic.get("engineStatus", "")).strip().lower()
+    # The new platform reports "engine-running" (hyphen); the legacy set uses
+    # "engine_running". Normalise so the ready/running state matches on both -
+    # without this a moving car whose speed momentarily reads 0 flips to parked.
+    engine = str(basic.get("engineStatus", "")).strip().lower().replace("-", "_")
     running = engine in _ENGINE_RUNNING
     return charging, (moving or running)
 

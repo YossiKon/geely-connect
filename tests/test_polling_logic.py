@@ -73,7 +73,10 @@ def test_driving_is_any_positive_speed():
 
 def test_a_running_car_at_a_standstill_still_counts_as_driving():
     m = _coordinator_module()
-    for word in ("engine_running", "running", "ENGINE_RUNNING", "on", "1", 1):
+    # "engine-running" is the real new-platform value (hyphen); it must count
+    # the same as the legacy "engine_running", or a moving car whose speed field
+    # momentarily reads 0 flips to parked.
+    for word in ("engine_running", "engine-running", "running", "ENGINE_RUNNING", "on", "1", 1):
         assert m._poll_flags(_status(speed="0", engine=word))[1] is True, word
 
 
