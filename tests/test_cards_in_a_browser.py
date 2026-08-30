@@ -1727,3 +1727,35 @@ def test_battery_bold_can_be_turned_off():
             getComputedStyle(el.shadowRoot.querySelector('.battpct')).fontWeight
         """, cfg={"battery_size": 24, "battery_bold": False})
     assert str(plain) in ("400", "normal"), plain
+
+
+# --------------------------------------------- charge_time_format option ---
+
+_CHARGE_TIME_SCRIPT = r"""(arg) => {
+    const el = document.createElement("geely-card");
+    document.body.appendChild(el);
+    el.setConfig(arg.cfg || {});
+    const hass = window.mkHass({});
+    hass.states["sensor.car_time_to_full_charge"] = {
+        entity_id: "sensor.car_time_to_full_charge", state: arg.mins,
+        attributes: {unit_of_measurement: "min"}};
+    el.hass = hass;
+    const rows = [...el.shadowRoot.querySelectorAll(".row")];
+    const r = rows.find(x => /Time to full/.test(x.textContent));
+    const v = r ? r.querySelector("b").textContent.trim() : null;
+    el.remove();
+    return v;
+}"""
+
+
+def test_charge_time_hours_minutes_format():
+    assert _evaluate(_CHARGE_TIME_SCRIPT,
+                     arg={"mins": "249", "cfg": {"charge_time_format": "hm"}}) == "4h 9m"
+    # under an hour drops the hours part
+    assert _evaluate(_CHARGE_TIME_SCRIPT,
+                     arg={"mins": "45", "cfg": {"charge_time_format": "hm"}}) == "45m"
+
+
+def test_charge_time_defaults_to_minutes():
+    v = _evaluate(_CHARGE_TIME_SCRIPT, arg={"mins": "249", "cfg": {}})
+    assert "249" in v, v   # unchanged from today's minutes reading

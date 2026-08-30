@@ -1792,7 +1792,21 @@
           <div class="grid sec">
             ${this._row("Charger", s.conn)}
             ${this._row("Power", power, { accent: s.charging })}
-            ${this._row("Time to full", this._st("sensor.time_to_full_charge"))}
+            ${this._row("Time to full", this._st("sensor.time_to_full_charge"), {
+              // charge_time_format: "min" (default, e.g. "249 min") or "hm"
+              // (e.g. "4h 9m"). The car reports minutes; "hm" just reshapes it.
+              value: (() => {
+                const st = this._st("sensor.time_to_full_charge");
+                if (!OK(st)) return "—";
+                const fmt = this._config.charge_time_format;
+                if (fmt === "hm" || fmt === "hours" || fmt === "hours_min") {
+                  const mins = Math.round(NUM(st));
+                  if (mins == null || isNaN(mins)) return this._fmt(st);
+                  const h = Math.floor(mins / 60), m = mins % 60;
+                  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+                }
+                return this._fmt(st);
+              })() })}
             ${this._row("Complete at", this._st("sensor.charge_complete"), {
               value: (() => { const st = this._st("sensor.charge_complete");
                 if (!OK(st)) return "—";
@@ -2263,7 +2277,21 @@
           <div class="grid sec">
             ${this._row("Charger", s.conn)}
             ${this._row("Power", power, { accent: s.charging })}
-            ${this._row("Time to full", this._st("sensor.time_to_full_charge"))}
+            ${this._row("Time to full", this._st("sensor.time_to_full_charge"), {
+              // charge_time_format: "min" (default, e.g. "249 min") or "hm"
+              // (e.g. "4h 9m"). The car reports minutes; "hm" just reshapes it.
+              value: (() => {
+                const st = this._st("sensor.time_to_full_charge");
+                if (!OK(st)) return "—";
+                const fmt = this._config.charge_time_format;
+                if (fmt === "hm" || fmt === "hours" || fmt === "hours_min") {
+                  const mins = Math.round(NUM(st));
+                  if (mins == null || isNaN(mins)) return this._fmt(st);
+                  const h = Math.floor(mins / 60), m = mins % 60;
+                  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+                }
+                return this._fmt(st);
+              })() })}
             ${this._row("Complete at", this._st("sensor.charge_complete"), {
               value: (() => { const st = this._st("sensor.charge_complete");
                 if (!OK(st)) return "—";
