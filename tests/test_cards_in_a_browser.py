@@ -1783,3 +1783,55 @@ def test_a_seat_button_fills_in_proportion_to_its_level():
     off = _lvl("Off")
     assert off["lvl"] in ("0", ""), off
     assert "lvl" not in off["cls"], "an off seat must not carry the fill class"
+
+
+# --------------------------------- user-supplied car image + tap to expand ---
+
+def test_a_car_image_replaces_the_drawing_and_keeps_the_state_overlay():
+    """With car_image set, the card shows the owner's photo instead of the
+    drawn SVG - but the live state has to survive, so the lamp/marker overlay
+    is drawn on top."""
+    got = _mount("geely-card", """{
+            hasImg: !!el.shadowRoot.querySelector('.photo img'),
+            src: (el.shadowRoot.querySelector('.photo img') || {}).getAttribute
+                 ? el.shadowRoot.querySelector('.photo img').getAttribute('src') : null,
+            overlay: !!el.shadowRoot.querySelector('.photo .lamps'),
+            noSvgCar: !el.shadowRoot.querySelector('svg.car'),
+        }""", cfg={"car_image": "/local/geely/mycar.webp"})
+    assert got["hasImg"] is True, got
+    assert got["src"] == "/local/geely/mycar.webp", got
+    assert got["overlay"] is True, got
+    assert got["noSvgCar"] is True, got
+
+
+def test_without_a_car_image_the_drawn_car_is_kept():
+    got = _mount("geely-card", """{
+            svgCar: !!el.shadowRoot.querySelector('svg.car'),
+            noPhoto: !el.shadowRoot.querySelector('.photo'),
+        }""")
+    assert got["svgCar"] is True, got
+    assert got["noPhoto"] is True, got
+
+
+def test_the_summary_card_makes_the_car_a_button_that_opens_the_full_card():
+    """Tapping the car on the compact card opens the full card in a modal
+    appended to document.body (so it centres against the viewport, not a
+    transformed dashboard ancestor)."""
+    got = _mount("geely-card-compact", """(() => {
+            const wrap = el.shadowRoot.querySelector('.carwrap.expandable');
+            if (!wrap) return { wrap: false };
+            wrap.click();
+            const dlg = document.querySelector('dialog.geely-expand');
+            return {
+                wrap: true,
+                role: wrap.getAttribute('role'),
+                dialogInBody: !!dlg && dlg.parentElement === document.body,
+                open: !!dlg && dlg.open,
+                hasFullCard: !!(dlg && dlg.querySelector('geely-card')),
+            };
+        })()""")
+    assert got["wrap"] is True, got
+    assert got["role"] == "button", got
+    assert got["dialogInBody"] is True, got
+    assert got["open"] is True, got
+    assert got["hasFullCard"] is True, got
