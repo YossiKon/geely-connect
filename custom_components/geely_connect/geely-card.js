@@ -673,6 +673,22 @@
     /* The level - Low / Medium / High - is the whole point of a seat button, so
      * it gets the strongest treatment on the card. */
     .cbtn.on b { color:${ON_TEXT}; font-weight: 700; }
+    /* Seat / wheel heat show their LEVEL as a proportional fill: full at the
+     * top level (identical to .on), a third and two-thirds of the button
+     * width at the lower ones, nothing when off - so the setting reads at a
+     * glance, not just from the label. --lvl is 0..1. The button carries both
+     * the on and lvl classes; defined after .on, this rule wins the background,
+     * and the on class keeps it counting as an active button everywhere else. */
+    .cbtn.lvl {
+      color:${ON_TEXT};
+      border-color: color-mix(in srgb, ${ACCENT} 60%, transparent);
+      background: linear-gradient(to right,
+        color-mix(in srgb, ${ACCENT} 16%, transparent) calc(var(--lvl, 0) * 100%),
+        transparent calc(var(--lvl, 0) * 100%));
+      box-shadow: 0 3px 14px -8px color-mix(in srgb, ${ACCENT} 90%, transparent);
+      transition: background .3s ease;
+    }
+    .cbtn.lvl b { color:${ON_TEXT}; font-weight: 700; }
     @media (hover: hover) {
       .cstep:hover, .cmini:hover { background: rgba(120,130,140,.15); }
     }
@@ -1282,7 +1298,15 @@
         const opts = (st.attributes && st.attributes.options) || [];
         // "unavailable"/"unknown" must read as Off, not as an active level.
         const lvl = opts.includes(st.state) ? st.state : "Off";
-        return `<button class="cbtn ${lvl !== "Off" ? "on" : ""}" data-act="${key}"
+        // Fill the button in proportion to the level: High fills it (same as
+        // the old on-state), Medium/Low fill two-thirds / one-third, Off none.
+        // Derived from the option's position so it fits whatever levels the
+        // select actually offers.
+        const idx = Math.max(0, opts.indexOf(lvl));
+        const frac = opts.length > 1 ? idx / (opts.length - 1)
+          : (lvl !== "Off" ? 1 : 0);
+        return `<button class="cbtn ${frac > 0 ? "on lvl" : ""}" style="--lvl:${frac}"
+            data-act="${key}"
             title="${esc(mode)} - ${esc(label)}: ${esc(lvl)}">${icon(ic)}<span>${esc(label)}</span>
             <b>${esc(lvl)}</b></button>`;
       };
@@ -1316,7 +1340,8 @@
             data-act="gclean" title="Fresh air (G-Clean)">${icon("fresh")}<span>Fresh air</span></button>` : "") +
         (pcomfort ? `<button class="cbtn ${pcomfort.state === "on" ? "on" : ""}"
             data-act="pcomfort" title="${esc(PCOMFORT_HINT)}">${icon("sleep")}<span>Parking comfort</span></button>` : "") +
-        (swheel ? `<button class="cbtn ${swheel.state === "on" ? "on" : ""}"
+        (swheel ? `<button class="cbtn ${swheel.state === "on" ? "on lvl" : ""}"
+            style="--lvl:${swheel.state === "on" ? 1 : 0}"
             data-act="swheel" title="${esc(SWHEEL_HINT)}">${icon("steering")}<span>Wheel heat</span></button>` : "") +
         cover("sunroof", "sunroof_open", "sunroof_close", "Sunroof", "roof") +
         cover("sunshade", "shade_open", "shade_close", "Shade", "shade");

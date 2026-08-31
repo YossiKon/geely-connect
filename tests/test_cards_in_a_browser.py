@@ -1759,3 +1759,27 @@ def test_charge_time_hours_minutes_format():
 def test_charge_time_defaults_to_minutes():
     v = _evaluate(_CHARGE_TIME_SCRIPT, arg={"mins": "249", "cfg": {}})
     assert "249" in v, v   # unchanged from today's minutes reading
+
+
+# ------------------------- #61: seat/wheel heat level as a proportional fill
+
+def test_a_seat_button_fills_in_proportion_to_its_level():
+    """The level - Low/Medium/High - is what a seat button is for, so it now
+    reads as a proportional background fill (#61): full at High, a third and
+    two-thirds at Low/Medium, none at Off. The fraction comes from the option's
+    position, so it fits whatever levels the select offers."""
+    def _lvl(state):
+        return _mount("geely-card", """(() => {
+            const b = el.shadowRoot.querySelector('[data-act="seat_heat_driver"]');
+            return { cls: b.className,
+                     lvl: b.style.getPropertyValue('--lvl').trim() };
+        })()""", seats={"heatDriver": state})
+    # options are Off, Low, Medium, High -> fractions 0, 1/3, 2/3, 1.
+    high = _lvl("High")
+    assert high["lvl"] == "1", high
+    assert "lvl" in high["cls"] and "on" in high["cls"], high
+    low = _lvl("Low")
+    assert abs(float(low["lvl"]) - 1/3) < 1e-6, low
+    off = _lvl("Off")
+    assert off["lvl"] in ("0", ""), off
+    assert "lvl" not in off["cls"], "an off seat must not carry the fill class"
