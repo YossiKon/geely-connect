@@ -263,6 +263,10 @@
                   when: >-
                     {{ as_timestamp(states('sensor.my_geely_ex5_charge_complete'),
                     0) | int }}
+                  # Tapping the notification opens this Lovelace path. Point it
+                  # at a view showing the full custom:geely-card and the tap
+                  # lands on the full card. Remove the line to just open the app.
+                  clickAction: /lovelace/car
         # Just left "Charging": a one-shot summary carrying the same tag
         # overwrites the pinned countdown, so there is no separate "clear" step
         # to race with the estimate blinking to unknown at the end of a session.
@@ -285,5 +289,6 @@
                   sticky: false
                   notification_icon: mdi:ev-station
                   color: "#43A047"
+                  clickAction: /lovelace/car
   mode: queued
   max: 10

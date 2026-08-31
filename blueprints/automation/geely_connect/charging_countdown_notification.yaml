@@ -69,6 +69,15 @@ blueprint:
       default: mdi:ev-station
       selector:
         icon:
+    dashboard_path:
+      name: Open on tap (dashboard path)
+      description: >
+        Where tapping the notification goes, e.g. /lovelace/car. Point it at a
+        view that shows the full `custom:geely-card` and the tap lands straight
+        on the full card. Leave blank to just open the app.
+      default: ""
+      selector:
+        text:
     channel_name:
       name: Notification channel
       description: >
@@ -138,6 +147,7 @@ action:
                 chronometer: true
                 chronometer_countdown: true
                 when: "{{ as_timestamp(states(complete_entity), 0) | int }}"
+                clickAction: !input dashboard_path
       # ---- Just left "Charging": one summary that replaces the pin ----------
       # A one-shot message with the same tag overwrites the pinned countdown,
       # so there is no separate "clear" step to race with the estimate blinking
@@ -160,6 +170,7 @@ action:
                 sticky: false
                 notification_icon: !input icon
                 color: "#43A047"
+                clickAction: !input dashboard_path
 
 mode: queued
 max: 10
