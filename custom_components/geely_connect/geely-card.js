@@ -1050,7 +1050,10 @@
       // No unit needed here: "is it moving" is the same question in mph.
       if (speed != null && speed > 0) return true;
       const eng = this._st("sensor.engine_state");
-      const raw = eng ? String(eng.state).trim().toLowerCase() : "";
+      // "engine-running" (new platform) and "engine_running" (legacy) both mean
+      // driving; normalise the separator so a running car stays "driving" even
+      // when the speed field momentarily reads 0 between the car's uploads.
+      const raw = eng ? String(eng.state).trim().toLowerCase().replace(/-/g, "_") : "";
       return DRIVING_STATES.has(raw);
     }
 
