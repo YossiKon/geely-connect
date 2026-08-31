@@ -4,8 +4,9 @@ blueprint:
     A single ongoing notification that stays on your phone's lock screen while
     the car charges: a live countdown timer, the finish time and the charging
     power, plus a persistent charging icon in the status bar. It refreshes
-    itself silently as the estimate changes and is replaced by a one-line
-    summary when the session ends.
+    itself silently as the estimate changes. When the battery reaches full it is
+    replaced by a "charged" alert on its own channel (so you can give that a
+    distinct sound); an early unplug clears it quietly instead.
 
 
     Android (Home Assistant Companion app) only for the full effect - the
@@ -37,6 +38,15 @@ blueprint:
         entity:
           domain: sensor
           device_class: timestamp
+    battery_sensor:
+      name: Battery sensor
+      description: >
+        The drive battery %, used to fire the "charged" alert at a true full -
+        not merely when charging stops - so an early unplug never triggers it.
+      selector:
+        entity:
+          domain: sensor
+          device_class: battery
     notify_target:
       name: Notify service
       description: >
@@ -57,8 +67,8 @@ blueprint:
     range_sensor:
       name: Range sensor (optional)
       description: >
-        Shown when charging stops, e.g. "292 km range". Leave blank to leave it
-        off.
+        Shown on the "charged" alert, e.g. "292 km range". Leave blank to leave
+        it off.
       default: ""
       selector:
         entity:
@@ -79,7 +89,7 @@ blueprint:
       selector:
         text:
     channel_name:
-      name: Notification channel
+      name: Countdown channel
       description: >
         Android groups notifications by channel and remembers each channel's
         settings. If you change the importance below, also change this name:
@@ -88,8 +98,18 @@ blueprint:
       default: Car charging
       selector:
         text:
+    complete_channel:
+      name: Charge-finished channel
+      description: >
+        A SEPARATE channel for the "charged" alert, so you can give it its own
+        sound in Android (long-press the notification -> the channel -> Sound)
+        without the ongoing countdown ever making that sound. Keep it different
+        from the countdown channel above.
+      default: Car charging done
+      selector:
+        text:
     importance:
-      name: Importance
+      name: Countdown importance
       description: >
         "default" shows on the lock screen (recommended). "low" is quieter, but
         Android hides low-importance notifications from the lock screen. "high"
@@ -101,34 +121,88 @@ blueprint:
             - default
             - low
             - high
+    full_level:
+      name: Full at (%)
+      description: >
+        Battery % that counts as fully charged and fires the "charged" alert.
+        99.5 catches a 100 that momentarily reads a touch under.
+      default: 99.5
+      selector:
+        number:
+          min: 80
+          max: 100
+          step: 0.5
+          unit_of_measurement: "%"
+          mode: box
 
 variables:
   connection_entity: !input connection_sensor
   complete_entity: !input charge_complete_sensor
+  battery_entity: !input battery_sensor
   power_entity: !input power_sensor
   range_entity: !input range_sensor
+  full_v: !input full_level
+  not_full: "{{ (states(battery_entity) | float(0)) < full_v }}"
+  batt_now: "{{ states(battery_entity) | float(0) | round | int }}"
   finish: >-
     {{ as_timestamp(states(complete_entity), 0) | timestamp_custom('%-I:%M %p', true) }}
   power_txt: >-
     {% if power_entity not in [none, ''] and has_value(power_entity) %} · {{ states(power_entity) }} {{ state_attr(power_entity, 'unit_of_measurement') or 'kW' }}{% endif %}
-  range_txt: >-
-    {% if range_entity not in [none, ''] and has_value(range_entity) %}{{ states(range_entity) }} km range{% else %}Charging has stopped.{% endif %}
+  full_txt: >-
+    {% if range_entity not in [none, ''] and has_value(range_entity) %}{{ states(range_entity) }} km range{% else %}Fully charged.{% endif %}
+  stop_txt: >-
+    Stopped at {{ batt_now }}%{% if range_entity not in [none, ''] and has_value(range_entity) %} · {{ states(range_entity) }} km{% endif %}
 
 trigger:
   - platform: state
     entity_id: !input connection_sensor
   - platform: state
     entity_id: !input charge_complete_sensor
+  # Drives the "charged" alert off the battery reaching full, held briefly so a
+  # single odd reading can't fire it.
+  - platform: numeric_state
+    entity_id: !input battery_sensor
+    above: !input full_level
+    for:
+      seconds: 20
 
 action:
   - choose:
-      # ---- Charging, with a finish time: post / refresh the countdown -------
+      # ---- TRUE full: clear the countdown, then the "charged" alert ---------
+      # Only the battery trigger has platform numeric_state, so this fires once
+      # at full and never on an early unplug.
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.platform == 'numeric_state' }}"
+        sequence:
+          - service: !input notify_target
+            data:
+              message: clear_notification
+              data:
+                tag: geely_charging
+          - service: !input notify_target
+            data:
+              title: "✅ Charged"
+              message: "{{ full_txt }}"
+              data:
+                # Own channel + high importance so a charge-finished sound (set
+                # per channel in Android) plays here and never on the countdown.
+                tag: geely_charge_done
+                channel: !input complete_channel
+                importance: high
+                sticky: false
+                notification_icon: !input icon
+                color: "#43A047"
+                clickAction: !input dashboard_path
+      # ---- Charging, not yet full: post / refresh the countdown ------------
       - conditions:
           - condition: state
             entity_id: !input connection_sensor
             state: "Charging"
           - condition: template
             value_template: "{{ has_value(complete_entity) }}"
+          - condition: template
+            value_template: "{{ not_full }}"
         sequence:
           - service: !input notify_target
             data:
@@ -148,29 +222,32 @@ action:
                 chronometer_countdown: true
                 when: "{{ as_timestamp(states(complete_entity), 0) | int }}"
                 clickAction: !input dashboard_path
-      # ---- Just left "Charging": one summary that replaces the pin ----------
-      # A one-shot message with the same tag overwrites the pinned countdown,
-      # so there is no separate "clear" step to race with the estimate blinking
-      # to unknown at the very end of a session.
+      # ---- Stopped before full (early unplug): quiet replace ----------------
+      # Reuses the countdown tag + channel so it swaps the pin without a sound.
       - conditions:
           - condition: template
             value_template: >-
               {{ trigger.entity_id == connection_entity
                  and trigger.from_state is not none
                  and trigger.from_state.state == 'Charging' }}
+          - condition: template
+            value_template: "{{ not_full }}"
         sequence:
           - service: !input notify_target
             data:
-              title: "✅ Charging stopped"
-              message: "{{ range_txt }}"
+              title: "🔌 Charging stopped"
+              message: "{{ stop_txt }}"
               data:
                 tag: geely_charging
                 channel: !input channel_name
                 importance: !input importance
+                alert_once: true
                 sticky: false
                 notification_icon: !input icon
                 color: "#43A047"
                 clickAction: !input dashboard_path
+  # No default: the last "charged"/"stopped" message stays put - a stray trigger
+  # while idle can never wipe it, nor race the estimate blinking to unknown.
 
 mode: queued
 max: 10

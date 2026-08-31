@@ -212,8 +212,9 @@
   description: >-
     A single ongoing lock-screen notification while the car charges: a live
     countdown timer, the finish time and charging power, and a charging icon
-    pinned in the status bar. It refreshes silently and is replaced by a
-    one-line summary when the session ends.
+    pinned in the status bar. It refreshes silently; at a true full it is
+    replaced by a "charged" alert on its own channel (so you can give that a
+    distinct sound), and an early unplug clears it quietly instead.
 
     Android companion app only for the full effect - the ticking timer, the
     status-bar pin and "alert once" are Android notification features. On iOS
@@ -223,13 +224,46 @@
       entity_id: sensor.my_geely_ex5_charger_connection
     - trigger: state
       entity_id: sensor.my_geely_ex5_charge_complete
+    # Drives the "charged" alert off the battery reaching full, held briefly so
+    # a single odd reading can't fire it. TUNE: 99.5 catches a 100 that reads a
+    # touch under; raise/lower to taste.
+    - trigger: numeric_state
+      entity_id: sensor.my_geely_ex5_battery
+      above: 99.5
+      for: "00:00:20"
   actions:
     - choose:
-        # Charging, with a finish time: post / refresh the countdown. The timer
-        # counts DOWN to Charge Complete - an absolute clock time, so the phone
-        # ticks it smoothly between polls. Do NOT anchor it to Time To Full
-        # Charge: that is the figure the car reported at the last poll and does
-        # not tick down between them, so it would freeze mid-count.
+        # TRUE full: clear the countdown, then a "charged" alert on its OWN
+        # channel + high importance, so a charge-finished sound (set per channel
+        # in Android) plays here and never on the countdown. Only the battery
+        # trigger is numeric_state, so this fires once at full - not on an early
+        # unplug.
+        - conditions:
+            - condition: template
+              value_template: "{{ trigger.platform == 'numeric_state' }}"
+          sequence:
+            - action: notify.mobile_app_your_phone
+              data:
+                message: clear_notification
+                data:
+                  tag: geely_charging
+            - action: notify.mobile_app_your_phone
+              data:
+                title: "✅ Charged"
+                message: >-
+                  {{ states('sensor.my_geely_ex5_electric_range') }} km of range.
+                data:
+                  tag: geely_charge_done
+                  channel: Car charging done
+                  importance: high
+                  sticky: false
+                  notification_icon: mdi:ev-station
+                  color: "#43A047"
+                  clickAction: /lovelace/car
+        # Charging, not yet full: post / refresh the countdown. The timer counts
+        # DOWN to Charge Complete - an absolute clock time, so the phone ticks it
+        # smoothly between polls. Do NOT anchor it to Time To Full Charge: that
+        # is the figure the car reported at the last poll and does not tick down.
         - conditions:
             - condition: state
               entity_id: sensor.my_geely_ex5_charger_connection
@@ -237,6 +271,9 @@
             - condition: template
               value_template: >-
                 {{ has_value('sensor.my_geely_ex5_charge_complete') }}
+            - condition: template
+              value_template: >-
+                {{ (states('sensor.my_geely_ex5_battery') | float(0)) < 99.5 }}
           sequence:
             - action: notify.mobile_app_your_phone
               data:
@@ -267,9 +304,8 @@
                   # at a view showing the full custom:geely-card and the tap
                   # lands on the full card. Remove the line to just open the app.
                   clickAction: /lovelace/car
-        # Just left "Charging": a one-shot summary carrying the same tag
-        # overwrites the pinned countdown, so there is no separate "clear" step
-        # to race with the estimate blinking to unknown at the end of a session.
+        # Stopped before full (early unplug): a one-shot summary carrying the
+        # countdown tag + channel replaces the pin without a sound (alert_once).
         - conditions:
             - condition: template
               value_template: >-
@@ -277,15 +313,22 @@
                 == 'sensor.my_geely_ex5_charger_connection'
                 and trigger.from_state is not none
                 and trigger.from_state.state == 'Charging' }}
+            - condition: template
+              value_template: >-
+                {{ (states('sensor.my_geely_ex5_battery') | float(0)) < 99.5 }}
           sequence:
             - action: notify.mobile_app_your_phone
               data:
-                title: "✅ Charging stopped"
+                title: "🔌 Charging stopped"
                 message: >-
-                  {{ states('sensor.my_geely_ex5_electric_range') }} km of range.
+                  Stopped at
+                  {{ states('sensor.my_geely_ex5_battery') | float(0) | round | int }}%
+                  · {{ states('sensor.my_geely_ex5_electric_range') }} km
                 data:
                   tag: geely_charging
                   channel: Car charging
+                  importance: default
+                  alert_once: true
                   sticky: false
                   notification_icon: mdi:ev-station
                   color: "#43A047"
