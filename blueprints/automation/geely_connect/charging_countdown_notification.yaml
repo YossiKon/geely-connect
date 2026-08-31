@@ -1,0 +1,253 @@
+blueprint:
+  name: Geely Connect - Charging countdown (live lock-screen notification)
+  description: >
+    A single ongoing notification that stays on your phone's lock screen while
+    the car charges: a live countdown timer, the finish time and the charging
+    power, plus a persistent charging icon in the status bar. It refreshes
+    itself silently as the estimate changes. When the battery reaches full it is
+    replaced by a "charged" alert on its own channel (so you can give that a
+    distinct sound); an early unplug clears it quietly instead.
+
+
+    Android (Home Assistant Companion app) only for the full effect - the
+    ticking timer, the pinned status-bar icon and the "alert once" behaviour are
+    all Android notification features. On iOS you still get a notification that
+    refreshes and clears, just without the live timer or the ongoing pin.
+
+
+    The countdown is anchored to the **Charge Complete** timestamp, not to Time
+    To Full Charge. Charge Complete is an absolute clock time, so the phone can
+    tick it down smoothly between polls; Time To Full is only the figure from
+    the last poll and would freeze between them.
+  domain: automation
+  input:
+    connection_sensor:
+      name: Charger connection sensor
+      description: >
+        The car's Charger Connection sensor - the one that reads "Charging"
+        while a session is running (sensor.<your_car>_charger_connection).
+      selector:
+        entity:
+          domain: sensor
+    charge_complete_sensor:
+      name: Charge Complete sensor
+      description: >
+        The computed finish-time sensor (sensor.<your_car>_charge_complete).
+        The countdown counts down to this.
+      selector:
+        entity:
+          domain: sensor
+          device_class: timestamp
+    battery_sensor:
+      name: Battery sensor
+      description: >
+        The drive battery %, used to fire the "charged" alert at a true full -
+        not merely when charging stops - so an early unplug never triggers it.
+      selector:
+        entity:
+          domain: sensor
+          device_class: battery
+    notify_target:
+      name: Notify service
+      description: >
+        Your phone's notify service, e.g. notify.mobile_app_pixel_9. It must be
+        a Home Assistant Companion app device for the live countdown.
+      default: notify.notify
+      selector:
+        text:
+    power_sensor:
+      name: Charging power sensor (optional)
+      description: >
+        Added to the message, e.g. "6.8 kW". Leave blank to leave it off.
+      default: ""
+      selector:
+        entity:
+          domain: sensor
+          device_class: power
+    range_sensor:
+      name: Range sensor (optional)
+      description: >
+        Shown on the "charged" alert, e.g. "292 km range". Leave blank to leave
+        it off.
+      default: ""
+      selector:
+        entity:
+          domain: sensor
+    icon:
+      name: Status-bar icon
+      description: The small icon pinned in the status bar while charging.
+      default: mdi:ev-station
+      selector:
+        icon:
+    dashboard_path:
+      name: Open on tap (dashboard path)
+      description: >
+        Where tapping the notification goes, e.g. /lovelace/car. Point it at a
+        view that shows the full `custom:geely-card` and the tap lands straight
+        on the full card. Leave blank to just open the app.
+      default: ""
+      selector:
+        text:
+    channel_name:
+      name: Countdown channel
+      description: >
+        Android groups notifications by channel and remembers each channel's
+        settings. If you change the importance below, also change this name:
+        Android freezes a channel's importance once it exists and will not raise
+        or lower it, so a fresh name is the only way to apply the new level.
+      default: Car charging
+      selector:
+        text:
+    complete_channel:
+      name: Charge-finished channel
+      description: >
+        A SEPARATE channel for the "charged" alert, so you can give it its own
+        sound in Android (long-press the notification -> the channel -> Sound)
+        without the ongoing countdown ever making that sound. Keep it different
+        from the countdown channel above.
+      default: Car charging done
+      selector:
+        text:
+    importance:
+      name: Countdown importance
+      description: >
+        "default" shows on the lock screen (recommended). "low" is quieter, but
+        Android hides low-importance notifications from the lock screen. "high"
+        also pops a heads-up when the channel is first created.
+      default: default
+      selector:
+        select:
+          options:
+            - default
+            - low
+            - high
+    full_level:
+      name: Full at (%)
+      description: >
+        Battery % that counts as fully charged and fires the "charged" alert.
+        99.5 catches a 100 that momentarily reads a touch under.
+      default: 99.5
+      selector:
+        number:
+          min: 80
+          max: 100
+          step: 0.5
+          unit_of_measurement: "%"
+          mode: box
+
+variables:
+  connection_entity: !input connection_sensor
+  complete_entity: !input charge_complete_sensor
+  battery_entity: !input battery_sensor
+  power_entity: !input power_sensor
+  range_entity: !input range_sensor
+  full_v: !input full_level
+  not_full: "{{ (states(battery_entity) | float(0)) < full_v }}"
+  batt_now: "{{ states(battery_entity) | float(0) | round | int }}"
+  finish: >-
+    {{ as_timestamp(states(complete_entity), 0) | timestamp_custom('%-I:%M %p', true) }}
+  power_txt: >-
+    {% if power_entity not in [none, ''] and has_value(power_entity) %} · {{ states(power_entity) }} {{ state_attr(power_entity, 'unit_of_measurement') or 'kW' }}{% endif %}
+  full_txt: >-
+    {% if range_entity not in [none, ''] and has_value(range_entity) %}{{ states(range_entity) }} km range{% else %}Fully charged.{% endif %}
+  stop_txt: >-
+    Stopped at {{ batt_now }}%{% if range_entity not in [none, ''] and has_value(range_entity) %} · {{ states(range_entity) }} km{% endif %}
+
+trigger:
+  - platform: state
+    entity_id: !input connection_sensor
+  - platform: state
+    entity_id: !input charge_complete_sensor
+  # Drives the "charged" alert off the battery reaching full, held briefly so a
+  # single odd reading can't fire it.
+  - platform: numeric_state
+    entity_id: !input battery_sensor
+    above: !input full_level
+    for:
+      seconds: 20
+
+action:
+  - choose:
+      # ---- TRUE full: clear the countdown, then the "charged" alert ---------
+      # Only the battery trigger has platform numeric_state, so this fires once
+      # at full and never on an early unplug.
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.platform == 'numeric_state' }}"
+        sequence:
+          - service: !input notify_target
+            data:
+              message: clear_notification
+              data:
+                tag: geely_charging
+          - service: !input notify_target
+            data:
+              title: "✅ Charged"
+              message: "{{ full_txt }}"
+              data:
+                # Own channel + high importance so a charge-finished sound (set
+                # per channel in Android) plays here and never on the countdown.
+                tag: geely_charge_done
+                channel: !input complete_channel
+                importance: high
+                sticky: false
+                notification_icon: !input icon
+                color: "#43A047"
+                clickAction: !input dashboard_path
+      # ---- Charging, not yet full: post / refresh the countdown ------------
+      - conditions:
+          - condition: state
+            entity_id: !input connection_sensor
+            state: "Charging"
+          - condition: template
+            value_template: "{{ has_value(complete_entity) }}"
+          - condition: template
+            value_template: "{{ not_full }}"
+        sequence:
+          - service: !input notify_target
+            data:
+              title: "🔌 Charging"
+              message: "Ready by {{ finish }}{{ power_txt }}"
+              data:
+                tag: geely_charging
+                channel: !input channel_name
+                importance: !input importance
+                alert_once: true       # sound once at start, silent refreshes
+                persistent: true       # pinned - not swipeable while charging
+                sticky: true           # survives a tap
+                visibility: public     # full content on the lock screen
+                notification_icon: !input icon
+                color: "#43A047"
+                chronometer: true
+                chronometer_countdown: true
+                when: "{{ as_timestamp(states(complete_entity), 0) | int }}"
+                clickAction: !input dashboard_path
+      # ---- Stopped before full (early unplug): quiet replace ----------------
+      # Reuses the countdown tag + channel so it swaps the pin without a sound.
+      - conditions:
+          - condition: template
+            value_template: >-
+              {{ trigger.entity_id == connection_entity
+                 and trigger.from_state is not none
+                 and trigger.from_state.state == 'Charging' }}
+          - condition: template
+            value_template: "{{ not_full }}"
+        sequence:
+          - service: !input notify_target
+            data:
+              title: "🔌 Charging stopped"
+              message: "{{ stop_txt }}"
+              data:
+                tag: geely_charging
+                channel: !input channel_name
+                importance: !input importance
+                alert_once: true
+                sticky: false
+                notification_icon: !input icon
+                color: "#43A047"
+                clickAction: !input dashboard_path
+  # No default: the last "charged"/"stopped" message stays put - a stray trigger
+  # while idle can never wipe it, nor race the estimate blinking to unknown.
+
+mode: queued
+max: 10
