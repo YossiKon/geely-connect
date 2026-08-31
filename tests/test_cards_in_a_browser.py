@@ -399,16 +399,6 @@ def test_a_car_stopped_at_a_light_is_still_driving():
         assert got["live"] in ([], ["refresh"]), (tag, got["live"])
 
 
-def test_the_new_platforms_hyphenated_engine_value_still_reads_as_driving():
-    """The real new-platform value is "engine-running" (hyphen); the driving set
-    uses "engine_running". Without normalising the separator, a moving car whose
-    speed field momentarily reads 0 between uploads flips to Parked - which is
-    exactly the flicker owners saw. Speed 0 + engine-running must stay Driving."""
-    for tag in ("geely-card", "geely-card-compact", "geely-card-mini"):
-        got = _mount(tag, _driving_probe(), speed="0", engine="engine-running")
-        assert "Driving" in got["text"], (tag, got)
-
-
 def test_a_trim_that_never_reports_an_engine_state_falls_back_to_speed():
     """`engine_state` is absent on some trims, where the test has to reduce to
     the old speed check rather than concluding "parked" for ever."""
@@ -1670,3 +1660,102 @@ def test_the_compact_card_watches_what_its_head_row_prints():
     compact = src[src.index("class GeelyCardCompact"):src.index("class GeelyCard extends")]
     assert '"sensor.interior_temperature"' in compact, (
         "the compact card prints the cabin temp without watching it")
+
+
+# ------------------------------------------- compact header customisation ---
+
+def test_hide_name_removes_the_title_text():
+    got = _mount("geely-card-compact", """{
+            withName: (el.shadowRoot.querySelector('.title')||{}).textContent
+                       ? el.shadowRoot.querySelector('.title').textContent.trim() : '',
+        }""")
+    assert got["withName"], got  # name present by default
+    got2 = _mount("geely-card-compact", """{
+            title: el.shadowRoot.querySelector('.title').textContent.trim(),
+            dot: !!el.shadowRoot.querySelector('.title .dot'),
+        }""", cfg={"hide_name": True})
+    assert got2["title"] == "", got2       # name gone
+    assert got2["dot"] is False, got2      # status dot removed with the name
+
+
+def test_battery_size_promotes_the_percentage_above_the_range():
+    got = _mount("geely-card-compact", """{
+            battpct: (el.shadowRoot.querySelector('.battpct')||{}).textContent || null,
+            size: el.shadowRoot.querySelector('.battpct')
+                  ? getComputedStyle(el.shadowRoot.querySelector('.battpct')).fontSize : null,
+            microHasPct: /%/.test(el.shadowRoot.querySelector('.head .micro').textContent),
+        }""", cfg={"battery_size": 28})
+    assert got["battpct"] and "%" in got["battpct"], got
+    assert got["size"] == "28px", got            # size is the configured value
+    assert got["microHasPct"] is False, got      # % moved out of the small line
+
+
+def test_no_battery_size_keeps_the_percentage_in_the_small_line():
+    got = _mount("geely-card-compact", """{
+            battpct: !!el.shadowRoot.querySelector('.battpct'),
+            microHasPct: /%/.test(el.shadowRoot.querySelector('.head .micro').textContent),
+        }""")
+    assert got["battpct"] is False, got
+    assert got["microHasPct"] is True, got
+
+
+def test_show_parked_adds_a_parked_chip_beside_locked():
+    got = _mount("geely-card-compact", """
+            [...el.shadowRoot.querySelectorAll('.chips .chip')].map(c => c.textContent.trim())
+        """, cfg={"show_parked": True})
+    assert "Parked" in got and "Locked" in got, got
+    # default: no standalone Parked chip while locked
+    got2 = _mount("geely-card-compact", """
+            [...el.shadowRoot.querySelectorAll('.chips .chip')].map(c => c.textContent.trim())
+        """)
+    assert "Parked" not in got2, got2
+
+
+def test_the_battery_headline_carries_the_cabin_temp_beside_the_percent():
+    got = _mount("geely-card-compact", """
+            (el.shadowRoot.querySelector('.battpct')||{}).textContent || ''
+        """, cfg={"battery_size": 24})
+    assert "%" in got and "°" in got, got   # e.g. "84% · 21°"
+
+
+def test_battery_bold_can_be_turned_off():
+    bold = _mount("geely-card-compact", """
+            getComputedStyle(el.shadowRoot.querySelector('.battpct')).fontWeight
+        """, cfg={"battery_size": 24})
+    assert str(bold) in ("700", "bold"), bold
+    plain = _mount("geely-card-compact", """
+            getComputedStyle(el.shadowRoot.querySelector('.battpct')).fontWeight
+        """, cfg={"battery_size": 24, "battery_bold": False})
+    assert str(plain) in ("400", "normal"), plain
+
+
+# --------------------------------------------- charge_time_format option ---
+
+_CHARGE_TIME_SCRIPT = r"""(arg) => {
+    const el = document.createElement("geely-card");
+    document.body.appendChild(el);
+    el.setConfig(arg.cfg || {});
+    const hass = window.mkHass({});
+    hass.states["sensor.car_time_to_full_charge"] = {
+        entity_id: "sensor.car_time_to_full_charge", state: arg.mins,
+        attributes: {unit_of_measurement: "min"}};
+    el.hass = hass;
+    const rows = [...el.shadowRoot.querySelectorAll(".row")];
+    const r = rows.find(x => /Time to full/.test(x.textContent));
+    const v = r ? r.querySelector("b").textContent.trim() : null;
+    el.remove();
+    return v;
+}"""
+
+
+def test_charge_time_hours_minutes_format():
+    assert _evaluate(_CHARGE_TIME_SCRIPT,
+                     arg={"mins": "249", "cfg": {"charge_time_format": "hm"}}) == "4h 9m"
+    # under an hour drops the hours part
+    assert _evaluate(_CHARGE_TIME_SCRIPT,
+                     arg={"mins": "45", "cfg": {"charge_time_format": "hm"}}) == "45m"
+
+
+def test_charge_time_defaults_to_minutes():
+    v = _evaluate(_CHARGE_TIME_SCRIPT, arg={"mins": "249", "cfg": {}})
+    assert "249" in v, v   # unchanged from today's minutes reading

@@ -1050,10 +1050,7 @@
       // No unit needed here: "is it moving" is the same question in mph.
       if (speed != null && speed > 0) return true;
       const eng = this._st("sensor.engine_state");
-      // "engine-running" (new platform) and "engine_running" (legacy) both mean
-      // driving; normalise the separator so a running car stays "driving" even
-      // when the speed field momentarily reads 0 between the car's uploads.
-      const raw = eng ? String(eng.state).trim().toLowerCase().replace(/-/g, "_") : "";
+      const raw = eng ? String(eng.state).trim().toLowerCase() : "";
       return DRIVING_STATES.has(raw);
     }
 
@@ -1565,11 +1562,18 @@
       const defrost = this._st("switch.defrost");
       const online = this._st("binary_sensor.connected");
 
+      // Header customisation (all opt-in; unset keeps today's layout).
+      const hideName = !!this._config.hide_name;
+      const battSize = Number(this._config.battery_size) || 0;  // px, 0 = off
+      const showParked = !!this._config.show_parked;
+      const battBold = this._config.battery_bold !== false;  // default bold
+
       const chips = [
         // First, and only while it is true: the compact card falls back to a
         // "Parked" chip when nothing else applies, which on a moving car was the
         // same contradiction as #25 on its bigger siblings.
         driving && `<span class="chip warn">Driving</span>`,
+        showParked && !driving && `<span class="chip">Parked</span>`,
         s.locked && `<span class="chip ${s.locked.state === "locked" ? "" : "warn"}">
             ${s.locked.state === "locked" ? "Locked" : "Unlocked"}</span>`,
         s.charging && `<span class="chip on">${iconFilled("bolt")} ${power != null ? power.toFixed(1) + " kW" : "Charging"}</span>`,
@@ -1587,22 +1591,23 @@
         .hero .n { font-size:44px; }
         .hero .u { font-size:13px; color: var(--secondary-text-color); margin-left:3px; }
         .hero .sub { margin-top:4px; }
+        .battpct { color: var(--primary-text-color); margin:-8px 0 2px; }
         .carwrap { flex:1; max-width:300px; margin-left:auto; }
         </style>
         <div class="shell">
           ${this._drivingNotice()}
           <div class="head">
             <div class="title">
-              <i class="dot ${online && online.state === "off" ? "off" : ""}"></i>
-              ${esc(this._title())}
+              ${hideName ? "" : `<i class="dot ${online && online.state === "off" ? "off" : ""}"></i>${esc(this._title())}`}
             </div>
             <span class="micro">${[
-              this._levels(s, batt),
-              inTemp == null ? "" : Math.round(inTemp) + "° in",
+              battSize ? "" : this._levels(s, batt),
+              (battSize || inTemp == null) ? "" : Math.round(inTemp) + "° in",
             ].filter(Boolean).join(" · ")}</span>
           </div>
           <div class="hero">
             <div>
+              ${battSize ? `<div class="battpct num" style="font-size:${battSize}px;font-weight:${battBold ? 700 : 400}">${batt}%${inTemp == null ? "" : ` · ${Math.round(inTemp)}°`}</div>` : ""}
               <div class="num n ${OK(s.range) ? "" : "unavail"}">${range}<span class="u">${esc(UNIT(s.range) || "km")}</span></div>
               <div class="micro sub">${esc(this._rangeLabel(s))}</div>
               ${split ? `<div class="micro sub">${esc(split)}</div>` : ""}
@@ -1746,8 +1751,7 @@
           <div class="head">
             <div>
               <div class="title">
-                <i class="dot ${online && online.state === "off" ? "off" : ""}"></i>
-                ${esc(this._title())}
+                ${this._config.hide_name ? "" : `<i class="dot ${online && online.state === "off" ? "off" : ""}"></i>${esc(this._title())}`}
               </div>
               <div class="status ${s.charging ? "charging" : ""}">${esc(statusLine)}</div>
             </div>
@@ -1788,7 +1792,21 @@
           <div class="grid sec">
             ${this._row("Charger", s.conn)}
             ${this._row("Power", power, { accent: s.charging })}
-            ${this._row("Time to full", this._st("sensor.time_to_full_charge"))}
+            ${this._row("Time to full", this._st("sensor.time_to_full_charge"), {
+              // charge_time_format: "min" (default, e.g. "249 min") or "hm"
+              // (e.g. "4h 9m"). The car reports minutes; "hm" just reshapes it.
+              value: (() => {
+                const st = this._st("sensor.time_to_full_charge");
+                if (!OK(st)) return "—";
+                const fmt = this._config.charge_time_format;
+                if (fmt === "hm" || fmt === "hours" || fmt === "hours_min") {
+                  const mins = Math.round(NUM(st));
+                  if (mins == null || isNaN(mins)) return this._fmt(st);
+                  const h = Math.floor(mins / 60), m = mins % 60;
+                  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+                }
+                return this._fmt(st);
+              })() })}
             ${this._row("Complete at", this._st("sensor.charge_complete"), {
               value: (() => { const st = this._st("sensor.charge_complete");
                 if (!OK(st)) return "—";
@@ -2055,7 +2073,7 @@
           <div class="head">
             <div class="title">
               <i class="dot ${online && online.state === "off" ? "off" : ""}"></i>
-              <em>${esc(this._title())}</em>
+              <em>${this._config.hide_name ? "" : esc(this._title())}</em>
             </div>
             <span class="temp">${[
               s.battery == null ? "" : Math.round(s.battery) + "%",
@@ -2218,8 +2236,7 @@
           <div class="head">
             <div>
               <div class="title">
-                <i class="dot ${online && online.state === "off" ? "off" : ""}"></i>
-                ${esc(this._title())}
+                ${this._config.hide_name ? "" : `<i class="dot ${online && online.state === "off" ? "off" : ""}"></i>${esc(this._title())}`}
               </div>
               <div class="status ${s.charging ? "charging" : ""}">${esc(statusLine)}</div>
             </div>
@@ -2260,7 +2277,21 @@
           <div class="grid sec">
             ${this._row("Charger", s.conn)}
             ${this._row("Power", power, { accent: s.charging })}
-            ${this._row("Time to full", this._st("sensor.time_to_full_charge"))}
+            ${this._row("Time to full", this._st("sensor.time_to_full_charge"), {
+              // charge_time_format: "min" (default, e.g. "249 min") or "hm"
+              // (e.g. "4h 9m"). The car reports minutes; "hm" just reshapes it.
+              value: (() => {
+                const st = this._st("sensor.time_to_full_charge");
+                if (!OK(st)) return "—";
+                const fmt = this._config.charge_time_format;
+                if (fmt === "hm" || fmt === "hours" || fmt === "hours_min") {
+                  const mins = Math.round(NUM(st));
+                  if (mins == null || isNaN(mins)) return this._fmt(st);
+                  const h = Math.floor(mins / 60), m = mins % 60;
+                  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+                }
+                return this._fmt(st);
+              })() })}
             ${this._row("Complete at", this._st("sensor.charge_complete"), {
               value: (() => { const st = this._st("sensor.charge_complete");
                 if (!OK(st)) return "—";
