@@ -511,11 +511,21 @@ class ZeekrAdapter:
                         "unsupported",
                         f"{service_id} is not mapped for the new platform yet")
                 new_id, new_cmd, new_params = mapped
+                # Which endpoint a command went out is otherwise invisible: both
+                # routes surface the same code=... string, so this is the only
+                # way to tell a new-platform send from a legacy one from a log.
+                _LOGGER.debug(
+                    "control %s/%s -> NEW route POST /ms-remote-control/"
+                    "v1.0/remoteControl/control (x-vin header)",
+                    service_id, command)
                 resp = self._authed(self._client.control_new_resp,
                                     new_id, new_cmd, new_params)
                 if isinstance(resp, dict) and str(resp.get("code")) in ("000000", "0"):
                     resp = {**resp, "code": 1000}
                 return resp
+            _LOGGER.debug(
+                "control %s -> LEGACY route PUT /remote-control/vehicle/"
+                "telematics/<vin> (no x-vin set)", service_id)
             return self._authed(self._client.control_resp, self.vin, body)
         except GeelyAuthError:
             raise
