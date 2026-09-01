@@ -199,6 +199,8 @@
       "label.fresh_air": "Fresh air",
       "label.fuel_short": "{n} fuel",
       "label.hood": "Hood",
+      "label.inside": "inside",
+      "label.maps": "Maps",
       "label.parking_comfort": "Parking comfort",
       "label.passenger": "Passenger",
       "label.range": "Range",
@@ -208,7 +210,13 @@
       "label.start": "Start",
       "label.sunroof": "Sunroof",
       "label.synced": "Synced {time}",
+      "label.temp_in": "{temp}° in",
+      "label.temp_out": "{temp}° out",
       "label.wheel_heat": "Wheel heat",
+      "level.high": "High",
+      "level.low": "Low",
+      "level.medium": "Medium",
+      "level.off": "Off",
       "row.battery_12v": "12 V battery",
       "row.charger": "Charger",
       "row.combined_range": "Combined range",
@@ -291,9 +299,11 @@
       "label.electric_range": "ระยะวิ่งไฟฟ้า",
       "label.end": "สิ้นสุด",
       "label.ev_short": "{n} ไฟฟ้า",
-      "label.fresh_air": "อากาศสด",
+      "label.fresh_air": "อากาศบริสุทธิ์",
       "label.fuel_short": "{n} น้ำมัน",
       "label.hood": "ฝากระโปรง",
+      "label.inside": "ภายใน",
+      "label.maps": "แผนที่",
       "label.parking_comfort": "โหมดจอดสบาย",
       "label.passenger": "ผู้โดยสาร",
       "label.range": "ระยะวิ่ง",
@@ -303,7 +313,13 @@
       "label.start": "เริ่ม",
       "label.sunroof": "ซันรูฟ",
       "label.synced": "ซิงก์แล้ว {time}",
+      "label.temp_in": "{temp}° ภายใน",
+      "label.temp_out": "{temp}° ภายนอก",
       "label.wheel_heat": "พวงมาลัยอุ่น",
+      "level.high": "สูง",
+      "level.low": "ต่ำ",
+      "level.medium": "กลาง",
+      "level.off": "ปิด",
       "row.battery_12v": "แบตเตอรี่ 12 โวลต์",
       "row.charger": "เครื่องชาร์จ",
       "row.combined_range": "ระยะวิ่งรวม",
@@ -342,7 +358,7 @@
       "tooltip.cooler": "เย็นลง",
       "tooltip.cover_close": "ปิด {label}",
       "tooltip.cover_open": "เปิด {label}",
-      "tooltip.fresh_air": "อากาศสด (G-Clean)",
+      "tooltip.fresh_air": "อากาศบริสุทธิ์ (G-Clean)",
       "tooltip.lifetime_avg": "ค่าเฉลี่ยตั้งแต่รถยังใหม่ หน้าจอในรถมักแสดงค่าทริปปัจจุบันแทน ซึ่งจะน้อยกว่านี้ - นั่นคือเอนทิตี Trip Consumption ไม่ใช่ตัวนี้",
       "tooltip.navigate_with": "นำทางไปยังรถด้วย {app}",
       "tooltip.open_the_full_card": "เปิดการ์ดแบบเต็ม",
@@ -1221,7 +1237,19 @@
           return st.state;
         })
         .join("|") + `|${this._armed || ""}|${this._pendingTemp}`
-        + `|${this._waiting() ? "wait" : ""}`;
+        + `|${this._waiting() ? "wait" : ""}|${this._lang(hass)}`;
+    }
+
+    /* The frontend's own language, resolved the same way for `_signature()`
+     * and `_t()` so the two can never disagree. `_signature()` folds this in
+     * because a language-only change moves no watched entity: without it,
+     * `set hass()` would compare an unchanged signature, skip the render,
+     * and a user who switched languages without a full page reload would
+     * see this card keep showing the old one - the same class of bug as
+     * #12's frozen banner, just triggered by a setting instead of a state. */
+    _lang(hass) {
+      return ((hass && ((hass.locale && hass.locale.language) || hass.language)) || "en")
+        .split("-")[0].toLowerCase();
     }
 
     /* How long to hold the controls after a command, in milliseconds.
@@ -1287,11 +1315,7 @@
      * `translations/*.json` uses elsewhere (`{email}`), so a translator
      * sees one convention across the integration. */
     _t(key, fallback, subs) {
-      const hass = this._hass;
-      const lang = ((hass && (
-        (hass.locale && hass.locale.language) || hass.language
-      )) || "en").split("-")[0].toLowerCase();
-      const dict = STR[lang] || STR.en;
+      const dict = STR[this._lang(this._hass)] || STR.en;
       let out = dict[key];
       if (out == null) out = STR.en[key];
       if (out == null) out = fallback;
@@ -1640,10 +1664,17 @@
         const idx = Math.max(0, opts.indexOf(lvl));
         const frac = opts.length > 1 ? idx / (opts.length - 1)
           : (lvl !== "Off" ? 1 : 0);
+        // `lvl` itself stays the entity's own English option string - it drives
+        // `_onAction`'s cycling logic and must keep matching `opts` exactly.
+        // Only the text shown to the user is translated, and only for the
+        // four levels this integration actually offers; an option this
+        // integration never defined (a future trim, a renamed option) falls
+        // back to showing the raw value rather than guessing at a translation.
+        const lvlWord = this._t(`level.${lvl.toLowerCase()}`, lvl);
         return `<button class="cbtn ${frac > 0 ? "on lvl" : ""}" style="--lvl:${frac}"
             data-act="${key}"
-            title="${esc(mode)} - ${esc(label)}: ${esc(lvl)}">${icon(ic)}<span>${esc(label)}</span>
-            <b>${esc(lvl)}</b></button>`;
+            title="${esc(mode)} - ${esc(label)}: ${esc(lvlWord)}">${icon(ic)}<span>${esc(label)}</span>
+            <b>${esc(lvlWord)}</b></button>`;
       };
       const cover = (suffix, openKey, closeKey, label, ic) => {
         const st = this._st(`cover.${suffix}`);
@@ -1926,15 +1957,21 @@
       const want = Array.isArray(this._config.nav) ? this._config.nav
         : DEFAULT_NAV;
       const chosen = want
-        .map((k) => NAV_APPS[String(k).toLowerCase()])
-        .filter(Boolean);
+        .map((k) => String(k).toLowerCase())
+        .filter((k) => NAV_APPS[k]);
       if (!chosen.length) return "";
       const mode = this._config.nav_travel
         ? String(this._config.nav_travel).toLowerCase() : "";
-      const link = (app) =>
-        `<a class="cbtn nav" href="${esc(app.url(at, mode))}" target="_blank"
+      // "Maps" (Google Maps) is generic wording on the button, not a brand
+      // name the way "Waze" / "Apple Maps" / "HERE" are - Yossi named it
+      // explicitly alongside Lock/Climate/Odometer as a label needing a key.
+      const link = (key) => {
+        const app = NAV_APPS[key];
+        const label = key === "maps" ? this._t("label.maps", app.label) : app.label;
+        return `<a class="cbtn nav" href="${esc(app.url(at, mode))}" target="_blank"
             rel="noopener noreferrer"
-            title="${esc(this._t("tooltip.navigate_with", "Navigate to the car with {app}", { app: app.label }))}">${icon("nav")}<span>${esc(app.label)}</span></a>`;
+            title="${esc(this._t("tooltip.navigate_with", "Navigate to the car with {app}", { app: label }))}">${icon("nav")}<span>${esc(label)}</span></a>`;
+      };
       return `<p class="micro csub" style="margin-top:12px">${icon("nav")} ${esc(this._t("section.navigate", "Navigate to the car"))}</p>
         <div class="crow wrap">${chosen.map(link).join("")}</div>`;
     }
@@ -2075,7 +2112,7 @@
             </div>
             <span class="micro">${[
               battSize ? "" : this._levels(s, batt),
-              (battSize || inTemp == null) ? "" : Math.round(inTemp) + "° in",
+              (battSize || inTemp == null) ? "" : this._t("label.temp_in", "{temp}° in", { temp: Math.round(inTemp) }),
             ].filter(Boolean).join(" · ")}</span>
           </div>
           <div class="hero">
@@ -2245,7 +2282,7 @@
             </div>
             <div class="side">
               ${OK(interior) ? `<div class="num">${Math.round(NUM(interior))}°</div>
-                <div class="u2">inside${OK(exterior) ? ` · ${Math.round(NUM(exterior))}° out` : ""}</div>` : ""}
+                <div class="u2">${esc(this._t("label.inside", "inside"))}${OK(exterior) ? ` · ${esc(this._t("label.temp_out", "{temp}° out", { temp: Math.round(NUM(exterior)) }))}` : ""}</div>` : ""}
             </div>
           </div>
           ${this._bars(s)}
@@ -2563,7 +2600,7 @@
             </div>
             <span class="temp">${[
               s.battery == null ? "" : Math.round(s.battery) + "%",
-              temp == null ? "" : Math.round(temp) + "° in",
+              temp == null ? "" : this._t("label.temp_in", "{temp}° in", { temp: Math.round(temp) }),
             ].filter(Boolean).join(" · ")}</span>
           </div>
           <div class="mid">
@@ -2749,7 +2786,7 @@
             </div>
             <div class="side">
               ${OK(interior) ? `<div class="num">${Math.round(NUM(interior))}°</div>
-                <div class="u2">inside${OK(exterior) ? ` · ${Math.round(NUM(exterior))}° out` : ""}</div>` : ""}
+                <div class="u2">${esc(this._t("label.inside", "inside"))}${OK(exterior) ? ` · ${esc(this._t("label.temp_out", "{temp}° out", { temp: Math.round(NUM(exterior)) }))}` : ""}</div>` : ""}
             </div>
           </div>
           ${this._bars(s)}
