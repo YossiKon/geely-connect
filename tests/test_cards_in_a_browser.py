@@ -1835,3 +1835,48 @@ def test_the_summary_card_makes_the_car_a_button_that_opens_the_full_card():
     assert got["dialogInBody"] is True, got
     assert got["open"] is True, got
     assert got["hasFullCard"] is True, got
+
+
+# ----------------------------------- #68/#70: the card speaks the UI language
+
+def _mount_lang(tag, probe, lang, **hass_opts):
+    """Mount a card whose fake hass carries a frontend language, so the card's
+    own string table (bundled in the JS - translations/*.json can't reach a
+    Lovelace card, #68) is exercised. `probe` is JS with `el` in scope."""
+    script = f"""() => {{
+        const el = document.createElement({json.dumps(tag)});
+        document.body.appendChild(el);
+        el.setConfig({{}});
+        const h = window.mkHass({json.dumps(hass_opts)});
+        h.locale = {{ language: {json.dumps(lang)} }};
+        el.hass = h;
+        return ({probe});
+    }}"""
+    return _evaluate(script)
+
+
+def test_the_card_localizes_its_labels_to_the_frontend_language():
+    """A Thai frontend gets Thai buttons, and an unknown language falls back to
+    English - the point of #68, since hass.localize() never reaches a card, so a
+    label can only follow hass.locale.language if the card carries the strings
+    itself. The Lock button label is the probe; the region suffix (th-TH) must
+    resolve the same as the bare language."""
+    lbl = '''el.shadowRoot.querySelector('[data-act="lock"] span').textContent'''
+    en = _mount_lang("geely-card", lbl, "en")
+    th = _mount_lang("geely-card", lbl, "th")
+    th_region = _mount_lang("geely-card", lbl, "th-TH")   # suffix ignored
+    unknown = _mount_lang("geely-card", lbl, "zz")         # -> English
+    assert en == "Lock", en
+    assert th and th != "Lock", ("th did not localize", th)
+    assert not th.isascii(), ("th is not the Thai string", th)
+    assert th_region == th, ("the region suffix was not stripped", th_region, th)
+    assert unknown == "Lock", ("an unknown language did not fall back", unknown)
+
+
+def test_a_missing_translation_key_falls_through_to_the_coded_default():
+    """_t() resolves STR[lang] -> STR.en -> the coded English passed at the call
+    site, so a gap in any dictionary shows the English default rather than a
+    blank label or a raw key name leaking to the user."""
+    got = _mount_lang("geely-card",
+                      '''el._t("no.such.key", "Coded Default")''', "th")
+    assert got == "Coded Default", got

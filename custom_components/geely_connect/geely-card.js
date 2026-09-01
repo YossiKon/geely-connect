@@ -158,6 +158,223 @@
   const SWHEEL_HINT = "Steering wheel heating on / off. Confirmed on a real "
     + "car; the reading is slow, so the button holds its state for a moment.";
 
+  /* Card UI strings, bundled here because a custom `card` translation
+   * category is never fetched into the Home Assistant frontend store -
+   * only the fixed set it knows about (config, options, entity, state,
+   * services, selector, exceptions, title...) - so `hass.localize()` would
+   * silently return "" for every key here. Lovelace cards that ship their
+   * own translations (mushroom, mini-graph-card, ...) all bundle strings
+   * this way instead. `_t()` below picks the dictionary by the frontend's
+   * own language, falling back to English, then to the coded fallback. */
+  const STR = {
+    en: {
+      "action.charging": "Charging",
+      "action.climate": "Climate",
+      "action.close": "Close",
+      "action.confirm_tap": "sure?",
+      "action.defrost": "Defrost",
+      "action.find": "Find",
+      "action.lock": "Lock",
+      "action.open": "Open",
+      "action.rapid_cool": "Rapid cool",
+      "action.rapid_heat": "Rapid heat",
+      "action.schedule": "Schedule",
+      "action.sync": "Sync",
+      "action.unlock": "Unlock",
+      "action.vent": "Vent",
+      "boot.boot": "Boot",
+      "boot.trunk": "Trunk",
+      "chip.climate_on": "Climate on",
+      "chip.driving": "Driving",
+      "chip.locked": "Locked",
+      "chip.n_open": "{count} open",
+      "chip.parked": "Parked",
+      "chip.plugged_in": "Plugged in",
+      "chip.unlocked": "Unlocked",
+      "label.battery_fuel_pct": "{batt}% · {fuel}% fuel",
+      "label.driver": "Driver",
+      "label.electric_range": "Electric range",
+      "label.end": "End",
+      "label.ev_short": "{n} EV",
+      "label.fresh_air": "Fresh air",
+      "label.fuel_short": "{n} fuel",
+      "label.hood": "Hood",
+      "label.inside": "inside",
+      "label.maps": "Maps",
+      "label.parking_comfort": "Parking comfort",
+      "label.passenger": "Passenger",
+      "label.range": "Range",
+      "label.seat_cooling": "Seat cooling",
+      "label.seat_heat": "Seat heat",
+      "label.shade": "Shade",
+      "label.start": "Start",
+      "label.sunroof": "Sunroof",
+      "label.synced": "Synced {time}",
+      "label.temp_in": "{temp}° in",
+      "label.temp_out": "{temp}° out",
+      "label.wheel_heat": "Wheel heat",
+      "level.high": "High",
+      "level.low": "Low",
+      "level.medium": "Medium",
+      "level.off": "Off",
+      "row.battery_12v": "12 V battery",
+      "row.charger": "Charger",
+      "row.combined_range": "Combined range",
+      "row.complete_at": "Complete at",
+      "row.efficiency": "Efficiency",
+      "row.engine": "Engine",
+      "row.fuel_level": "Fuel level",
+      "row.fuel_range": "Fuel range",
+      "row.lifetime_avg": "Lifetime avg",
+      "row.odometer": "Odometer",
+      "row.pack_power": "Pack power",
+      "row.power": "Power",
+      "row.range_at_full": "Range at 100%",
+      "row.schedule": "Schedule",
+      "row.service_in": "Service in",
+      "row.time_to_full": "Time to full",
+      "row.trip_meter": "Trip meter",
+      "section.charging": "Charging",
+      "section.fuel": "Fuel",
+      "section.navigate": "Navigate to the car",
+      "section.seat_cooling": "Seat cooling",
+      "section.seat_heating": "Seat heating",
+      "section.tires": "Tires",
+      "section.trip_health": "Trip & health",
+      "status.charging_line": "Charging{power}",
+      "status.driving_body": "Remote actions are unavailable until the car is parked",
+      "status.driving_line": "Driving{speed}",
+      "status.driving_locked": "Driving · actions locked",
+      "status.driving_title": "Driving",
+      "status.n_openings_open": "{count} opening{plural} open",
+      "status.no_vehicle_body": "No Geely vehicle found. Set <code>prefix:</code> to your entity slug, e.g. <code>my_geely_ex5</code> for <code>sensor.my_geely_ex5_battery</code>.",
+      "status.no_vehicle_title": "Geely Connect",
+      "status.parked_locked": "Parked · Locked",
+      "status.render_failed": "Render failed: {error}",
+      "tooltip.charging_toggle": "Start / stop charging",
+      "tooltip.cooler": "Cooler",
+      "tooltip.cover_close": "Close {label}",
+      "tooltip.cover_open": "Open {label}",
+      "tooltip.fresh_air": "Fresh air (G-Clean)",
+      "tooltip.lifetime_avg": "Average since the car was new. Your car's screen usually shows the current trip instead, which reads lower - that is the Trip Consumption entity, not this one.",
+      "tooltip.navigate_with": "Navigate to the car with {app}",
+      "tooltip.open_the_full_card": "Open the full card",
+      "tooltip.parking_comfort": "Parking Comfort: keeps the cabin comfortable while the car is parked. Your car does not report whether it is on, so this button toggles it without showing a state.",
+      "tooltip.rapid_cool": "Rapid cooling: the car's own preset - drives the setpoint to its minimum, ventilates both front seats and cracks the windows",
+      "tooltip.rapid_heat": "Rapid warming: the car's own preset - drives the setpoint to its maximum and heats both front seats, plus the steering wheel where fitted",
+      "tooltip.schedule_toggle": "Scheduled charging on / off",
+      "tooltip.trunk_release": "Unlocks the {word} latch - it does not open the {word} electrically. Lift it by hand, or use the key fob, within a few seconds before it re-locks itself.",
+      "tooltip.warmer": "Warmer",
+      "tooltip.wheel_heat": "Steering wheel heating on / off. Confirmed on a real car; the reading is slow, so the button holds its state for a moment.",
+      "topview.closed": "Closed",
+      "topview.open": "Open",
+      "topview.unknown": "—",
+    },
+    th: {
+      "action.charging": "ชาร์จ",
+      "action.climate": "แอร์",
+      "action.close": "ปิด",
+      "action.confirm_tap": "แน่ใจ?",
+      "action.defrost": "ไล่ฝ้า",
+      "action.find": "ค้นหา",
+      "action.lock": "ล็อก",
+      "action.open": "เปิด",
+      "action.rapid_cool": "เย็นเร็ว",
+      "action.rapid_heat": "อุ่นเร็ว",
+      "action.schedule": "ตั้งเวลา",
+      "action.sync": "ซิงก์",
+      "action.unlock": "ปลดล็อก",
+      "action.vent": "ระบายอากาศ",
+      "boot.boot": "กระโปรงท้าย",
+      "boot.trunk": "ท้ายรถ",
+      "chip.climate_on": "แอร์เปิดอยู่",
+      "chip.driving": "กำลังขับ",
+      "chip.locked": "ล็อกแล้ว",
+      "chip.n_open": "เปิดอยู่ {count} จุด",
+      "chip.parked": "จอดอยู่",
+      "chip.plugged_in": "เสียบปลั๊กอยู่",
+      "chip.unlocked": "ปลดล็อกแล้ว",
+      "label.battery_fuel_pct": "{batt}% · {fuel}% น้ำมัน",
+      "label.driver": "คนขับ",
+      "label.electric_range": "ระยะวิ่งไฟฟ้า",
+      "label.end": "สิ้นสุด",
+      "label.ev_short": "{n} ไฟฟ้า",
+      "label.fresh_air": "อากาศบริสุทธิ์",
+      "label.fuel_short": "{n} น้ำมัน",
+      "label.hood": "ฝากระโปรง",
+      "label.inside": "ภายใน",
+      "label.maps": "แผนที่",
+      "label.parking_comfort": "โหมดจอดสบาย",
+      "label.passenger": "ผู้โดยสาร",
+      "label.range": "ระยะวิ่ง",
+      "label.seat_cooling": "เบาะระบายความร้อน",
+      "label.seat_heat": "เบาะทำความร้อน",
+      "label.shade": "ม่านบังแดด",
+      "label.start": "เริ่ม",
+      "label.sunroof": "ซันรูฟ",
+      "label.synced": "ซิงก์แล้ว {time}",
+      "label.temp_in": "{temp}° ภายใน",
+      "label.temp_out": "{temp}° ภายนอก",
+      "label.wheel_heat": "พวงมาลัยอุ่น",
+      "level.high": "สูง",
+      "level.low": "ต่ำ",
+      "level.medium": "กลาง",
+      "level.off": "ปิด",
+      "row.battery_12v": "แบตเตอรี่ 12 โวลต์",
+      "row.charger": "เครื่องชาร์จ",
+      "row.combined_range": "ระยะวิ่งรวม",
+      "row.complete_at": "ชาร์จเสร็จเมื่อ",
+      "row.efficiency": "ประสิทธิภาพ",
+      "row.engine": "เครื่องยนต์",
+      "row.fuel_level": "ระดับน้ำมัน",
+      "row.fuel_range": "ระยะวิ่งน้ำมัน",
+      "row.lifetime_avg": "ค่าเฉลี่ยตลอดอายุ",
+      "row.odometer": "เลขไมล์",
+      "row.pack_power": "กำลังแพ็คแบตเตอรี่",
+      "row.power": "กำลังไฟ",
+      "row.range_at_full": "ระยะวิ่งเมื่อชาร์จเต็ม 100%",
+      "row.schedule": "ตารางเวลา",
+      "row.service_in": "ครบกำหนดบริการใน",
+      "row.time_to_full": "เวลาชาร์จเต็ม",
+      "row.trip_meter": "เลขไมล์ทริป",
+      "section.charging": "การชาร์จ",
+      "section.fuel": "น้ำมัน",
+      "section.navigate": "นำทางไปยังรถ",
+      "section.seat_cooling": "เบาะระบายความร้อน",
+      "section.seat_heating": "เบาะทำความร้อน",
+      "section.tires": "ยาง",
+      "section.trip_health": "ทริปและสุขภาพรถ",
+      "status.charging_line": "กำลังชาร์จ{power}",
+      "status.driving_body": "สั่งงานระยะไกลไม่ได้จนกว่ารถจะจอด",
+      "status.driving_line": "กำลังขับ{speed}",
+      "status.driving_locked": "กำลังขับ · คำสั่งถูกล็อก",
+      "status.driving_title": "กำลังขับ",
+      "status.n_openings_open": "เปิดอยู่ {count} จุด",
+      "status.no_vehicle_body": "ไม่พบรถ Geely ตั้งค่า <code>prefix:</code> เป็นชื่อเอนทิตีของคุณ เช่น <code>my_geely_ex5</code> สำหรับ <code>sensor.my_geely_ex5_battery</code>",
+      "status.no_vehicle_title": "Geely Connect",
+      "status.parked_locked": "จอดอยู่ · ล็อกแล้ว",
+      "status.render_failed": "แสดงผลไม่สำเร็จ: {error}",
+      "tooltip.charging_toggle": "เริ่ม / หยุดการชาร์จ",
+      "tooltip.cooler": "เย็นลง",
+      "tooltip.cover_close": "ปิด {label}",
+      "tooltip.cover_open": "เปิด {label}",
+      "tooltip.fresh_air": "อากาศบริสุทธิ์ (G-Clean)",
+      "tooltip.lifetime_avg": "ค่าเฉลี่ยตั้งแต่รถยังใหม่ หน้าจอในรถมักแสดงค่าทริปปัจจุบันแทน ซึ่งจะน้อยกว่านี้ - นั่นคือเอนทิตี Trip Consumption ไม่ใช่ตัวนี้",
+      "tooltip.navigate_with": "นำทางไปยังรถด้วย {app}",
+      "tooltip.open_the_full_card": "เปิดการ์ดแบบเต็ม",
+      "tooltip.parking_comfort": "โหมดจอดสบาย: รักษาความสบายในห้องโดยสารขณะจอดรถ รถของคุณไม่รายงานว่าเปิดอยู่หรือไม่ ปุ่มนี้จึงสลับสถานะโดยไม่แสดงสถานะปัจจุบัน",
+      "tooltip.rapid_cool": "เย็นเร็ว: โหมดสำเร็จรูปของรถ ปรับอุณหภูมิไปที่ค่าต่ำสุด ระบายความร้อนเบาะคู่หน้าทั้งสองฝั่ง และเปิดกระจกเล็กน้อย",
+      "tooltip.rapid_heat": "อุ่นเร็ว: โหมดสำเร็จรูปของรถ ปรับอุณหภูมิไปที่ค่าสูงสุดและอุ่นเบาะคู่หน้าทั้งสองฝั่ง รวมถึงพวงมาลัยในรุ่นที่มี",
+      "tooltip.schedule_toggle": "ตั้งเวลาชาร์จ เปิด / ปิด",
+      "tooltip.trunk_release": "ปลดล็อกสลัก{word} - ไม่ได้เปิด{word}ด้วยไฟฟ้า ยกขึ้นด้วยมือ หรือใช้กุญแจรีโมท ภายในไม่กี่วินาทีก่อนที่จะล็อกกลับเอง",
+      "tooltip.warmer": "อุ่นขึ้น",
+      "tooltip.wheel_heat": "เปิด / ปิดพวงมาลัยไฟฟ้า ยืนยันแล้วบนรถจริง การอ่านค่าช้า ปุ่มจึงค้างสถานะไว้สักครู่",
+      "topview.closed": "ปิด",
+      "topview.open": "เปิด",
+      "topview.unknown": "—",
+    },
+  };
+
   const DEFAULT_COOLDOWN_S = 3;
   /* How long the temperature stepper waits for the tapping to stop. */
   const TEMP_SETTLE_MS = 1100;
@@ -353,7 +570,8 @@
    * where it sits on the body: pressures beside each wheel, doors on their
    * sills, hood / sunroof / trunk on their panels. */
   const CAR_TOP_SVG = (cls, d) => {
-    const stat = (open) => (open == null ? "—" : open ? "Open" : "Closed");
+    const w = d.words;
+    const stat = (open) => (open == null ? w.unknown : open ? w.open : w.closed);
     const cl = (open) => (open ? "tv-stat open" : "tv-stat");
     return `
     <svg class="cartop ${cls}" viewBox="0 0 400 720" fill="none" aria-hidden="true">
@@ -427,18 +645,18 @@
       <text class="tv-val" x="358" y="612" text-anchor="middle">${d.tires.rr.split(" ")[0]}</text>
       <text class="tv-lab" x="358" y="628" text-anchor="middle">${esc((d.tires.rr.split(" ")[1] || "").toUpperCase())} RR</text>
 
-      <text class="${cl(d.doors.fl)}" x="58" y="311" text-anchor="end">${stat(d.doors.fl)}</text>
-      <text class="${cl(d.doors.rl)}" x="58" y="405" text-anchor="end">${stat(d.doors.rl)}</text>
-      <text class="${cl(d.doors.fr)}" x="342" y="311">${stat(d.doors.fr)}</text>
-      <text class="${cl(d.doors.rr)}" x="342" y="405">${stat(d.doors.rr)}</text>
+      <text class="${cl(d.doors.fl)}" x="58" y="311" text-anchor="end">${esc(stat(d.doors.fl))}</text>
+      <text class="${cl(d.doors.rl)}" x="58" y="405" text-anchor="end">${esc(stat(d.doors.rl))}</text>
+      <text class="${cl(d.doors.fr)}" x="342" y="311">${esc(stat(d.doors.fr))}</text>
+      <text class="${cl(d.doors.rr)}" x="342" y="405">${esc(stat(d.doors.rr))}</text>
 
-      <text class="tv-lab onbody" x="200" y="122" text-anchor="middle">HOOD</text>
-      <text class="${cl(d.hood)} onbody" x="200" y="142" text-anchor="middle">${stat(d.hood)}</text>
+      <text class="tv-lab onbody" x="200" y="122" text-anchor="middle">${esc(w.hood)}</text>
+      <text class="${cl(d.hood)} onbody" x="200" y="142" text-anchor="middle">${esc(stat(d.hood))}</text>
       ${d.sunroof == null ? "" : `
-      <text class="tv-lab onglass" x="200" y="322" text-anchor="middle">SUNROOF</text>
-      <text class="${cl(d.sunroof)} onglass" x="200" y="342" text-anchor="middle">${stat(d.sunroof)}</text>`}
-      <text class="tv-lab onbody" x="200" y="634" text-anchor="middle">${d.bootWord}</text>
-      <text class="${cl(d.trunk)} onbody" x="200" y="654" text-anchor="middle">${stat(d.trunk)}</text>
+      <text class="tv-lab onglass" x="200" y="322" text-anchor="middle">${esc(w.sunroof)}</text>
+      <text class="${cl(d.sunroof)} onglass" x="200" y="342" text-anchor="middle">${esc(stat(d.sunroof))}</text>`}
+      <text class="tv-lab onbody" x="200" y="634" text-anchor="middle">${esc(d.bootWord)}</text>
+      <text class="${cl(d.trunk)} onbody" x="200" y="654" text-anchor="middle">${esc(stat(d.trunk))}</text>
     </svg>`;
   };
 
@@ -927,7 +1145,8 @@
       } catch (err) {
         this.shadowRoot.innerHTML = `<style>${BASE_CSS}</style>
           <div class="shell"><p class="micro">Geely Card</p>
-          <p style="margin-top:8px;font-size:12px">Render failed: ${esc(err && err.message)}</p></div>`;
+          <p style="margin-top:8px;font-size:12px">${esc(this._t("status.render_failed",
+            "Render failed: {error}", { error: err && err.message }))}</p></div>`;
       }
     }
 
@@ -1018,7 +1237,19 @@
           return st.state;
         })
         .join("|") + `|${this._armed || ""}|${this._pendingTemp}`
-        + `|${this._waiting() ? "wait" : ""}`;
+        + `|${this._waiting() ? "wait" : ""}|${this._lang(hass)}`;
+    }
+
+    /* The frontend's own language, resolved the same way for `_signature()`
+     * and `_t()` so the two can never disagree. `_signature()` folds this in
+     * because a language-only change moves no watched entity: without it,
+     * `set hass()` would compare an unchanged signature, skip the render,
+     * and a user who switched languages without a full page reload would
+     * see this card keep showing the old one - the same class of bug as
+     * #12's frozen banner, just triggered by a setting instead of a state. */
+    _lang(hass) {
+      return ((hass && ((hass.locale && hass.locale.language) || hass.language)) || "en")
+        .split("-")[0].toLowerCase();
     }
 
     /* How long to hold the controls after a command, in milliseconds.
@@ -1066,6 +1297,30 @@
         detail: { message: `Geely: ${message}` },
         bubbles: true, composed: true,
       }));
+    }
+
+    /* Every visible label on the card goes through here. `key` looks up
+     * `STR[lang][key]`, where `lang` is the frontend's own language (not
+     * `translations/*.json` - a custom `card` category there is never
+     * fetched into the frontend, so `hass.localize()` cannot see it; see the
+     * note on `STR` above). `fallback` is the English text this card shipped
+     * with before translation existed, and is the last resort when `STR.en`
+     * itself is missing the key (should not happen, but a button must never
+     * go empty just because a dictionary has a gap) - `STR.en` is tried
+     * before it, so a language missing a key still reads in English rather
+     * than falling straight to the coded fallback.
+     *
+     * `subs` is a flat {token: value} map substituted into whichever string
+     * was chosen, `{token}` -> value - the same placeholder style
+     * `translations/*.json` uses elsewhere (`{email}`), so a translator
+     * sees one convention across the integration. */
+    _t(key, fallback, subs) {
+      const dict = STR[this._lang(this._hass)] || STR.en;
+      let out = dict[key];
+      if (out == null) out = STR.en[key];
+      if (out == null) out = fallback;
+      if (subs) for (const k in subs) out = out.split(`{${k}}`).join(subs[k]);
+      return out;
     }
 
     /* One command at a time, with a gap after it.
@@ -1174,7 +1429,8 @@
     _drivingNotice() {
       if (!this._isDriving()) return "";
       return `<div class="driving" role="status">${icon("driving")}
-        <span><b>Driving</b>Remote actions are unavailable until the car is parked</span>
+        <span><b>${esc(this._t("status.driving_title", "Driving"))}</b>${esc(this._t(
+          "status.driving_body", "Remote actions are unavailable until the car is parked"))}</span>
       </div>`;
     }
 
@@ -1276,22 +1532,26 @@
      * on the control itself, not only in the README nobody reads first.
      */
     _bootTitle() {
-      return `Unlocks the ${this._bootWord().toLowerCase()} latch - it does not `
-        + `open the ${this._bootWord().toLowerCase()} electrically. Lift it by hand, `
-        + `or use the key fob, within a few seconds before it re-locks itself.`;
+      const word = this._bootWord().toLowerCase();
+      return this._t("tooltip.trunk_release",
+        "Unlocks the {word} latch - it does not open the {word} electrically. "
+        + "Lift it by hand, or use the key fob, within a few seconds before it re-locks itself.",
+        { word });
     }
 
     /* "Boot" or "Trunk"? Home Assistant's country setting decides, and
      * `boot: true/false` in the card config overrides it. Asked for by an
-     * Australian owner (#14), and it costs nothing: the label is ours. */
+     * Australian owner (#14), and it costs nothing: the label is ours.
+     * `.toUpperCase()` is a no-op on scripts without letter case (Thai,
+     * Arabic, Hebrew), so `caps` only changes anything for a Latin word. */
     _bootWord(caps = false) {
       const cfg = this._config.boot;
       const c = this._hass && this._hass.config && this._hass.config.country;
       const boot = typeof cfg === "boolean"
         ? cfg
         : !!c && BOOT_COUNTRIES.has(String(c).toUpperCase());
-      if (boot) return caps ? "BOOT" : "Boot";
-      return caps ? "TRUNK" : "Trunk";
+      const word = boot ? this._t("boot.boot", "Boot") : this._t("boot.trunk", "Trunk");
+      return caps ? word.toUpperCase() : word;
     }
 
     /* Right-hand-drive? `rhd: true/false` in the card config overrides;
@@ -1371,11 +1631,11 @@
       const schedOn = sched && sched.state === "on";
       return `<div class="crow wrap" style="margin:2px 0 6px">
         ${sw ? `<button class="cbtn ${sw.state === "on" ? "on" : ""}" data-act="charging_sw"
-          title="Start / stop charging">${icon("bolt")}<span>Charging</span></button>` : ""}
+          title="${esc(this._t("tooltip.charging_toggle", "Start / stop charging"))}">${icon("bolt")}<span>${esc(this._t("action.charging", "Charging"))}</span></button>` : ""}
         ${sched ? `<button class="cbtn ${schedOn ? "on" : ""}" data-act="sched_sw"
-          title="Scheduled charging on / off">${icon("charge")}<span>Schedule</span></button>` : ""}
-        ${schedOn ? timeBox("scheduled_charging_start", "Start") : ""}
-        ${schedOn ? timeBox("scheduled_charging_end", "End") : ""}
+          title="${esc(this._t("tooltip.schedule_toggle", "Scheduled charging on / off"))}">${icon("charge")}<span>${esc(this._t("action.schedule", "Schedule"))}</span></button>` : ""}
+        ${schedOn ? timeBox("scheduled_charging_start", this._t("label.start", "Start")) : ""}
+        ${schedOn ? timeBox("scheduled_charging_end", this._t("label.end", "End")) : ""}
       </div>`;
     }
 
@@ -1404,28 +1664,41 @@
         const idx = Math.max(0, opts.indexOf(lvl));
         const frac = opts.length > 1 ? idx / (opts.length - 1)
           : (lvl !== "Off" ? 1 : 0);
+        // `lvl` itself stays the entity's own English option string - it drives
+        // `_onAction`'s cycling logic and must keep matching `opts` exactly.
+        // Only the text shown to the user is translated, and only for the
+        // four levels this integration actually offers; an option this
+        // integration never defined (a future trim, a renamed option) falls
+        // back to showing the raw value rather than guessing at a translation.
+        const lvlWord = this._t(`level.${lvl.toLowerCase()}`, lvl);
         return `<button class="cbtn ${frac > 0 ? "on lvl" : ""}" style="--lvl:${frac}"
             data-act="${key}"
-            title="${esc(mode)} - ${esc(label)}: ${esc(lvl)}">${icon(ic)}<span>${esc(label)}</span>
-            <b>${esc(lvl)}</b></button>`;
+            title="${esc(mode)} - ${esc(label)}: ${esc(lvlWord)}">${icon(ic)}<span>${esc(label)}</span>
+            <b>${esc(lvlWord)}</b></button>`;
       };
       const cover = (suffix, openKey, closeKey, label, ic) => {
         const st = this._st(`cover.${suffix}`);
         if (!st) return "";
         const isOpen = st.state === "open" || st.state === "opening";
+        const openWord = this._t("action.open", "Open");
+        const closeWord = this._t("action.close", "Close");
         return `<div class="cpair ${isOpen ? "on" : ""}">
             ${icon(ic)}<span>${esc(label)}</span>
-            <button class="cmini" data-act="${openKey}" title="Open ${esc(label)}">Open</button>
-            <button class="cmini" data-act="${closeKey}" title="Close ${esc(label)}">Close</button>
+            <button class="cmini" data-act="${openKey}" title="${esc(this._t("tooltip.cover_open", "Open {label}", { label }))}">${esc(openWord)}</button>
+            <button class="cmini" data-act="${closeKey}" title="${esc(this._t("tooltip.cover_close", "Close {label}", { label }))}">${esc(closeWord)}</button>
           </div>`;
       };
       const gclean = this._st("switch.g_clean");
       const pcomfort = this._st("switch.parking_comfort");
       const swheel = this._st("switch.steering_wheel_heat");
-      const heatRow = seat("seat_heat_driver", "Driver", "seatheat", "Seat heat") +
-        seat("seat_heat_passenger", "Passenger", "seatheat", "Seat heat");
-      const ventRow = seat("seat_vent_driver", "Driver", "seatvent", "Seat cooling") +
-        seat("seat_vent_passenger", "Passenger", "seatvent", "Seat cooling");
+      const driverWord = this._t("label.driver", "Driver");
+      const passengerWord = this._t("label.passenger", "Passenger");
+      const seatHeatMode = this._t("label.seat_heat", "Seat heat");
+      const seatCoolMode = this._t("label.seat_cooling", "Seat cooling");
+      const heatRow = seat("seat_heat_driver", driverWord, "seatheat", seatHeatMode) +
+        seat("seat_heat_passenger", passengerWord, "seatheat", seatHeatMode);
+      const ventRow = seat("seat_vent_driver", driverWord, "seatvent", seatCoolMode) +
+        seat("seat_vent_passenger", passengerWord, "seatvent", seatCoolMode);
       /* Parking Comfort keeps the cabin liveable while the car sits, so it belongs
        * beside the cabin-air controls rather than among the one-shot actions.
        *
@@ -1435,32 +1708,34 @@
        * the switch reports unknown and the class never applies. Left as a normal
        * comparison rather than hard-coded off, so a car that does report it would
        * light up correctly; the tooltip covers the ones that do not. */
+      const sunroofWord = this._t("label.sunroof", "Sunroof");
+      const shadeWord = this._t("label.shade", "Shade");
       const airRow = (gclean ? `<button class="cbtn ${gclean.state === "on" ? "on" : ""}"
-            data-act="gclean" title="Fresh air (G-Clean)">${icon("fresh")}<span>Fresh air</span></button>` : "") +
+            data-act="gclean" title="${esc(this._t("tooltip.fresh_air", "Fresh air (G-Clean)"))}">${icon("fresh")}<span>${esc(this._t("label.fresh_air", "Fresh air"))}</span></button>` : "") +
         (pcomfort ? `<button class="cbtn ${pcomfort.state === "on" ? "on" : ""}"
-            data-act="pcomfort" title="${esc(PCOMFORT_HINT)}">${icon("sleep")}<span>Parking comfort</span></button>` : "") +
+            data-act="pcomfort" title="${esc(this._t("tooltip.parking_comfort", PCOMFORT_HINT))}">${icon("sleep")}<span>${esc(this._t("label.parking_comfort", "Parking comfort"))}</span></button>` : "") +
         (swheel ? `<button class="cbtn ${swheel.state === "on" ? "on lvl" : ""}"
             style="--lvl:${swheel.state === "on" ? 1 : 0}"
-            data-act="swheel" title="${esc(SWHEEL_HINT)}">${icon("steering")}<span>Wheel heat</span></button>` : "") +
-        cover("sunroof", "sunroof_open", "sunroof_close", "Sunroof", "roof") +
-        cover("sunshade", "shade_open", "shade_close", "Shade", "shade");
+            data-act="swheel" title="${esc(this._t("tooltip.wheel_heat", SWHEEL_HINT))}">${icon("steering")}<span>${esc(this._t("label.wheel_heat", "Wheel heat"))}</span></button>` : "") +
+        cover("sunroof", "sunroof_open", "sunroof_close", sunroofWord, "roof") +
+        cover("sunshade", "shade_open", "shade_close", shadeWord, "shade");
       return `
         <hr class="hairline">
-        <p class="micro">${icon("climate")} Climate</p>
+        <p class="micro">${icon("climate")} ${esc(this._t("action.climate", "Climate"))}</p>
         <div class="crow wrap temprow">
           <div class="temp ${on ? "on" : ""}">
-            <button class="cstep" data-act="tempdown" title="Cooler">${icon("minus")}</button>
+            <button class="cstep" data-act="tempdown" title="${esc(this._t("tooltip.cooler", "Cooler"))}">${icon("minus")}</button>
             <span class="tval">${isFinite(target) ? String(target).replace(/\.0$/, "") : "—"}°</span>
-            <button class="cstep" data-act="tempup" title="Warmer">${icon("plus")}</button>
+            <button class="cstep" data-act="tempup" title="${esc(this._t("tooltip.warmer", "Warmer"))}">${icon("plus")}</button>
           </div>
           <button class="cbtn ${preset === "Rapid Warming" ? "on" : ""}" data-act="rapidheat"
-            title="${esc(RAPID_HEAT_HINT)}">${icon("heat")}<span>Rapid heat</span></button>
+            title="${esc(this._t("tooltip.rapid_heat", RAPID_HEAT_HINT))}">${icon("heat")}<span>${esc(this._t("action.rapid_heat", "Rapid heat"))}</span></button>
           <button class="cbtn ${preset === "Rapid Cooling" ? "on" : ""}" data-act="rapidcool"
-            title="${esc(RAPID_COOL_HINT)}">${icon("cool")}<span>Rapid cool</span></button>
+            title="${esc(this._t("tooltip.rapid_cool", RAPID_COOL_HINT))}">${icon("cool")}<span>${esc(this._t("action.rapid_cool", "Rapid cool"))}</span></button>
         </div>
-        ${heatRow ? `<p class="micro csub">${icon("seatheat")} Seat heating</p>
+        ${heatRow ? `<p class="micro csub">${icon("seatheat")} ${esc(this._t("section.seat_heating", "Seat heating"))}</p>
         <div class="crow wrap">${heatRow}</div>` : ""}
-        ${ventRow ? `<p class="micro csub">${icon("seatvent")} Seat cooling</p>
+        ${ventRow ? `<p class="micro csub">${icon("seatvent")} ${esc(this._t("section.seat_cooling", "Seat cooling"))}</p>
         <div class="crow wrap">${ventRow}</div>` : ""}
         ${airRow ? `<div class="crow wrap" style="margin-top:10px">${airRow}</div>` : ""}`;
     }
@@ -1504,7 +1779,7 @@
         opts.on ? "on" : "",
         this._armed === key ? "armed" : "",
       ].join(" ").trim();
-      const text = this._armed === key ? "sure?" : label;
+      const text = this._armed === key ? this._t("action.confirm_tap", "sure?") : label;
       return `<button class="${cls}" data-act="${key}" ${opts.disabled ? "disabled" : ""}
                 title="${esc(opts.title || label)}">${icon(ic)}<span>${esc(text)}</span></button>`;
     }
@@ -1661,7 +1936,8 @@
      * full tank is a car that will happily drive you home. */
     _levels(s, batt) {
       if (!s.hybrid || !OK(s.fuelPct)) return `${batt}%`;
-      return `${batt}% · ${Math.round(NUM(s.fuelPct))}% fuel`;
+      return this._t("label.battery_fuel_pct", "{batt}% · {fuel}% fuel",
+        { batt, fuel: Math.round(NUM(s.fuelPct)) });
     }
 
     /* Navigate to where the car is parked, in whichever app the owner has.
@@ -1681,24 +1957,31 @@
       const want = Array.isArray(this._config.nav) ? this._config.nav
         : DEFAULT_NAV;
       const chosen = want
-        .map((k) => NAV_APPS[String(k).toLowerCase()])
-        .filter(Boolean);
+        .map((k) => String(k).toLowerCase())
+        .filter((k) => NAV_APPS[k]);
       if (!chosen.length) return "";
       const mode = this._config.nav_travel
         ? String(this._config.nav_travel).toLowerCase() : "";
-      const link = (app) =>
-        `<a class="cbtn nav" href="${esc(app.url(at, mode))}" target="_blank"
+      // "Maps" (Google Maps) is generic wording on the button, not a brand
+      // name the way "Waze" / "Apple Maps" / "HERE" are - Yossi named it
+      // explicitly alongside Lock/Climate/Odometer as a label needing a key.
+      const link = (key) => {
+        const app = NAV_APPS[key];
+        const label = key === "maps" ? this._t("label.maps", app.label) : app.label;
+        return `<a class="cbtn nav" href="${esc(app.url(at, mode))}" target="_blank"
             rel="noopener noreferrer"
-            title="Navigate to the car with ${esc(app.label)}">${icon("nav")}<span>${esc(app.label)}</span></a>`;
-      return `<p class="micro csub" style="margin-top:12px">${icon("nav")} Navigate to the car</p>
+            title="${esc(this._t("tooltip.navigate_with", "Navigate to the car with {app}", { app: label }))}">${icon("nav")}<span>${esc(label)}</span></a>`;
+      };
+      return `<p class="micro csub" style="margin-top:12px">${icon("nav")} ${esc(this._t("section.navigate", "Navigate to the car"))}</p>
         <div class="crow wrap">${chosen.map(link).join("")}</div>`;
     }
 
     /* What to call the headline number, so it never means two things. */
     _rangeLabel(s) {
-      if (s.rangeKind === "combined") return "Combined range";
-      if (s.rangeKind === "fuel") return "Fuel range";
-      return s.hybrid ? "Electric range" : "Range";
+      if (s.rangeKind === "combined") return this._t("row.combined_range", "Combined range");
+      if (s.rangeKind === "fuel") return this._t("row.fuel_range", "Fuel range");
+      return s.hybrid ? this._t("label.electric_range", "Electric range")
+        : this._t("label.range", "Range");
     }
 
     /* "212 EV · 480 fuel" - the two halves behind a combined figure. Without it
@@ -1707,8 +1990,10 @@
     _rangeSplit(s) {
       if (!s.hybrid) return "";
       const parts = [];
-      if (OK(s.electric)) parts.push(`${Math.round(NUM(s.electric))} EV`);
-      if (OK(s.fuelRange)) parts.push(`${Math.round(NUM(s.fuelRange))} fuel`);
+      if (OK(s.electric)) parts.push(this._t("label.ev_short", "{n} EV",
+        { n: Math.round(NUM(s.electric)) }));
+      if (OK(s.fuelRange)) parts.push(this._t("label.fuel_short", "{n} fuel",
+        { n: Math.round(NUM(s.fuelRange)) }));
       return parts.length > 1 ? parts.join(" · ") : "";
     }
 
@@ -1742,10 +2027,11 @@
 
     _missing() {
       this.shadowRoot.innerHTML = `<style>${BASE_CSS}</style>
-        <div class="shell"><p class="micro">Geely Connect</p>
+        <div class="shell"><p class="micro">${esc(this._t("status.no_vehicle_title", "Geely Connect"))}</p>
         <p style="margin-top:8px;font-size:13px">
-          No Geely vehicle found. Set <code>prefix:</code> to your entity slug,
-          e.g. <code>my_geely_ex5</code> for <code>sensor.my_geely_ex5_battery</code>.
+          ${this._t("status.no_vehicle_body",
+            "No Geely vehicle found. Set <code>prefix:</code> to your entity slug, "
+            + "e.g. <code>my_geely_ex5</code> for <code>sensor.my_geely_ex5_battery</code>.")}
         </p></div>`;
     }
   }
@@ -1789,18 +2075,21 @@
       const showParked = !!this._config.show_parked;
       const battBold = this._config.battery_bold !== false;  // default bold
 
+      const drivingWord = this._t("chip.driving", "Driving");
+      const parkedWord = this._t("chip.parked", "Parked");
+      const chargingWord = this._t("action.charging", "Charging");
       const chips = [
         // First, and only while it is true: the compact card falls back to a
         // "Parked" chip when nothing else applies, which on a moving car was the
         // same contradiction as #25 on its bigger siblings.
-        driving && `<span class="chip warn">Driving</span>`,
-        showParked && !driving && `<span class="chip">Parked</span>`,
+        driving && `<span class="chip warn">${esc(drivingWord)}</span>`,
+        showParked && !driving && `<span class="chip">${esc(parkedWord)}</span>`,
         s.locked && `<span class="chip ${s.locked.state === "locked" ? "" : "warn"}">
-            ${s.locked.state === "locked" ? "Locked" : "Unlocked"}</span>`,
-        s.charging && `<span class="chip on">${iconFilled("bolt")} ${power != null ? power.toFixed(1) + " kW" : "Charging"}</span>`,
-        !s.charging && s.conn && s.conn.state === "Plugged in" && `<span class="chip">Plugged in</span>`,
-        climateOn && `<span class="chip on">Climate on</span>`,
-        s.doorsOpen.length > 0 && `<span class="chip warn">${s.doorsOpen.length} open</span>`,
+            ${esc(s.locked.state === "locked" ? this._t("chip.locked", "Locked") : this._t("chip.unlocked", "Unlocked"))}</span>`,
+        s.charging && `<span class="chip on">${iconFilled("bolt")} ${power != null ? power.toFixed(1) + " kW" : esc(chargingWord)}</span>`,
+        !s.charging && s.conn && s.conn.state === "Plugged in" && `<span class="chip">${esc(this._t("chip.plugged_in", "Plugged in"))}</span>`,
+        climateOn && `<span class="chip on">${esc(this._t("chip.climate_on", "Climate on"))}</span>`,
+        s.doorsOpen.length > 0 && `<span class="chip warn">${esc(this._t("chip.n_open", "{count} open", { count: s.doorsOpen.length }))}</span>`,
       ].filter(Boolean).join("");
 
       this.shadowRoot.innerHTML = `<style>${BASE_CSS}
@@ -1823,7 +2112,7 @@
             </div>
             <span class="micro">${[
               battSize ? "" : this._levels(s, batt),
-              (battSize || inTemp == null) ? "" : Math.round(inTemp) + "° in",
+              (battSize || inTemp == null) ? "" : this._t("label.temp_in", "{temp}° in", { temp: Math.round(inTemp) }),
             ].filter(Boolean).join(" · ")}</span>
           </div>
           <div class="hero">
@@ -1834,16 +2123,16 @@
               ${split ? `<div class="micro sub">${esc(split)}</div>` : ""}
             </div>
             <div class="carwrap expandable" role="button" tabindex="0"
-                 title="Open the full card">${this._carBody(s.charging ? "charging" : "")}</div>
+                 title="${esc(this._t("tooltip.open_the_full_card", "Open the full card"))}">${this._carBody(s.charging ? "charging" : "")}</div>
           </div>
           <div style="margin:2px 0 10px">${this._bars(s)}</div>
-          <div class="chips" style="margin-bottom:12px">${chips || `<span class="chip">${driving ? "Driving" : "Parked"}</span>`}</div>
+          <div class="chips" style="margin-bottom:12px">${chips || `<span class="chip">${driving ? esc(drivingWord) : esc(parkedWord)}</span>`}</div>
           <div class="actions">
-            ${this._actBtn("lock", "Lock", "lock", { on: s.locked && s.locked.state === "locked" })}
-            ${this._actBtn("unlock", "Unlock", "unlock")}
-            ${this._actBtn("rapidheat", "Rapid heat", "heat", { title: RAPID_HEAT_HINT, on: this._preset() === "Rapid Warming" })}
-            ${this._actBtn("rapidcool", "Rapid cool", "cool", { title: RAPID_COOL_HINT, on: this._preset() === "Rapid Cooling" })}
-            ${this._actBtn("defrost", "Defrost", "defrost", { on: defrost && defrost.state === "on" })}
+            ${this._actBtn("lock", this._t("action.lock", "Lock"), "lock", { on: s.locked && s.locked.state === "locked" })}
+            ${this._actBtn("unlock", this._t("action.unlock", "Unlock"), "unlock")}
+            ${this._actBtn("rapidheat", this._t("action.rapid_heat", "Rapid heat"), "heat", { title: this._t("tooltip.rapid_heat", RAPID_HEAT_HINT), on: this._preset() === "Rapid Warming" })}
+            ${this._actBtn("rapidcool", this._t("action.rapid_cool", "Rapid cool"), "cool", { title: this._t("tooltip.rapid_cool", RAPID_COOL_HINT), on: this._preset() === "Rapid Cooling" })}
+            ${this._actBtn("defrost", this._t("action.defrost", "Defrost"), "defrost", { on: defrost && defrost.state === "on" })}
             ${this._actBtn("trunk", this._bootWord(), "trunk", { title: this._bootTitle() })}
           </div>
         </div>`;
@@ -1917,11 +2206,16 @@
       // field read 0 for twenty-five minutes of a drive. The speed is still
       // shown when the car actually reports one.
       const statusLine = s.charging
-        ? `Charging${OK(power) ? " · " + this._fmt(power) : ""}`
+        ? this._t("status.charging_line", "Charging{power}",
+            { power: OK(power) ? " · " + this._fmt(power) : "" })
         : driving
-        ? `Driving${speed != null && speed > 0 ? ` · ${Math.round(speed)} ${esc(speedUnit)}` : ""}`
-        : s.doorsOpen.length ? `${s.doorsOpen.length} opening${s.doorsOpen.length > 1 ? "s" : ""} open`
-        : s.locked && s.locked.state === "locked" ? "Parked · Locked" : "Parked";
+        ? this._t("status.driving_line", "Driving{speed}",
+            { speed: speed != null && speed > 0 ? ` · ${Math.round(speed)} ${esc(speedUnit)}` : "" })
+        : s.doorsOpen.length ? this._t("status.n_openings_open",
+            "{count} opening{plural} open",
+            { count: s.doorsOpen.length, plural: s.doorsOpen.length > 1 ? "s" : "" })
+        : s.locked && s.locked.state === "locked" ? this._t("status.parked_locked", "Parked · Locked")
+        : this._t("chip.parked", "Parked");
 
       const sched = schedA && schedB && OK(schedA) && OK(schedB)
         ? `${schedA.state.slice(0, 5)}–${schedB.state.slice(0, 5)}${schedOn && schedOn.state === "on" ? "" : " (off)"}`
@@ -1988,7 +2282,7 @@
             </div>
             <div class="side">
               ${OK(interior) ? `<div class="num">${Math.round(NUM(interior))}°</div>
-                <div class="u2">inside${OK(exterior) ? ` · ${Math.round(NUM(exterior))}° out` : ""}</div>` : ""}
+                <div class="u2">${esc(this._t("label.inside", "inside"))}${OK(exterior) ? ` · ${esc(this._t("label.temp_out", "{temp}° out", { temp: Math.round(NUM(exterior)) }))}` : ""}</div>` : ""}
             </div>
           </div>
           ${this._bars(s)}
@@ -1996,25 +2290,25 @@
           <div class="carwrap">${this._carBody(s.charging ? "charging" : "")}</div>
 
           <div class="actions" style="margin-top:8px">
-            ${this._actBtn("lock", "Lock", "lock", { on: s.locked && s.locked.state === "locked" })}
-            ${this._actBtn("unlock", "Unlock", "unlock")}
-            ${this._actBtn("climate", "Climate", "climate", { on: climateOn })}
-            ${this._actBtn("defrost", "Defrost", "defrost", { on: defrost && defrost.state === "on" })}
-            ${this._actBtn("vent", "Vent", "vent", { on: vent && vent.state === "on" })}
+            ${this._actBtn("lock", this._t("action.lock", "Lock"), "lock", { on: s.locked && s.locked.state === "locked" })}
+            ${this._actBtn("unlock", this._t("action.unlock", "Unlock"), "unlock")}
+            ${this._actBtn("climate", this._t("action.climate", "Climate"), "climate", { on: climateOn })}
+            ${this._actBtn("defrost", this._t("action.defrost", "Defrost"), "defrost", { on: defrost && defrost.state === "on" })}
+            ${this._actBtn("vent", this._t("action.vent", "Vent"), "vent", { on: vent && vent.state === "on" })}
             ${this._actBtn("trunk", this._bootWord(), "trunk", { title: this._bootTitle() })}
-            ${this._actBtn("find", "Find", "find")}
-            ${this._actBtn("refresh", "Sync", "refresh")}
+            ${this._actBtn("find", this._t("action.find", "Find"), "find")}
+            ${this._actBtn("refresh", this._t("action.sync", "Sync"), "refresh")}
           </div>
           ${this._navRow()}
           ${this._climatePanel()}
 
           <hr class="hairline">
-          <p class="micro">${icon("charge")} Charging</p>
+          <p class="micro">${icon("charge")} ${esc(this._t("section.charging", "Charging"))}</p>
           ${this._chargingControls()}
           <div class="grid sec">
-            ${this._row("Charger", s.conn)}
-            ${this._row("Power", power, { accent: s.charging })}
-            ${this._row("Time to full", this._st("sensor.time_to_full_charge"), {
+            ${this._row(this._t("row.charger", "Charger"), s.conn)}
+            ${this._row(this._t("row.power", "Power"), power, { accent: s.charging })}
+            ${this._row(this._t("row.time_to_full", "Time to full"), this._st("sensor.time_to_full_charge"), {
               // charge_time_format: "min" (default, e.g. "249 min") or "hm"
               // (e.g. "4h 9m"). The car reports minutes; "hm" just reshapes it.
               value: (() => {
@@ -2029,36 +2323,36 @@
                 }
                 return this._fmt(st);
               })() })}
-            ${this._row("Complete at", this._st("sensor.charge_complete"), {
+            ${this._row(this._t("row.complete_at", "Complete at"), this._st("sensor.charge_complete"), {
               value: (() => { const st = this._st("sensor.charge_complete");
                 if (!OK(st)) return "—";
                 const d = new Date(st.state);
                 return isNaN(d) ? st.state : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
               })() })}
-            ${this._row("Range at 100%", this._st("sensor.range_at_full_charge"))}
-            ${sched ? this._row("Schedule", null, { value: sched }) : ""}
-            ${this._row("Pack power", this._st("sensor.pack_power"))}
+            ${this._row(this._t("row.range_at_full", "Range at 100%"), this._st("sensor.range_at_full_charge"))}
+            ${sched ? this._row(this._t("row.schedule", "Schedule"), null, { value: sched }) : ""}
+            ${this._row(this._t("row.pack_power", "Pack power"), this._st("sensor.pack_power"))}
           </div>
 
           ${s.hybrid ? `
           <hr class="hairline">
-          <p class="micro">${icon("fuel")} Fuel</p>
+          <p class="micro">${icon("fuel")} ${esc(this._t("section.fuel", "Fuel"))}</p>
           <div class="grid sec">
-            ${this._row("Fuel level", this._st("sensor.fuel_level"))}
-            ${this._row("Fuel range", fuelRange)}
+            ${this._row(this._t("row.fuel_level", "Fuel level"), this._st("sensor.fuel_level"))}
+            ${this._row(this._t("row.fuel_range", "Fuel range"), fuelRange)}
             ${/* The headline already IS the combined figure whenever the car
                   reports one, so repeating it here wastes the row. On a trim
                   that only reports the two halves it is worth showing. */""}
             ${s.rangeKind === "combined" ? "" :
-              this._row("Combined range", combined, { accent: true })}
+              this._row(this._t("row.combined_range", "Combined range"), combined, { accent: true })}
             ${/* Only a car with an engine has an engine to report, and whether
                   it is running is the fact a hybrid owner cannot get anywhere
                   else on these cards. */""}
-            ${this._row("Engine", this._st("sensor.engine_state"))}
+            ${this._row(this._t("row.engine", "Engine"), this._st("sensor.engine_state"))}
           </div>` : ""}
 
           <hr class="hairline">
-          <p class="micro">${icon("tire")} Tires</p>
+          <p class="micro">${icon("tire")} ${esc(this._t("section.tires", "Tires"))}</p>
           <div class="tires" style="margin-top:8px">
             <div class="t"><b>${tire("front_left")}</b><div class="micro">FL</div></div>
             <div class="t"><b>${tire("front_right")}</b><div class="micro">FR</div></div>
@@ -2067,14 +2361,14 @@
           </div>
 
           <hr class="hairline">
-          <p class="micro">${icon("trip")} Trip &amp; health</p>
+          <p class="micro">${icon("trip")} ${esc(this._t("section.trip_health", "Trip & health"))}</p>
           <div class="grid sec">
-            ${this._row("Odometer", this._st("sensor.total_mileage"))}
-            ${this._row("Trip meter", this._st("sensor.trip_meter"))}
-            ${this._row("Lifetime avg", this._st("sensor.average_consumption"), { title: LIFETIME_HINT })}
-            ${this._row("Efficiency", this._st("sensor.efficiency"))}
-            ${this._row("12 V battery", this._st("sensor.12v_battery"))}
-            ${this._row("Service in", days, {
+            ${this._row(this._t("row.odometer", "Odometer"), this._st("sensor.total_mileage"))}
+            ${this._row(this._t("row.trip_meter", "Trip meter"), this._st("sensor.trip_meter"))}
+            ${this._row(this._t("row.lifetime_avg", "Lifetime avg"), this._st("sensor.average_consumption"), { title: this._t("tooltip.lifetime_avg", LIFETIME_HINT) })}
+            ${this._row(this._t("row.efficiency", "Efficiency"), this._st("sensor.efficiency"))}
+            ${this._row(this._t("row.battery_12v", "12 V battery"), this._st("sensor.12v_battery"))}
+            ${this._row(this._t("row.service_in", "Service in"), days, {
               warn: OK(days) && NUM(days) != null && NUM(days) <= 30,
               value: OK(days) ? `${this._fmt(days)} / ${OK(this._st("sensor.distance_to_service"))
                 ? this._fmt(this._st("sensor.distance_to_service")) : "—"}` : "—" })}
@@ -2085,7 +2379,8 @@
             <span class="micro">${(() => { const st = this._st("sensor.last_updated");
               if (!OK(st)) return "";
               const d = new Date(st.state);
-              return isNaN(d) ? "" : "Synced " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+              return isNaN(d) ? "" : this._t("label.synced", "Synced {time}",
+                { time: d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) });
             })()}</span>
           </div>
         </div>`;
@@ -2172,11 +2467,14 @@
       // buttons beside it are greyed out either way.
       const driving = this._isDriving();
       const statusLine = driving
-        ? "Driving · actions locked"
+        ? this._t("status.driving_locked", "Driving · actions locked")
         : s.charging
-        ? `Charging${power != null ? " · " + power.toFixed(1) + " kW" : ""}`
-        : s.doorsOpen.length ? `${s.doorsOpen.length} open`
-        : locked ? "Locked" : s.locked ? "Unlocked" : "Parked";
+        ? this._t("status.charging_line", "Charging{power}",
+            { power: power != null ? " · " + power.toFixed(1) + " kW" : "" })
+        : s.doorsOpen.length ? this._t("chip.n_open", "{count} open", { count: s.doorsOpen.length })
+        : locked ? this._t("chip.locked", "Locked")
+        : s.locked ? this._t("chip.unlocked", "Unlocked")
+        : this._t("chip.parked", "Parked");
 
       this.shadowRoot.innerHTML = `<style>${BASE_CSS}
         .shell { padding: 12px 16px 10px; }
@@ -2212,12 +2510,12 @@
             </div>
             <div class="actions">
               ${locked
-                ? this._actBtn("unlock", "Unlock", "unlock")
-                : this._actBtn("lock", "Lock", "lock")}
-              ${this._actBtn("rapidheat", "Rapid heat", "heat", { title: RAPID_HEAT_HINT, on: this._preset() === "Rapid Warming" })}
-              ${this._actBtn("rapidcool", "Rapid cool", "cool", { title: RAPID_COOL_HINT, on: this._preset() === "Rapid Cooling" })}
+                ? this._actBtn("unlock", this._t("action.unlock", "Unlock"), "unlock")
+                : this._actBtn("lock", this._t("action.lock", "Lock"), "lock")}
+              ${this._actBtn("rapidheat", this._t("action.rapid_heat", "Rapid heat"), "heat", { title: this._t("tooltip.rapid_heat", RAPID_HEAT_HINT), on: this._preset() === "Rapid Warming" })}
+              ${this._actBtn("rapidcool", this._t("action.rapid_cool", "Rapid cool"), "cool", { title: this._t("tooltip.rapid_cool", RAPID_COOL_HINT), on: this._preset() === "Rapid Cooling" })}
               ${this._actBtn("trunk", this._bootWord(), "trunk", { title: this._bootTitle() })}
-              ${this._actBtn("find", "Find", "find")}
+              ${this._actBtn("find", this._t("action.find", "Find"), "find")}
             </div>
           </div>
           ${this._bars(s)}
@@ -2264,11 +2562,14 @@
       // buttons beside it are greyed out either way.
       const driving = this._isDriving();
       const statusLine = driving
-        ? "Driving · actions locked"
+        ? this._t("status.driving_locked", "Driving · actions locked")
         : s.charging
-        ? `Charging${power != null ? " · " + power.toFixed(1) + " kW" : ""}`
-        : s.doorsOpen.length ? `${s.doorsOpen.length} open`
-        : locked ? "Locked" : s.locked ? "Unlocked" : "Parked";
+        ? this._t("status.charging_line", "Charging{power}",
+            { power: power != null ? " · " + power.toFixed(1) + " kW" : "" })
+        : s.doorsOpen.length ? this._t("chip.n_open", "{count} open", { count: s.doorsOpen.length })
+        : locked ? this._t("chip.locked", "Locked")
+        : s.locked ? this._t("chip.unlocked", "Unlocked")
+        : this._t("chip.parked", "Parked");
 
       this.shadowRoot.innerHTML = `<style>${BASE_CSS}
         .shell { padding: 14px 16px 12px; }
@@ -2299,7 +2600,7 @@
             </div>
             <span class="temp">${[
               s.battery == null ? "" : Math.round(s.battery) + "%",
-              temp == null ? "" : Math.round(temp) + "° in",
+              temp == null ? "" : this._t("label.temp_in", "{temp}° in", { temp: Math.round(temp) }),
             ].filter(Boolean).join(" · ")}</span>
           </div>
           <div class="mid">
@@ -2308,10 +2609,10 @@
           </div>
           <div class="actions">
             ${locked
-              ? this._actBtn("unlock", "Unlock", "unlock")
-              : this._actBtn("lock", "Lock", "lock")}
-            ${this._actBtn("rapidheat", "Rapid heat", "heat", { title: RAPID_HEAT_HINT, on: preset === "Rapid Warming" })}
-            ${this._actBtn("rapidcool", "Rapid cool", "cool", { title: RAPID_COOL_HINT, on: preset === "Rapid Cooling" })}
+              ? this._actBtn("unlock", this._t("action.unlock", "Unlock"), "unlock")
+              : this._actBtn("lock", this._t("action.lock", "Lock"), "lock")}
+            ${this._actBtn("rapidheat", this._t("action.rapid_heat", "Rapid heat"), "heat", { title: this._t("tooltip.rapid_heat", RAPID_HEAT_HINT), on: preset === "Rapid Warming" })}
+            ${this._actBtn("rapidcool", this._t("action.rapid_cool", "Rapid cool"), "cool", { title: this._t("tooltip.rapid_cool", RAPID_COOL_HINT), on: preset === "Rapid Cooling" })}
           </div>
         </div>`;
       this._wire();
@@ -2386,11 +2687,16 @@
       // field read 0 for twenty-five minutes of a drive. The speed is still
       // shown when the car actually reports one.
       const statusLine = s.charging
-        ? `Charging${OK(power) ? " · " + this._fmt(power) : ""}`
+        ? this._t("status.charging_line", "Charging{power}",
+            { power: OK(power) ? " · " + this._fmt(power) : "" })
         : driving
-        ? `Driving${speed != null && speed > 0 ? ` · ${Math.round(speed)} ${esc(speedUnit)}` : ""}`
-        : s.doorsOpen.length ? `${s.doorsOpen.length} opening${s.doorsOpen.length > 1 ? "s" : ""} open`
-        : s.locked && s.locked.state === "locked" ? "Parked · Locked" : "Parked";
+        ? this._t("status.driving_line", "Driving{speed}",
+            { speed: speed != null && speed > 0 ? ` · ${Math.round(speed)} ${esc(speedUnit)}` : "" })
+        : s.doorsOpen.length ? this._t("status.n_openings_open",
+            "{count} opening{plural} open",
+            { count: s.doorsOpen.length, plural: s.doorsOpen.length > 1 ? "s" : "" })
+        : s.locked && s.locked.state === "locked" ? this._t("status.parked_locked", "Parked · Locked")
+        : this._t("chip.parked", "Parked");
       const sched = schedA && schedB && OK(schedA) && OK(schedB)
         ? `${schedA.state.slice(0, 5)}–${schedB.state.slice(0, 5)}${schedOn && schedOn.state === "on" ? "" : " (off)"}`
         : null;
@@ -2416,6 +2722,13 @@
         trunk: isOpen("trunk"),
         bootWord: this._bootWord(true),
         sunroof: sunroofSt ? sunroofSt.state !== "closed" : null,
+        words: {
+          hood: this._t("label.hood", "Hood").toUpperCase(),
+          sunroof: this._t("label.sunroof", "Sunroof").toUpperCase(),
+          open: this._t("topview.open", "Open"),
+          closed: this._t("topview.closed", "Closed"),
+          unknown: this._t("topview.unknown", "—"),
+        },
       };
 
       this.shadowRoot.innerHTML = `<style>${BASE_CSS}
@@ -2473,20 +2786,20 @@
             </div>
             <div class="side">
               ${OK(interior) ? `<div class="num">${Math.round(NUM(interior))}°</div>
-                <div class="u2">inside${OK(exterior) ? ` · ${Math.round(NUM(exterior))}° out` : ""}</div>` : ""}
+                <div class="u2">${esc(this._t("label.inside", "inside"))}${OK(exterior) ? ` · ${esc(this._t("label.temp_out", "{temp}° out", { temp: Math.round(NUM(exterior)) }))}` : ""}</div>` : ""}
             </div>
           </div>
           ${this._bars(s)}
 
           <div class="actions">
-            ${this._actBtn("lock", "Lock", "lock", { on: s.locked && s.locked.state === "locked" })}
-            ${this._actBtn("unlock", "Unlock", "unlock")}
-            ${this._actBtn("climate", "Climate", "climate", { on: climateOn })}
-            ${this._actBtn("defrost", "Defrost", "defrost", { on: defrost && defrost.state === "on" })}
-            ${this._actBtn("vent", "Vent", "vent", { on: vent && vent.state === "on" })}
+            ${this._actBtn("lock", this._t("action.lock", "Lock"), "lock", { on: s.locked && s.locked.state === "locked" })}
+            ${this._actBtn("unlock", this._t("action.unlock", "Unlock"), "unlock")}
+            ${this._actBtn("climate", this._t("action.climate", "Climate"), "climate", { on: climateOn })}
+            ${this._actBtn("defrost", this._t("action.defrost", "Defrost"), "defrost", { on: defrost && defrost.state === "on" })}
+            ${this._actBtn("vent", this._t("action.vent", "Vent"), "vent", { on: vent && vent.state === "on" })}
             ${this._actBtn("trunk", this._bootWord(), "trunk", { title: this._bootTitle() })}
-            ${this._actBtn("find", "Find", "find")}
-            ${this._actBtn("refresh", "Sync", "refresh")}
+            ${this._actBtn("find", this._t("action.find", "Find"), "find")}
+            ${this._actBtn("refresh", this._t("action.sync", "Sync"), "refresh")}
           </div>
 
           <div class="carwrap">${CAR_TOP_SVG(s.charging ? "charging" : "", d)}</div>
@@ -2494,12 +2807,12 @@
           ${this._climatePanel()}
 
           <hr class="hairline">
-          <p class="micro">${icon("charge")} Charging</p>
+          <p class="micro">${icon("charge")} ${esc(this._t("section.charging", "Charging"))}</p>
           ${this._chargingControls()}
           <div class="grid sec">
-            ${this._row("Charger", s.conn)}
-            ${this._row("Power", power, { accent: s.charging })}
-            ${this._row("Time to full", this._st("sensor.time_to_full_charge"), {
+            ${this._row(this._t("row.charger", "Charger"), s.conn)}
+            ${this._row(this._t("row.power", "Power"), power, { accent: s.charging })}
+            ${this._row(this._t("row.time_to_full", "Time to full"), this._st("sensor.time_to_full_charge"), {
               // charge_time_format: "min" (default, e.g. "249 min") or "hm"
               // (e.g. "4h 9m"). The car reports minutes; "hm" just reshapes it.
               value: (() => {
@@ -2514,43 +2827,43 @@
                 }
                 return this._fmt(st);
               })() })}
-            ${this._row("Complete at", this._st("sensor.charge_complete"), {
+            ${this._row(this._t("row.complete_at", "Complete at"), this._st("sensor.charge_complete"), {
               value: (() => { const st = this._st("sensor.charge_complete");
                 if (!OK(st)) return "—";
                 const dte = new Date(st.state);
                 return isNaN(dte) ? st.state : dte.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
               })() })}
-            ${this._row("Range at 100%", this._st("sensor.range_at_full_charge"))}
-            ${sched ? this._row("Schedule", null, { value: sched }) : ""}
-            ${this._row("Pack power", this._st("sensor.pack_power"))}
+            ${this._row(this._t("row.range_at_full", "Range at 100%"), this._st("sensor.range_at_full_charge"))}
+            ${sched ? this._row(this._t("row.schedule", "Schedule"), null, { value: sched }) : ""}
+            ${this._row(this._t("row.pack_power", "Pack power"), this._st("sensor.pack_power"))}
           </div>
 
           ${s.hybrid ? `
           <hr class="hairline">
-          <p class="micro">${icon("fuel")} Fuel</p>
+          <p class="micro">${icon("fuel")} ${esc(this._t("section.fuel", "Fuel"))}</p>
           <div class="grid sec">
-            ${this._row("Fuel level", this._st("sensor.fuel_level"))}
-            ${this._row("Fuel range", fuelRange)}
+            ${this._row(this._t("row.fuel_level", "Fuel level"), this._st("sensor.fuel_level"))}
+            ${this._row(this._t("row.fuel_range", "Fuel range"), fuelRange)}
             ${/* The headline already IS the combined figure whenever the car
                   reports one, so repeating it here wastes the row. On a trim
                   that only reports the two halves it is worth showing. */""}
             ${s.rangeKind === "combined" ? "" :
-              this._row("Combined range", combined, { accent: true })}
+              this._row(this._t("row.combined_range", "Combined range"), combined, { accent: true })}
             ${/* Only a car with an engine has an engine to report, and whether
                   it is running is the fact a hybrid owner cannot get anywhere
                   else on these cards. */""}
-            ${this._row("Engine", this._st("sensor.engine_state"))}
+            ${this._row(this._t("row.engine", "Engine"), this._st("sensor.engine_state"))}
           </div>` : ""}
 
           <hr class="hairline">
-          <p class="micro">${icon("trip")} Trip &amp; health</p>
+          <p class="micro">${icon("trip")} ${esc(this._t("section.trip_health", "Trip & health"))}</p>
           <div class="grid sec">
-            ${this._row("Odometer", this._st("sensor.total_mileage"))}
-            ${this._row("Trip meter", this._st("sensor.trip_meter"))}
-            ${this._row("Lifetime avg", this._st("sensor.average_consumption"), { title: LIFETIME_HINT })}
-            ${this._row("Efficiency", this._st("sensor.efficiency"))}
-            ${this._row("12 V battery", this._st("sensor.12v_battery"))}
-            ${this._row("Service in", days, {
+            ${this._row(this._t("row.odometer", "Odometer"), this._st("sensor.total_mileage"))}
+            ${this._row(this._t("row.trip_meter", "Trip meter"), this._st("sensor.trip_meter"))}
+            ${this._row(this._t("row.lifetime_avg", "Lifetime avg"), this._st("sensor.average_consumption"), { title: this._t("tooltip.lifetime_avg", LIFETIME_HINT) })}
+            ${this._row(this._t("row.efficiency", "Efficiency"), this._st("sensor.efficiency"))}
+            ${this._row(this._t("row.battery_12v", "12 V battery"), this._st("sensor.12v_battery"))}
+            ${this._row(this._t("row.service_in", "Service in"), days, {
               warn: OK(days) && NUM(days) != null && NUM(days) <= 30,
               value: OK(days) ? `${this._fmt(days)} / ${OK(this._st("sensor.distance_to_service"))
                 ? this._fmt(this._st("sensor.distance_to_service")) : "—"}` : "—" })}
@@ -2561,7 +2874,8 @@
             <span class="micro">${(() => { const st = this._st("sensor.last_updated");
               if (!OK(st)) return "";
               const dte = new Date(st.state);
-              return isNaN(dte) ? "" : "Synced " + dte.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+              return isNaN(dte) ? "" : this._t("label.synced", "Synced {time}",
+                { time: dte.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) });
             })()}</span>
           </div>
         </div>`;
