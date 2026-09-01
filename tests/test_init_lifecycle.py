@@ -1005,3 +1005,95 @@ def test_a_probe_without_a_coordinator_still_sends_the_command():
             AssertionError("must not be called without a coordinator"))):
         run()
     assert any(c[0] == "control" for c in api.calls)
+
+
+# ------------------------------------------------ when to wake the car ---
+# The position wake reaches the car itself and costs 12 V charge, so it fires
+# when the fix we hold could be wrong - not on a timer. The odometer is what
+# makes that knowable without asking: strictly increasing, in every payload.
+
+def _snap(speed, odo):
+    return {"code": 1000, "data": {"vehicleStatus": {
+        "basicVehicleStatus": {"speed": speed},
+        "additionalVehicleStatus": {
+            "electricVehicleStatus": {"statusOfChargerConnection": "0",
+                                      "chargeLevel": "80"},
+            "maintenanceStatus": {"odometer": odo}}}}}
+
+
+def _wakes(api):
+    return api.calls.count("position")
+
+
+def test_a_parked_car_is_not_woken_to_re_ask_where_it_is():
+    """The change this replaces woke a car every Nth poll while parked - about
+    every ninety minutes on Normal, for a fortnight at an airport. An odometer
+    that has not moved is the car already saying it is where it was."""
+    m = _mod()
+    _, _, _, api, coord, _ = _setup(m)
+    api.status_results = [_snap("0", "2174") for _ in range(6)]
+    for _ in range(6):
+        asyncio.run(coord.refresh())
+    before = _wakes(api)
+    api.status_results = [_snap("0", "2174") for _ in range(10)]
+    for _ in range(10):
+        asyncio.run(coord.refresh())
+    assert _wakes(api) == before, "a stationary car was woken again"
+
+
+def test_the_last_fix_of_a_drive_is_taken_once_the_car_has_parked():
+    """Where the car is parked is the reading an owner actually wants, and it
+    only exists after the car stops. `was_driving` reads the PREVIOUS snapshot,
+    so the first parked cycle still sees driving and takes that final fix."""
+    m = _mod()
+    _, _, _, api, coord, _ = _setup(m)
+    api.status_results = [_snap("0", "2174"), _snap("0", "2174")]
+    for _ in range(2):
+        asyncio.run(coord.refresh())
+    quiet = _wakes(api)
+
+    api.status_results = [_snap("60", "2180"), _snap("55", "2186")]
+    for _ in range(2):
+        asyncio.run(coord.refresh())
+    assert _wakes(api) > quiet, "the map must follow a moving car"
+
+    driving = _wakes(api)
+    api.status_results = [_snap("0", "2192")]
+    asyncio.run(coord.refresh())
+    assert _wakes(api) == driving + 1, "no final fix once the car parked"
+
+    parked = _wakes(api)
+    api.status_results = [_snap("0", "2192") for _ in range(5)]
+    for _ in range(5):
+        asyncio.run(coord.refresh())
+    assert _wakes(api) == parked, "it kept waking a car that had already parked"
+
+
+def test_a_trip_this_integration_never_saw_still_refreshes_the_fix():
+    """A drive can begin and end inside one parked back-off window - fifteen
+    minutes on Normal - leaving speed at zero on both sides of it. The odometer
+    is the only evidence left that the fix we hold is somewhere else."""
+    m = _mod()
+    _, _, _, api, coord, _ = _setup(m)
+    api.status_results = [_snap("0", "2174") for _ in range(4)]
+    for _ in range(4):
+        asyncio.run(coord.refresh())
+    settled = _wakes(api)
+
+    api.status_results = [_snap("0", "2192"), _snap("0", "2192")]
+    for _ in range(2):
+        asyncio.run(coord.refresh())
+    assert _wakes(api) > settled, "an unobserved trip left a stale position"
+
+
+def test_a_car_with_no_readable_odometer_keeps_the_old_cadence():
+    """Nothing is proven without an odometer, so the timer stands exactly as it
+    did - this change must not cost any car its coverage."""
+    m = _mod()
+    _, _, _, api, coord, _ = _setup(m)
+    api.status_results = [_snap("0", None) for _ in range(12)]
+    for _ in range(12):
+        asyncio.run(coord.refresh())
+    profile_n = 6      # POLL_PROFILES["normal"]["position_every"]
+    assert _wakes(api) >= 12 // profile_n, "the fallback timer stopped firing"
+

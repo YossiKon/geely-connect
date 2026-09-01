@@ -264,6 +264,23 @@ _ENGINE_RUNNING = frozenset({"engine_running", "running", "on", "1", "true"})
 _STUCK_POLLS = 10
 
 
+def _odometer(d: dict) -> float | None:
+    """The car's cumulative distance, used as proof that it has moved.
+
+    Strictly increasing and present in every payload, which makes it the one
+    field that can answer "is the position we hold still where the car is?"
+    without asking the car - and asking the car costs a wake.
+    """
+    if not isinstance(d, dict):
+        return None
+    add = (d.get("vehicleStatus") or {}).get("additionalVehicleStatus") or {}
+    raw = (add.get("maintenanceStatus") or {}).get("odometer")
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
 def _poll_flags(d: dict) -> tuple[bool, bool]:
     """(charging, driving) from a status dict, tolerant of missing fields."""
     if not isinstance(d, dict):
@@ -468,7 +485,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _FAILURE_TOLERANCE = 2
     fail_state = {"consecutive": 0}
     # Efficient-polling state: cycle counter, idle streak, last-change signature.
-    poll_state = {"cycle": 0, "idle": 0, "sig": None}
+    poll_state = {"cycle": 0, "idle": 0, "sig": None, "fix_odo": None}
     # Chosen polling profile (Eco / Normal / Live) from setup.
     profile = POLL_PROFILES.get(
         # Options win over data: the polling mode can be changed after setup.
@@ -490,14 +507,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         prev = prev if isinstance(prev, dict) else {}
         was_charging, was_driving = _poll_flags(prev)
 
-        # Position wake (PAI) is expensive and actually wakes the car, so we do
-        # NOT fire it every cycle. Only while driving, once every Nth cycle
-        # when parked - or when the user pressed Refresh Data, whose contract
-        # is "everything, now". That last leg matters most in Super Eco, where
-        # the parked cadence is one wake in days and a manual pull is the
-        # advertised way to get a fresh fix on demand.
+        # Position wake (PAI) reaches the car and spends its 12 V, so it fires
+        # only when the fix we hold could be wrong: while driving (the map
+        # follows the car), on the first poll after a drive ends (`was_driving`
+        # reads the PREVIOUS snapshot, so parking still takes one last fix -
+        # where the car is parked is the reading an owner wants), when the
+        # odometer has moved since the last fix (a trip that began and ended
+        # inside one parked back-off window, speed zero on both sides), or on
+        # Refresh Data. It deliberately no longer fires on a bare timer: an
+        # odometer that has not moved is the car saying it is where it was, so a
+        # car parked for a fortnight is never woken. Movement without driving -
+        # towed, shipped - changes no odometer; Refresh Data covers that.
         forced = poll_state.get("force_secondary", False)
-        if was_driving or forced or ((cyc - 1) % _POSITION_EVERY == 0):
+        prev_odo, fix_odo = _odometer(prev), poll_state["fix_odo"]
+        have_proof = prev_odo is not None and fix_odo is not None
+        moved = have_proof and prev_odo > fix_odo
+        # The timer survives only for a car whose odometer we cannot read -
+        # then nothing is proven and the old cadence stands exactly as before,
+        # so no car loses coverage by this change. It also carries the very
+        # first cycle, when there is no previous snapshot to compare.
+        timer_due = (not have_proof) and ((cyc - 1) % _POSITION_EVERY == 0)
+        woke = was_driving or forced or moved or timer_due
+        if woke:
             try:
                 await _call_with_retry(api.request_position_refresh)
             except GeelyAuthError as e:
@@ -639,6 +670,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         else:
             poll_state["idle"] = 0
         poll_state["sig"] = sig
+        # Anchor the suppressor to the reading this cycle's fix belongs to, and
+        # only once the fresh payload is in hand - reading it from `prev` would
+        # anchor to the cycle before and re-fire for one extra wake.
+        if woke:
+            odo_now = _odometer(data)
+            if odo_now is not None:
+                poll_state["fix_odo"] = odo_now
 
         if not _MANUAL:
             try:

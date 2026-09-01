@@ -90,8 +90,7 @@ def test_unmapped_endpoints_raise_cleanly():
     a, _ = _make_adapter()
     for call in (a.vehicle_status_state,
                  lambda: a.charge_server_get("7"),
-                 lambda: a.scheduled_charging_set(vin=FAKE_VIN),
-                 a.rapid_climate):
+                 lambda: a.scheduled_charging_set(vin=FAKE_VIN)):
         try:
             call()
             assert False, f"expected NotImplementedError from {call}"
@@ -331,3 +330,90 @@ def test_a_catalogue_that_cannot_be_fetched_keeps_every_entity():
 
     c.capabilities_new = _boom
     assert a.fetch_capabilities() == []
+
+
+def test_position_refresh_sends_the_pai_wake_on_the_new_platform():
+    """With an x-vin token, request_position_refresh fires the PAI locator
+    through the control transport - serviceId PAI, pai=1 - which is what makes
+    a new-platform car's map refresh at all."""
+    a, c = _make_adapter()
+    c.enc_vin = "opaque-token"
+    sent = []
+    c.control_new_resp = lambda sid, cmd, params=None: (
+        sent.append((sid, cmd, params)) or {"code": "000000", "data": {}})
+    a.request_position_refresh()
+    assert sent == [("PAI", "start", [{"key": "pai", "value": "1"}])], sent
+
+
+def test_position_refresh_is_a_no_op_without_a_token():
+    """A vehicle with no x-vin token is on the old platform (or unconfigured);
+    the legacy client owns its PAI, so this side must not reach the car."""
+    a, c = _make_adapter()   # enc_vin defaults to ""
+    called = []
+    c.control_new_resp = lambda *a_, **k: called.append(1) or {}
+    assert a.request_position_refresh() == {}
+    assert called == [], "must not send a new-platform command without a token"
+
+
+def test_rapid_warm_and_cool_build_the_captured_setsmarttemp_body():
+    """Rapid climate uses the setSmartTemp endpoint (serviceId PAA), not the
+    control route. Warm carries the seat-heat block and sw=true; cool carries
+    an empty ventilation list and sw=false. Both drive the cabin via ac+temp."""
+    a, c = _make_adapter()
+    c.enc_vin = "opaque-token"
+    seen = []
+    c.set_smart_temp_new = lambda setting, command="immediately": (
+        seen.append((command, setting)) or {"code": "000000", "data": {}})
+
+    resp = a.rapid_climate(ac=True, temp="28.5", heat_seats=["11", "19"],
+                           vent_seats=None, vlt=False, sw=True)
+    cmd, warm = seen[-1]
+    assert cmd == "immediately"
+    assert warm["ac"] == "true" and warm["temp"] == "28.5" and warm["sw"] == "true"
+    assert warm["heat"] == [{"level": "3", "pos": "11"}, {"level": "3", "pos": "19"}]
+    assert "ventilation" not in warm
+    assert resp["code"] == 1000, "000000 was not translated"
+
+    a.rapid_climate(ac=True, temp="15.5", heat_seats=None,
+                    vent_seats=["11", "19"], vlt=True, sw=None)
+    _, cool = seen[-1]
+    assert cool["temp"] == "15.5" and cool["sw"] == "false"
+    assert cool["ventilation"] == [] and "heat" not in cool
+
+
+def test_rapid_climate_is_a_no_op_without_a_token():
+    a, _ = _make_adapter()   # enc_vin defaults to ""
+    try:
+        a.rapid_climate(ac=True, temp="22.0")
+    except NotImplementedError:
+        pass
+    else:  # pragma: no cover - only reached on a regression
+        raise AssertionError("expected NotImplementedError without a token")
+
+
+def test_a_safe_command_is_translated_and_its_code_rewritten():
+    """control() on the new platform runs the request through the translator
+    and rewrites the gateway's 000000 to the 1000 the coordinator expects."""
+    a, c = _make_adapter()
+    c.enc_vin = "opaque-token"
+    sent = []
+    c.control_new_resp = lambda sid, cmd, params=None: (
+        sent.append((sid, cmd, params)) or {"code": "000000", "data": {}})
+    c.control_resp = lambda vin, body: {"code": "1000", "legacy": True}
+    resp = a.control("RHL", [{"key": "rhl", "value": "horn-light-flash"}])
+    assert sent == [("RHL", "start", [{"key": "rhl", "value": "horn-light-flash"}])]
+    assert resp["code"] == 1000 and "legacy" not in resp
+
+
+def test_control_refuses_an_unmapped_new_platform_service():
+    """A service the translator does not know must fail loudly, never send a
+    guessed body to the car."""
+    a, c = _make_adapter()
+    c.enc_vin = "opaque-token"
+    c.control_new_resp = lambda *a_, **k: {"code": "000000"}
+    try:
+        a.control("SOMETHING_NEW", [])
+    except ad.GeelyControlError as err:
+        assert "not mapped" in str(err)
+    else:  # pragma: no cover - only reached on a regression
+        raise AssertionError("expected GeelyControlError for an unmapped service")

@@ -159,6 +159,63 @@ def translate_capabilities(rows: list[dict]) -> list[dict]:
     return entries
 
 
+def _translate_command(service_id: str, command: str,
+                       parameters: list[dict] | None):
+    """Legacy (serviceId, command, params) -> the new gateway's vocabulary.
+
+    Captured from the official app (2026-08-27..29). The new platform drops the
+    `_2` suffix, and the parameter shapes differ per service. This covers the
+    climate family (RCE), air-clean (RCC), find/horn/lights (RHL) and windows
+    (RWS); the door lock/unlock mapping is handled separately.
+
+    Returns None for anything not captured, so an unmapped control fails
+    loudly instead of sending a guessed body to a vehicle.
+    """
+    p = {q.get("key"): q.get("value") for q in (parameters or [])}
+
+    if service_id in ("RCE_2", "RCE"):
+        level = p.get("rce.level")
+        seat = p.get("rce.heat") or p.get("rce.ventilation")
+        # Steering wheel: the switch fires it with no rce.level (the command
+        # carries start/stop directly), and the captured body ALWAYS carries
+        # rce.conditioner=5 on both on and off - without it the car does not
+        # know which conditioner to stop, so the wheel would heat but never
+        # turn off. Handle it before the level check so the switch path works.
+        if seat == "steering_wheel":
+            on = command if level is None else ("start" if str(level) != "0" else "stop")
+            return "RCE", on, [{"key": "rce.heat", "value": "steering_wheel"},
+                               {"key": "rce.conditioner", "value": "5"}]
+        if level is not None and seat:
+            # Seats move the seat name INTO the key and carry the level as the
+            # value, with an rce.conditioner selector alongside.
+            on = "start" if str(level) != "0" else "stop"
+            kind = "heat" if p.get("rce.heat") else "vent"   # vent: inferred
+            return "RCE", on, [{"key": f"rce.{kind}.{seat}", "value": str(level)},
+                               {"key": "rce.conditioner", "value": "3"}]
+        # AC and defrost both ride RCE with the parameters already built here
+        # (defrost is rce.conditioner=2, captured exactly as this integration
+        # sends it).
+        return "RCE", command, list(parameters or [])
+
+    if service_id in ("RCC_2", "RCC"):              # G-Clean / air cleaning
+        return "RCC", command, [{"key": "rcc.conditioner", "value": "50"},
+                                {"key": "rcc.ventilation", "value": "0"}]
+
+    if service_id == "RHL":                         # find car / horn / lights
+        # The app sends RHL unchanged, with the rhl value chosen per button -
+        # horn-light-flash (Find), light-flash (lights). Pass it straight
+        # through; the integration already builds the right value.
+        return "RHL", command, list(parameters or [])
+
+    if service_id == "RWS_2":                        # windows / sunshade
+        # serviceId RWS (no _2); target passes through (window / ventilate /
+        # sunshade); start = open/down, stop = close/up - mirroring the door
+        # service.
+        return "RWS", command, list(parameters or [])
+
+    return None
+
+
 def _wrap_vehicle_status(data: Any) -> Any:
     """Give the new gateway's status payload the old platform's nesting.
 
@@ -321,19 +378,31 @@ class ZeekrAdapter:
                             self.vin, self.user_id)
 
     def request_position_refresh(self) -> dict:
-        """PAI wake (serviceId PAI / operation 4 / pai 1) on the legacy client.
+        """Wake the car for a fresh GPS fix (PAI - position acquisition).
 
-        Deliberately a no-op on the new platform: the coordinator fires this
-        automatically on the first poll and on every driving cycle, and the
-        control write path here is NOT live-verified on this backend (only door
-        lock/unlock is). Auto-sending an unproven command to the car on a timer
-        is exactly what the maintainer avoids, so until the PAI write is
-        confirmed we serve the position already in the status payload and skip
-        the active wake. The body it would send is kept for when it is proven:
+        The new gateway never streams position: the status payload carries the
+        last *located* fix and only refreshes when something asks the car for
+        one, which is why a migrated car's map could sit hours stale while every
+        other value was live (#53). The Geely app fires this on every map open.
 
-          {command: start, serviceId: PAI, serviceParameters:
-             [{operation: 4}, {pai: 1}], userId, timestamp}
+        Capture-verified on the new gateway (2026-08-29): the request is
+        serviceId PAI with a single `pai=1` parameter, sent through the same
+        control route as any other new-platform command. The legacy
+        `operation=4` parameter is rejected here (037000 parameter incorrect),
+        so only `pai=1` is sent. PAI *acquires* a position - there is no
+        variant of it that moves or opens the car - so unlike the lock/unlock
+        mapping its failure mode is benign.
+
+            {"command": "start", "serviceId": "PAI",
+             "setting": {"serviceParameters": [{"key": "pai", "value": "1"}]}}
+
+        The gateway ACKs immediately; the fresh fix lands in the status payload
+        a few seconds later, which the next poll reads. On a vehicle without an
+        x-vin token this stays a no-op, exactly as before.
         """
+        if self._client.enc_vin:
+            return self._authed(self._client.control_new_resp, "PAI", "start",
+                                [{"key": "pai", "value": "1"}])
         return {}
 
     def vehicle_status_state(self) -> dict:
@@ -351,10 +420,45 @@ class ZeekrAdapter:
             "new-platform charge-server write not mapped yet"
         )
 
-    def rapid_climate(self, **kwargs: Any) -> dict:
-        raise NotImplementedError(
-            "new-platform rapid-climate write not mapped yet"
-        )
+    def rapid_climate(self, *, ac: bool, temp: str,
+                      heat_seats: list[str] | None = None,
+                      vent_seats: list[str] | None = None,
+                      vlt: bool = False, sw: bool | None = None,
+                      level: str = "3", duration: str = "90",
+                      **_: Any) -> dict:
+        """Rapid warm / cool on the new gateway (capture-verified 2026-08-29).
+
+        The new platform does not use the legacy charge-server bizType-7
+        write; it has a dedicated endpoint (setSmartTemp / serviceId PAA)
+        with an object body. Warming carries the seat-heat block and sw;
+        cooling carries an (empty, on this trim) ventilation list. The
+        cabin itself is driven by ac + temp either way.
+        """
+        if not self._client.enc_vin:
+            raise NotImplementedError(
+                "rapid climate needs the new-platform x-vin")
+        setting = {
+            "ac": "true" if ac else "false",
+            "duration": str(duration),
+            "mode": "",
+            "paa": "0",
+            "scheduledTime": "",
+            "sw": "true" if sw else "false",
+            "temp": temp,
+            "timerId": "",
+        }
+        if heat_seats:
+            setting["heat"] = [{"level": level, "pos": p} for p in heat_seats]
+        else:
+            # Rapid cool: the captured body on this trim sent an empty
+            # ventilation list (this car has no ventilated seats); the cool
+            # comes from ac + temp. A car with ventilated seats can populate
+            # this once captured.
+            setting["ventilation"] = []
+        resp = self._authed(self._client.set_smart_temp_new, setting)
+        if isinstance(resp, dict) and str(resp.get("code")) in ("000000", "0"):
+            resp = {**resp, "code": 1000}
+        return resp
 
     def fetch_capabilities(self) -> list[dict]:
         """The catalogue, translated into the shape capabilities.py parses.
@@ -396,6 +500,32 @@ class ZeekrAdapter:
             "userId": str(self.user_id),
         }
         try:
+            if self._client.enc_vin:
+                # New-platform vehicle: the old platform does not know this VIN
+                # (8060), so a command sent there fails exactly as a status
+                # read does. The new route takes a different body, so the
+                # legacy fields built above are simply not sent.
+                mapped = _translate_command(service_id, command, parameters)
+                if mapped is None:
+                    raise GeelyControlError(
+                        "unsupported",
+                        f"{service_id} is not mapped for the new platform yet")
+                new_id, new_cmd, new_params = mapped
+                # Which endpoint a command went out is otherwise invisible: both
+                # routes surface the same code=... string, so this is the only
+                # way to tell a new-platform send from a legacy one from a log.
+                _LOGGER.debug(
+                    "control %s/%s -> NEW route POST /ms-remote-control/"
+                    "v1.0/remoteControl/control (x-vin header)",
+                    service_id, command)
+                resp = self._authed(self._client.control_new_resp,
+                                    new_id, new_cmd, new_params)
+                if isinstance(resp, dict) and str(resp.get("code")) in ("000000", "0"):
+                    resp = {**resp, "code": 1000}
+                return resp
+            _LOGGER.debug(
+                "control %s -> LEGACY route PUT /remote-control/vehicle/"
+                "telematics/<vin> (no x-vin set)", service_id)
             return self._authed(self._client.control_resp, self.vin, body)
         except GeelyAuthError:
             raise
