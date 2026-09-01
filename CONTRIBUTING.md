@@ -36,8 +36,8 @@ code.
 - Match Home Assistant core conventions - this repo aims to be ready for a
   future submission as an official integration.
 - User-facing text goes through `strings.json` and every file in
-  `translations/` (en, he, ar, fr, ru) - never hard-code UI strings. The five
-  files must have identical key sets.
+  `translations/` (en, he, ar, fr, ru, th) - never hard-code UI strings. The
+  six files must have identical key sets.
 - Every numeric sensor needs a `state_class`, or Home Assistant records no
   long-term statistics for it.
 - New entities ship **enabled**. If something is only worth having
