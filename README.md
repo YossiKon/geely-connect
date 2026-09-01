@@ -44,7 +44,8 @@ polished setup on top.
   changeable at any time.
 - 🌍 **EU, North-American and APAC** backends, detected from the vehicle.
 - 🗣️ **Translated setup** - the configuration dialogs are in English, Hebrew,
-  Arabic, Russian and French. Entity names follow Home Assistant's own
+  Arabic, Russian, French and Thai, and the dashboard cards follow Home
+  Assistant's UI language. Entity names follow Home Assistant's own
   language.
 - 🖥️ **Five built-in dashboard cards** - a full cockpit with a complete climate panel, a top-down status view, a compact tile, a mini square and a one-row strip - registered automatically, plus ready-made automations and Blueprints
 - 🚗 **The cards stand down while you drive** - a banner instead of buttons the
@@ -237,6 +238,14 @@ everything else.
 The integration ships **five custom cards** and registers them by itself - no
 HACS frontend package, no resource to add, nothing to copy. Open any
 dashboard, **Add card**, and search "Geely":
+
+> 🌐 **The cards speak your language.** Every label follows Home Assistant's
+> UI language automatically - English and Thai ship today - and falls back to
+> English wherever a translation has a gap, so a partial dictionary never
+> blanks a button. A Lovelace card can never read `translations/*.json` (the
+> frontend only loads its fixed set of translation categories), so the card
+> carries its own table: adding a language is one `STR` block in
+> `geely-card.js`, and a PR for yours is welcome.
 
 | Card | What it is |
 |---|---|
@@ -994,9 +1003,26 @@ like a credential path rather than a convenience:
 Geely released a separate new app on a new backend, and the setup form now opens
 with a **platform picker**. The default is the existing backend and nothing
 changes for current installs — an entry with no platform marker stays on the
-legacy path. The new **Geely EM (Zeekr)** option is **experimental**: at the
-time of writing it is live-verified on a single Australian account, with door
-lock/unlock confirmed and climate, windows and non-AU regions still untested.
+legacy path. The new **Geely EM (Zeekr)** option is **experimental**, but no
+longer a single-account story. Live-verified on real Australian cars today: the
+vehicle read (status, position, capabilities and the two charging-reported
+entities), and - for a migrated car addressed by its vehicle token - remote
+commands through the new gateway's own control route: find / lights (confirmed
+by two owners), windows, sunshade and vent, rapid heat / cool, G-Clean, seat
+and steering-wheel heat, defrost, and the GPS position wake. **Door lock /
+unlock is deliberately not enabled on that new control route yet** - its
+mapping waits for a second owner's confirmation, because a wrong guess there
+could unlock a car; until then those two buttons answer with a clear "not
+mapped" error rather than sending anything. Non-AU regions are still
+unverified.
+
+**Migrated accounts.** When the official app moves an account onto the new
+platform, the old backend stops knowing the car - every read answers
+`8060 The vehicle corresponding to the VIN does not exist`. Setup still works:
+paste the app's `x-vin` header value into the advanced **Vehicle token**
+field (`zeekr_enc_vin`) at setup, or later from **Configure**, and the vehicle
+read and the commands above run against the new gateway directly. The token is
+redacted from logs and from the diagnostics report like every other credential.
 
 Its security model is genuinely different from the legacy one above, and it is
 only fair to state that plainly:
@@ -1198,7 +1224,7 @@ payload rather than freezing on its own.
 ```
 custom_components/geely_connect/   the integration itself (what HACS installs)
 ├── brand/                         icon.png / logo.png shown in the HA UI
-├── translations/                  UI translations (en, he, ar, fr, ru)
+├── translations/                  UI translations (en, he, ar, fr, ru, th)
 ├── geely-card.js                  the five built-in dashboard cards
 ├── manifest.json                  integration metadata
 └── *.py                           platforms, API client, config flow, …
