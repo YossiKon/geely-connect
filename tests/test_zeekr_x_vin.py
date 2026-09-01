@@ -67,6 +67,18 @@ def test_probe_returns_empty_when_no_build_matches():
     assert client.enc_vin == "keep-me"
 
 
+def test_probe_rejects_an_empty_catalogue_even_without_a_raise():
+    """Acceptance is positive: a candidate the gateway answered with an empty
+    catalogue (a hypothetical HTTP 200 + no rows, no raise) must NOT be stored,
+    so a wrong x-vin can never be false-accepted."""
+    client = zc.ZeekrClient(email="a@b.c", password="")
+    client.access_token = "tok"
+    client.capabilities_new = lambda: []      # never raises, always empty
+    client.enc_vin = "keep-me"
+    assert client.probe_x_vin(FAKE_VIN) == ""
+    assert client.enc_vin == "keep-me"
+
+
 def test_probe_needs_a_session_and_a_vin():
     client = _client_with("x")
     client.access_token = None

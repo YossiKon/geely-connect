@@ -941,10 +941,14 @@ class ZeekrClient:
         gateway accepts, or "" if none of the known app builds match.
 
         Each candidate is verified with a read-only, x-vin-addressed call (the
-        capability catalogue): a wrong x-vin is rejected by the gateway and
-        raises, so only a value the gateway resolves to this vehicle is
-        returned. Restores the client's previous x-vin on the way out, so a
-        failed probe never disturbs a value already in use.
+        capability catalogue). Acceptance is POSITIVE, not merely "did not
+        raise": a candidate is kept only if the call returns a NON-EMPTY
+        catalogue, i.e. the gateway resolved the x-vin to a real vehicle. A
+        wrong x-vin is rejected with HTTP 400 `079025 "Decrypt X-VIN failed"`
+        (verified live against a real car), which raises; and a hypothetical
+        non-raising empty response is not accepted either. Restores the
+        client's previous x-vin on the way out, so a failed probe never
+        disturbs a value already in use.
         """
         if not self.access_token or not vin:
             return ""
@@ -954,10 +958,10 @@ class ZeekrClient:
                 candidate = derive_x_vin(vin, key, iv)
                 self.enc_vin = candidate
                 try:
-                    self.capabilities_new()
+                    if self.capabilities_new():   # non-empty => resolved to a car
+                        return candidate
                 except (ZeekrAuthError, ZeekrApiError):
                     continue
-                return candidate
             return ""
         finally:
             self.enc_vin = saved
