@@ -110,6 +110,34 @@ HF_APP_ID = "GEELY-APP-NEW"
 HF_SECRET = "eeec50cb855a4c69a12f297c0d27a07f"  # NativeSecretLib "GEELY_EM"
 HF_ACCEPT = "application/json;responseformat=3"
 
+# --- x-vin (X-VIN header) derivation -------------------------------------
+# The new gateway addresses a vehicle by an *encrypted* VIN in the `x-vin`
+# header. The app derives it locally from the ordinary VIN:
+#   VIN -> AES-128-CBC (PKCS#7 pad) -> standard Base64.
+# The AES material is per-app-build package data, not an account credential
+# or session token; it is already public (github.com/Wysie/zeekr_key_extractor
+# and PR #57). It differs by app build/region, and a WRONG pair yields a
+# valid-looking but wrong header that only fails at request time, so we never
+# trust a derived value blindly: `probe_x_vin` derives with each known pair
+# and keeps the one the gateway actually accepts, else falls back to the
+# owner-supplied `zeekr_enc_vin` option. Add a pair as new builds are captured.
+_X_VIN_MATERIAL: tuple[tuple[bytes, bytes, str], ...] = (
+    # (key, iv, note) -- 16-byte ASCII AES-128 key + 16-byte ASCII IV
+    (b"a01a6db985a2f5d4", b"ed446b8b8845013d", "PR #57"),
+    (b"2a25d6c112dcf841", b"53bd2ae715ff176f", "Geely Global EM (com.geely.global.em, AU/SEA)"),
+)
+
+
+def derive_x_vin(vin: str, key: bytes, iv: bytes) -> str:
+    """One app build's VIN -> x-vin transform (AES-128-CBC/PKCS7 -> Base64)."""
+    from cryptography.hazmat.primitives import padding
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
+    padder = padding.PKCS7(128).padder()
+    pt = padder.update(vin.encode("ascii")) + padder.finalize()
+    enc = Cipher(algorithms.AES(key), modes.CBC(iv)).encryptor()
+    return base64.b64encode(enc.update(pt) + enc.finalize()).decode("ascii")
+
 # Per-install device identity for HF requests: the app derives one per
 # device, so a shared static value would let the vendor correlate every HA
 # install as a single device. Regenerated per process; not part of any
@@ -907,6 +935,36 @@ class ZeekrClient:
                 if isinstance(val, list):
                     return [v for v in val if isinstance(v, dict)]
         return []
+
+    def probe_x_vin(self, vin: str) -> str:
+        """Derive the x-vin from the plain VIN and return the value the new
+        gateway accepts, or "" if none of the known app builds match.
+
+        Each candidate is verified with a read-only, x-vin-addressed call (the
+        capability catalogue). Acceptance is POSITIVE, not merely "did not
+        raise": a candidate is kept only if the call returns a NON-EMPTY
+        catalogue, i.e. the gateway resolved the x-vin to a real vehicle. A
+        wrong x-vin is rejected with HTTP 400 `079025 "Decrypt X-VIN failed"`
+        (verified live against a real car), which raises; and a hypothetical
+        non-raising empty response is not accepted either. Restores the
+        client's previous x-vin on the way out, so a failed probe never
+        disturbs a value already in use.
+        """
+        if not self.access_token or not vin:
+            return ""
+        saved = self.enc_vin
+        try:
+            for key, iv, _note in _X_VIN_MATERIAL:
+                candidate = derive_x_vin(vin, key, iv)
+                self.enc_vin = candidate
+                try:
+                    if self.capabilities_new():   # non-empty => resolved to a car
+                        return candidate
+                except (ZeekrAuthError, ZeekrApiError):
+                    continue
+            return ""
+        finally:
+            self.enc_vin = saved
 
     def capabilities_new(self) -> list[dict]:
         """The new platform's capability catalogue for this vehicle.

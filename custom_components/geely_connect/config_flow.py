@@ -165,6 +165,9 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._platform_default: str | None = None
         self._zeekr_hf_token: str | None = None
         self._zeekr_password: str | None = None
+        # The logged-in client from the login step, reused in _finish_zeekr to
+        # verify a derived x-vin against the gateway before storing it.
+        self._zeekr_client: Any = None
         # Set when this flow is a re-auth. We update the existing entry's
         # token instead of creating a new one in that case.
         self._reauth_entry: config_entries.ConfigEntry | None = None
@@ -520,6 +523,7 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             try:
                 client = await self.hass.async_add_executor_job(
                     _zeekr_login_password, email, user_input["password"], self._country_code)
+                self._zeekr_client = client
                 self._zeekr_tokens = (client.access_token or "", client.refresh_token or "")
                 self._zeekr_hf_token = client.hf_token
                 self._zeekr_password = (user_input["password"]
@@ -612,6 +616,29 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         enc_password = await self.hass.async_add_executor_job(
             password_encrypt, self.hass, self._zeekr_password or "")
 
+        # Auto-derive the new-platform x-vin from the VIN where the app build is
+        # known, verifying the gateway accepts it before storing. The
+        # owner-supplied `zeekr_enc_vin` option still overrides, and stays the
+        # fallback when no known build matches (nothing is stored then, so the
+        # entry behaves exactly as before this change). Mechanism per PR #57;
+        # the material is public app package data, not an account credential.
+        existing_x_vin = ""
+        if self._reauth_entry is not None:
+            existing_x_vin = (
+                self._reauth_entry.options.get(CONF_ZEEKR_ENC_VIN)
+                or self._reauth_entry.data.get(CONF_ZEEKR_ENC_VIN) or "")
+        enc_vin = existing_x_vin
+        if not enc_vin and self._zeekr_client is not None:
+            try:
+                enc_vin = await self.hass.async_add_executor_job(
+                    self._zeekr_client.probe_x_vin, vin) or ""
+            except Exception:  # noqa: BLE001 - derivation is best-effort only
+                _LOGGER.debug("x-vin auto-derivation failed; "
+                              "falling back to the manual option", exc_info=True)
+                enc_vin = ""
+            if enc_vin:
+                _LOGGER.info("derived a working new-platform x-vin for this vehicle")
+
         if self._reauth_entry is not None:
             entry = self._reauth_entry
             previous_email = entry.data.get(CONF_EMAIL) or ""
@@ -634,6 +661,8 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             # must be re-pointed at the picked vehicle + its metadata.
             new_data[CONF_VIN] = vin
             new_data.update(vehicle_metadata(vehicle))
+            if enc_vin:
+                new_data[CONF_ZEEKR_ENC_VIN] = enc_vin
             # The legacy-only credentials are meaningless on the new platform
             # and their presence sent setup down the dead legacy path (a
             # hybrid entry: legacy keys + zeekr tokens + no platform marker).
@@ -673,6 +702,7 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_ZEEKR_HF_TOKEN:      self._zeekr_hf_token or "",
                 CONF_ZEEKR_HF_EXPIRY:     int(time.time()) + 172800,
                 CONF_ZEEKR_PASSWORD:      enc_password,
+                CONF_ZEEKR_ENC_VIN:       enc_vin,
                 **metadata,
                 CONF_PRESSURE_UNIT:       self._pressure_unit,
                 CONF_POLL_MODE:           self._poll_mode,

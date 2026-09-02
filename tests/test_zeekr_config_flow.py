@@ -418,3 +418,31 @@ def test_reconfigure_choosing_legacy_goes_to_the_legacy_form():
     flow.hass.config_entries.async_get_entry = lambda eid: entry
     res = asyncio.run(flow.async_step_reconfigure({"platform": "legacy"}))
     assert res["type"] == "form" and res["step_id"] == "user", res
+
+
+class _DerivingClient(_FakeClient):
+    """A logged-in client whose app build's x-vin the gateway accepts."""
+    def probe_x_vin(self, vin):
+        return "DERIVED-XVIN=="
+
+
+def test_zeekr_login_auto_derives_and_stores_the_x_vin():
+    cf, flow = _flow()
+    cf._zeekr_login_password = lambda e, p, c: _DerivingClient()
+    asyncio.run(flow.async_step_user({"platform": "zeekr"}))
+    res = asyncio.run(flow.async_step_zeekr_login(_zeekr_login_input()))
+    assert res["type"] == "create_entry", res
+    assert res["data"]["zeekr_enc_vin"] == "DERIVED-XVIN==", (
+        "a verified derived x-vin must be stored so the car works without a "
+        "manual token")
+
+
+def test_zeekr_migration_stores_the_derived_x_vin():
+    cf, flow = _flow()
+    entry = _legacy_entry()
+    flow._reauth_entry = entry
+    cf._zeekr_login_password = lambda e, p, c: _DerivingClient()
+    asyncio.run(flow.async_step_user({"platform": "zeekr"}))
+    res = asyncio.run(flow.async_step_zeekr_login(_zeekr_login_input()))
+    assert res["type"] == "abort" and res["reason"] == "reauth_successful", res
+    assert entry.data["zeekr_enc_vin"] == "DERIVED-XVIN=="
