@@ -249,7 +249,7 @@ dashboard, **Add card**, and search "Geely":
 
 | Card | What it is |
 |---|---|
-| **Geely Card** (`custom:geely-card`) | The full cockpit: range and battery up top, the EX5 silhouette that glows while charging and flags every opening, one-tap Lock / Unlock / Climate / Defrost / Vent / Trunk / Find / Sync, a full climate panel (temperature, rapid heat / cool, seat heating and cooling, fresh air, sunroof and shade), charging and schedule toggles with editable start / end times, links that navigate you to wherever the car is parked, then charging, tires, trip and service health - each block hides itself when the car doesn't report it |
+| **Geely Card** (`custom:geely-card`) | The full cockpit: range and battery up top, the EX5 silhouette that glows while charging and flags every opening, one-tap Lock / Unlock / Climate / Defrost / Vent / Trunk / Find / Sync, a full climate panel (temperature, rapid heat / cool, seat heating and cooling, fresh air, windows, sunroof and shade), charging and schedule toggles with editable start / end times, links that navigate you to wherever the car is parked, then charging, tires, trip and service health - each block hides itself when the car doesn't report it |
 | **Geely Card (top view)** (`custom:geely-card-top`) | The car from above: tire pressure beside each wheel, bold live status on every door, the hood, the sunroof and the trunk - with the same header, actions and climate panel. The driver's door follows your market automatically (right-hand-drive countries show it on the right; `rhd: true/false` in the card config overrides) |
 | **Geely Card (compact)** (`custom:geely-card-compact`) | The essentials in one tile: battery and cabin temperature in the header, range, status chips - and Lock, Unlock, rapid Heat / Cool, Defrost and Trunk |
 | **Geely Card (mini)** (`custom:geely-card-mini`) | A small square: range, battery and cabin temperature in the header, status, a lock button that follows the car (locked offers Unlock, unlocked offers Lock), and one-tap quick heat / quick cool |
@@ -342,8 +342,9 @@ The full and top-view cards carry a complete **Climate** section:
 - **Seat heating / Seat cooling** per front seat - each tap steps
   Off → Low → Medium → High → Off.
 - **Fresh air** (G-Clean), **Parking comfort**, **Wheel heat** (on cars that
-  have a heated steering wheel), and **Open / Close** for the sunroof and the
-  sunshade. Parking comfort never lights up, deliberately: the car does not
+  have a heated steering wheel), and **Open / Close** for the windows, the
+  sunroof and the sunshade - each pair lights while that opening is open.
+  Parking comfort never lights up, deliberately: the car does not
   report whether it is on - the field that looks like its flag reads 1 with the
   feature off - so the button toggles it without claiming a state.
 - Every block hides itself on a trim that lacks the entity - and there is no
