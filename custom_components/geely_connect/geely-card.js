@@ -847,6 +847,25 @@
       background: color-mix(in srgb, ${AMBER} 15%, transparent);
       font-weight: 600;
     }
+    /* A clickable chip whose lit fraction (--lvl 0..1) shows how far open the
+     * windows are - a vent crack lights a sliver, fully down lights it all. */
+    .chip.lvl {
+      color: ${ON_TEXT}; font-weight: 600; cursor: pointer;
+      border-color: color-mix(in srgb, ${ACCENT} 55%, transparent);
+      background: linear-gradient(to right,
+        color-mix(in srgb, ${ACCENT} 22%, transparent) calc(var(--lvl, 0) * 100%),
+        transparent calc(var(--lvl, 0) * 100%));
+    }
+    .chip.lvl:hover { border-color: color-mix(in srgb, ${ACCENT} 80%, transparent); }
+    .win-menu { background: var(--ha-card-background, var(--card-background-color, #1c1c1e));
+      color: var(--primary-text-color, #e6e6e6); border-radius: 16px; padding: 16px;
+      display: flex; flex-direction: column; gap: 10px; min-width: 220px;
+      box-shadow: 0 18px 50px -12px rgba(0,0,0,.6); }
+    .win-menu h4 { margin: 0 0 2px; font-size: 13px; font-weight: 600; }
+    .win-menu button { font: inherit; padding: 12px; border-radius: 12px; cursor: pointer;
+      border: 1px solid color-mix(in srgb, ${ACCENT} 45%, transparent);
+      background: color-mix(in srgb, ${ACCENT} 14%, transparent); color: ${ON_TEXT}; }
+    .win-menu button:hover { background: color-mix(in srgb, ${ACCENT} 26%, transparent); }
     .actions { display: flex; gap: 8px; justify-content: space-between; }
     .act {
       flex: 1; display: flex; flex-direction: column; align-items: center; gap: 5px;
@@ -1516,6 +1535,7 @@
         case "shade_close": this._call("cover", "close_cover", "sunshade"); break;
         case "windows_open": this._call("cover", "open_cover", "all_windows"); break;
         case "windows_close": this._call("cover", "close_cover", "all_windows"); break;
+        case "windows_menu": this._openWindowsMenu(); break;
         case "gclean": this._call("switch", "toggle", "g_clean"); break;
         case "pcomfort": this._call("switch", "toggle", "parking_comfort"); break;
         case "swheel": this._call("switch", "toggle", "steering_wheel_heat"); break;
@@ -1880,6 +1900,43 @@
       this._expandDialog.showModal();
     }
 
+    /* A small Open / Close menu for the compact card's windows chip. Appended
+     * to document.body (not the shadow root) for the same top-layer/centring
+     * reason as _openFullCard. Its buttons route through _onAction, which is
+     * already blocked while driving, so this only ever opens when parked. */
+    _openWindowsMenu() {
+      const dlg = document.createElement("dialog");
+      dlg.style.cssText = [
+        "position:fixed", "inset:0", "margin:auto", "border:none",
+        "padding:0", "background:transparent", "color:inherit",
+        "width:max-content", "max-width:92vw",
+      ].join(";");
+      _ensureExpandBackdropStyle();
+      const panel = document.createElement("div");
+      panel.className = "win-menu";
+      const title = document.createElement("h4");
+      title.textContent = this._t("label.windows", "Windows");
+      panel.appendChild(title);
+      const add = (label, act) => {
+        const b = document.createElement("button");
+        b.textContent = label;
+        b.addEventListener("click", () => { dlg.close(); this._onAction(act); });
+        panel.appendChild(b);
+      };
+      add(this._t("action.open", "Open"), "windows_open");
+      add(this._t("action.close", "Close"), "windows_close");
+      // The panel needs the card's theme tokens and its own class rules, so
+      // carry a copy of the card CSS into the dialog's own scope.
+      const style = document.createElement("style");
+      style.textContent = this.shadowRoot.querySelector("style")
+        ? this.shadowRoot.querySelector("style").textContent : "";
+      dlg.append(style, panel);
+      dlg.addEventListener("click", (ev) => { if (ev.target === dlg) dlg.close(); });
+      dlg.addEventListener("close", () => dlg.remove());
+      document.body.appendChild(dlg);
+      dlg.showModal();
+    }
+
     /* An unreachable image must fail quietly rather than leaving lamps hovering
      * over a broken-image glyph. Inline handlers are avoided because a strict
      * CSP would drop them silently. */
@@ -2092,6 +2149,14 @@
       const drivingWord = this._t("chip.driving", "Driving");
       const parkedWord = this._t("chip.parked", "Parked");
       const chargingWord = this._t("action.charging", "Charging");
+      const windowsWord = this._t("label.windows", "Windows");
+      const windowsCover = this._st("cover.all_windows");
+      const windowsOpen = windowsCover &&
+        (windowsCover.state === "open" || windowsCover.state === "opening");
+      const winPos = windowsCover && windowsCover.attributes
+        ? windowsCover.attributes.current_position : null;
+      const winFrac = typeof winPos === "number"
+        ? Math.max(0, Math.min(1, winPos / 100)) : 1;
       const chips = [
         // First, and only while it is true: the compact card falls back to a
         // "Parked" chip when nothing else applies, which on a moving car was the
@@ -2104,6 +2169,9 @@
         !s.charging && s.conn && s.conn.state === "Plugged in" && `<span class="chip">${esc(this._t("chip.plugged_in", "Plugged in"))}</span>`,
         climateOn && `<span class="chip on">${esc(this._t("chip.climate_on", "Climate on"))}</span>`,
         s.doorsOpen.length > 0 && `<span class="chip warn">${esc(this._t("chip.n_open", "{count} open", { count: s.doorsOpen.length }))}</span>`,
+        // Windows: only while open, the lit fraction shows how far, and a tap
+        // opens a small Open / Close menu (blocked while driving like any action).
+        windowsOpen && `<span class="chip lvl" style="--lvl:${winFrac}" data-act="windows_menu" role="button" tabindex="0" title="${esc(this._t("tooltip.windows_menu", "Open or close the windows"))}">${icon("window")} ${esc(windowsWord)}${typeof winPos === "number" ? ` ${winPos}%` : ""}</span>`,
       ].filter(Boolean).join("");
 
       this.shadowRoot.innerHTML = `<style>${BASE_CSS}

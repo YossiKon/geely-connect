@@ -1961,3 +1961,38 @@ def test_windows_hide_the_percentage_when_fully_open_or_closed():
               .querySelector('span').textContent.trim()
         """, covers={"windows": "closed", "windowsPos": 0})
     assert closed == "Windows", closed
+
+
+# ------------------------------------- compact card: the windows chip + menu
+
+def test_compact_windows_chip_appears_only_when_open_with_a_proportional_fill():
+    got = _mount("geely-card-compact", """(() => {
+            const c = el.shadowRoot.querySelector('.chip.lvl[data-act="windows_open"], .chip.lvl[data-act="windows_menu"]');
+            return c ? { text: c.textContent.trim(), lvl: c.style.getPropertyValue('--lvl').trim() } : null;
+        })()""", covers={"windows": "open", "windowsPos": 8})
+    assert got is not None, "no windows chip while open"
+    assert "8%" in got["text"], got
+    assert got["lvl"] == "0.08", got            # 8% -> 0.08 of the chip lit
+
+
+def test_compact_windows_chip_absent_when_closed():
+    got = _mount("geely-card-compact", """
+            !!el.shadowRoot.querySelector('[data-act="windows_menu"]')
+        """, covers={"windows": "closed", "windowsPos": 0})
+    assert got is False, got
+
+
+def test_compact_windows_chip_opens_an_open_close_menu_that_acts():
+    got = _mount("geely-card-compact", """(() => {
+            document.querySelectorAll('dialog.win-menu, dialog .win-menu').forEach(d => {
+                const dlg = d.closest('dialog'); if (dlg) dlg.remove();
+            });
+            el.shadowRoot.querySelector('[data-act="windows_menu"]').click();
+            const menu = document.querySelector('.win-menu');
+            const labels = menu ? [...menu.querySelectorAll('button')].map(b => b.textContent.trim()) : [];
+            const open = menu && [...menu.querySelectorAll('button')].find(b => /open/i.test(b.textContent));
+            if (open) open.click();
+            return { labels, calls: el._hass.serviceCalls };
+        })()""", covers={"windows": "open", "windowsPos": 8})
+    assert got["labels"] == ["Open", "Close"], got
+    assert ["cover", "open_cover", {"entity_id": "cover.car_all_windows"}] in got["calls"], got
