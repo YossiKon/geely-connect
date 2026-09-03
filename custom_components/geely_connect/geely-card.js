@@ -34,7 +34,7 @@
     "scheduled_charging", "charger_connection", "tire_front_right",
     "tire_front_left", "tire_rear_right", "door_rear_right", "charging_power",
     "seat_heat_passenger", "seat_vent_passenger", "seat_heat_driver",
-    "seat_vent_driver", "sunshade", "g_clean", "parking_comfort",
+    "seat_vent_driver", "sunshade", "all_windows", "g_clean", "parking_comfort",
     "steering_wheel_heat",
     "tire_rear_left", "door_rear_left", "combined_range", "charge_complete",
     "charge_voltage", "electric_range", "charge_current", "door_passenger",
@@ -209,6 +209,7 @@
       "label.shade": "Shade",
       "label.start": "Start",
       "label.sunroof": "Sunroof",
+      "label.windows": "Windows",
       "label.synced": "Synced {time}",
       "label.temp_in": "{temp}° in",
       "label.temp_out": "{temp}° out",
@@ -312,6 +313,7 @@
       "label.shade": "ม่านบังแดด",
       "label.start": "เริ่ม",
       "label.sunroof": "ซันรูฟ",
+      "label.windows": "หน้าต่าง",
       "label.synced": "ซิงก์แล้ว {time}",
       "label.temp_in": "{temp}° ภายใน",
       "label.temp_out": "{temp}° ภายนอก",
@@ -706,6 +708,8 @@
            <path d="M8 10.5h8M9.5 6.9v3.6M14.5 6.9v3.6"/>`,
     shade: `<path d="M4 14.5c0-5 3.6-8.5 8-8.5s8 3.5 8 8.5"/>
             <path d="M6 12h12M8.5 12c0 2.5 1.5 4 3.5 4s3.5-1.5 3.5-4"/>`,
+    window: `<rect x="4" y="6.5" width="16" height="11" rx="1.5"/>
+             <path d="M12 6.5v11M4 12h16"/>`,
     fresh: `<path d="M5 9.5c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2"/>
             <path d="M5 14c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2"/>
             <path d="M5 18.5c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2"/>`,
@@ -1510,6 +1514,8 @@
         case "sunroof_close": this._call("cover", "close_cover", "sunroof"); break;
         case "shade_open": this._call("cover", "open_cover", "sunshade"); break;
         case "shade_close": this._call("cover", "close_cover", "sunshade"); break;
+        case "windows_open": this._call("cover", "open_cover", "all_windows"); break;
+        case "windows_close": this._call("cover", "close_cover", "all_windows"); break;
         case "gclean": this._call("switch", "toggle", "g_clean"); break;
         case "pcomfort": this._call("switch", "toggle", "parking_comfort"); break;
         case "swheel": this._call("switch", "toggle", "steering_wheel_heat"); break;
@@ -1710,6 +1716,7 @@
        * light up correctly; the tooltip covers the ones that do not. */
       const sunroofWord = this._t("label.sunroof", "Sunroof");
       const shadeWord = this._t("label.shade", "Shade");
+      const windowsWord = this._t("label.windows", "Windows");
       const airRow = (gclean ? `<button class="cbtn ${gclean.state === "on" ? "on" : ""}"
             data-act="gclean" title="${esc(this._t("tooltip.fresh_air", "Fresh air (G-Clean)"))}">${icon("fresh")}<span>${esc(this._t("label.fresh_air", "Fresh air"))}</span></button>` : "") +
         (pcomfort ? `<button class="cbtn ${pcomfort.state === "on" ? "on" : ""}"
@@ -1718,7 +1725,8 @@
             style="--lvl:${swheel.state === "on" ? 1 : 0}"
             data-act="swheel" title="${esc(this._t("tooltip.wheel_heat", SWHEEL_HINT))}">${icon("steering")}<span>${esc(this._t("label.wheel_heat", "Wheel heat"))}</span></button>` : "") +
         cover("sunroof", "sunroof_open", "sunroof_close", sunroofWord, "roof") +
-        cover("sunshade", "shade_open", "shade_close", shadeWord, "shade");
+        cover("sunshade", "shade_open", "shade_close", shadeWord, "shade") +
+        cover("all_windows", "windows_open", "windows_close", windowsWord, "window");
       return `
         <hr class="hairline">
         <p class="micro">${icon("climate")} ${esc(this._t("action.climate", "Climate"))}</p>
