@@ -99,7 +99,9 @@ window.mkHass = (opts) => {
   // exists, so a trim without one gets no row rather than a dead control.
   if (opts.covers) {
     const c = opts.covers;
-    if (c.windows) put(`cover.${P}_all_windows`, c.windows, { device_class: "window" });
+    if (c.windows) put(`cover.${P}_all_windows`, c.windows,
+        { device_class: "window",
+          ...(c.windowsPos != null ? { current_position: c.windowsPos } : {}) });
     if (c.sunroof) put(`cover.${P}_sunroof`, c.sunroof, { device_class: "shade" });
     if (c.sunshade) put(`cover.${P}_sunshade`, c.sunshade, { device_class: "shade" });
   }
@@ -1933,3 +1935,29 @@ def test_pressing_windows_open_calls_the_cover_service():
             return el._hass.serviceCalls;
         })()""", covers={"windows": "closed"})
     assert ["cover", "open_cover", {"entity_id": "cover.car_all_windows"}] in got, got
+
+
+def test_windows_show_their_open_percentage_when_partly_open():
+    """The car reports a per-window position (a vent crack ~8%), so a partly
+    open window reads e.g. "Windows 8%" rather than a bare "open"."""
+    got = _mount("geely-card", """
+            [...el.shadowRoot.querySelectorAll('.cpair')]
+              .find(p => p.querySelector('[data-act="windows_open"]'))
+              .querySelector('span').textContent.trim()
+        """, covers={"windows": "open", "windowsPos": 8})
+    assert got == "Windows 8%", got
+
+
+def test_windows_hide_the_percentage_when_fully_open_or_closed():
+    full = _mount("geely-card", """
+            [...el.shadowRoot.querySelectorAll('.cpair')]
+              .find(p => p.querySelector('[data-act="windows_open"]'))
+              .querySelector('span').textContent.trim()
+        """, covers={"windows": "open", "windowsPos": 100})
+    assert full == "Windows", full   # 100% -> just "Windows" (fully down)
+    closed = _mount("geely-card", """
+            [...el.shadowRoot.querySelectorAll('.cpair')]
+              .find(p => p.querySelector('[data-act="windows_open"]'))
+              .querySelector('span').textContent.trim()
+        """, covers={"windows": "closed", "windowsPos": 0})
+    assert closed == "Windows", closed

@@ -1686,10 +1686,16 @@
         const st = this._st(`cover.${suffix}`);
         if (!st) return "";
         const isOpen = st.state === "open" || st.state === "opening";
+        // A partly-open cover that reports a position (the windows do: a vent
+        // crack is ~8%) shows how far, so "cracked" reads differently from
+        // "fully down". Whole open/closed covers (sunroof, shade) show nothing.
+        const pos = st.attributes && st.attributes.current_position;
+        const pct = (isOpen && typeof pos === "number" && pos > 0 && pos < 100)
+          ? ` ${pos}%` : "";
         const openWord = this._t("action.open", "Open");
         const closeWord = this._t("action.close", "Close");
         return `<div class="cpair ${isOpen ? "on" : ""}">
-            ${icon(ic)}<span>${esc(label)}</span>
+            ${icon(ic)}<span>${esc(label)}${pct}</span>
             <button class="cmini" data-act="${openKey}" title="${esc(this._t("tooltip.cover_open", "Open {label}", { label }))}">${esc(openWord)}</button>
             <button class="cmini" data-act="${closeKey}" title="${esc(this._t("tooltip.cover_close", "Close {label}", { label }))}">${esc(closeWord)}</button>
           </div>`;

@@ -520,6 +520,23 @@ def test_windows_cover_follows_the_four_corner_fields():
     assert entity.is_closed is None
 
 
+def test_windows_cover_reports_the_most_open_corner_as_its_position():
+    _need_ha()
+    # A vent crack reads ~8 on every corner; the aggregate reports the max.
+    _, entity = _make_cover("GeelyWindows", data=_climate_data(
+        winPosDriver=8, winPosPassenger=8, winPosDriverRear=8, winPosPassengerRear=8))
+    assert entity.current_cover_position == 8
+    # One window further down wins; junk and out-of-range are tolerated/clamped.
+    _, entity = _make_cover("GeelyWindows", data=_climate_data(
+        winPosDriver="8", winPosPassenger="60", winPosDriverRear="x", winPosPassengerRear="140"))
+    assert entity.current_cover_position == 100
+    # No winPos field at all -> unknown, not 0.
+    _, entity = _make_cover("GeelyWindows", data=_climate_data())
+    assert entity.current_cover_position is None
+    _, entity = _make_cover("GeelyWindows", data=None)
+    assert entity.current_cover_position is None
+
+
 # --------------------------------------------------------- device_tracker ---
 
 def _pos_data(**pos):
