@@ -312,3 +312,23 @@ def speed_is_stale(basic: dict | None) -> bool:
         return False
     flag = basic.get("speedValidity")
     return flag is not None and str(flag).strip().lower() in ("false", "0")
+
+
+def exterior_temp_is_stale(climate: dict | None) -> bool:
+    """Is `exteriorTemp` a reading the car disowns?
+
+    `exteriorTempValidity` sits beside it exactly as `speedValidity` sits
+    beside the speed, and it carries the same meaning: when it is false the
+    number is whatever was last left in that slot. A Colombian EX2 published
+    130 with the flag false while the real air was 25-28 (#24) - and the
+    per-entry temperature offset cannot rescue that one, because it is not a
+    measurement to correct. Unknown is the honest reading.
+
+    Only an EXPLICIT falsy value counts, so a trim that never reports the flag
+    behaves exactly as before - the same rule that keeps the speed gate from
+    blanking cars nobody has tested.
+    """
+    if not isinstance(climate, dict):
+        return False
+    flag = climate.get("exteriorTempValidity")
+    return flag is not None and str(flag).strip().lower() in ("false", "0")

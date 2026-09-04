@@ -55,6 +55,7 @@ from .const import (
 from .helpers import minutes_or_none as _minutes_or_none
 from .helpers import walk as _walk
 from .helpers import speed_is_stale
+from .helpers import exterior_temp_is_stale
 
 # Keys that represent a tire pressure (raw value is kPa; converted per user unit).
 _TIRE_KEYS = {"tire_pressure_fl", "tire_pressure_fr", "tire_pressure_rl", "tire_pressure_rr"}
@@ -670,6 +671,14 @@ class GeelySensor(CoordinatorEntity, _AutoPrecision):
     def native_value(self) -> Any:
         v = _walk(self.coordinator.data or {}, self._path)
         val = _coerce(v, self._value_kind, self._value_map)
+        # The car publishes exteriorTempValidity beside the reading, and a
+        # false flag means the number is whatever was last in that slot - 130
+        # on a car sitting in 25-28 °C air (#24). Gated before the offset
+        # below, because an offset applied to a disowned number only produces
+        # a wrong reading that looks deliberate.
+        if self._key == "exterior_temp" and exterior_temp_is_stale(
+                _walk(self.coordinator.data or {}, _CLIM)):
+            return None
         # Tire pressure stays in its native kPa here; Home Assistant converts
         # it to the unit chosen at setup. Converting it ourselves as well
         # would apply the factor twice.

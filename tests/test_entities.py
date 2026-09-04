@@ -518,6 +518,70 @@ def test_speed_is_published_when_speed_validity_is_absent():
     assert _speed("50").native_value == 50.0
 
 
+# --------------------------- #24: exteriorTempValidity ----------------------
+
+def _ext_temp(temp, validity=None, offset=0.0):
+    """The exterior-temperature sensor over a climateStatus carrying `temp` and
+    an `exteriorTempValidity` flag. `validity=None` means the flag is absent (a
+    trim that never reports it)."""
+    import copy
+    data = copy.deepcopy(STATUS)
+    clim = data["vehicleStatus"]["additionalVehicleStatus"]["climateStatus"]
+    clim["exteriorTemp"] = temp
+    if validity is not None:
+        clim["exteriorTempValidity"] = validity
+    else:
+        clim.pop("exteriorTempValidity", None)
+
+    class C(_Coord):
+        pass
+    C.data = data
+    sensor = load("sensor")
+    spec = next(s for s in sensor.SENSOR_SPECS if s[0] == "exterior_temp")
+    return sensor.GeelySensor(C(), FAKE_VIN, "Geely EX5 (0000)", *spec,
+                              pressure_unit="psi", value_offset=offset)
+
+
+def test_exterior_temp_is_unknown_when_its_validity_is_false():
+    """A Colombian EX2 published `exteriorTemp` 130 with the flag false while
+    the real air was 25-28 (#24). The car is disowning the number, so the
+    sensor must publish unknown rather than a confident 130 °C."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    assert _ext_temp("130", False).native_value is None
+    assert _ext_temp("130", "false").native_value is None
+    # A plausible-looking number is disowned exactly the same way: the flag,
+    # not the magnitude, is what decides.
+    assert _ext_temp("22.5", "false").native_value is None
+
+
+def test_a_disowned_exterior_temp_is_not_rescued_by_the_offset():
+    """The per-entry offset corrects a measurement; it cannot correct a value
+    that is not one. Applied to a disowned 130 it would publish a wrong reading
+    that looks deliberate, so the gate has to win over the offset."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    assert _ext_temp("130", "false", offset=-10.0).native_value is None
+
+
+def test_exterior_temp_is_published_when_its_validity_is_true():
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    assert _ext_temp("22.5", True).native_value == 22.5
+    assert _ext_temp("22.5", "true").native_value == 22.5
+    # The offset still applies to a reading the car stands behind.
+    assert _ext_temp("32.5", "true", offset=-10.0).native_value == 22.5
+
+
+def test_exterior_temp_is_published_when_the_validity_flag_is_absent():
+    """A trim that never reports the flag keeps the old behaviour - the guard
+    fires only on an explicit falsy value, never on a missing one, so no car
+    loses its temperature to this change."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    assert _ext_temp("22.5").native_value == 22.5
+
+
 def test_the_documented_entity_counts_are_the_real_ones():
     """The README promises specific numbers on the first screen, and a new entity
     silently makes them wrong - which is a small lie in the most-read paragraph
