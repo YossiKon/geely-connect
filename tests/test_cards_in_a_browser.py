@@ -95,6 +95,16 @@ window.mkHass = (opts) => {
     if (seat.ventDriver !== null) put(`select.${P}_seat_vent_driver`, seat.ventDriver || "Off", { options: lvls });
     if (seat.ventPassenger !== null) put(`select.${P}_seat_vent_passenger`, seat.ventPassenger || "Off", { options: lvls });
   }
+  // Covers (sunroof / sunshade / all windows) render only when the entity
+  // exists, so a trim without one gets no row rather than a dead control.
+  if (opts.covers) {
+    const c = opts.covers;
+    if (c.windows) put(`cover.${P}_all_windows`, c.windows,
+        { device_class: "window",
+          ...(c.windowsPos != null ? { current_position: c.windowsPos } : {}) });
+    if (c.sunroof) put(`cover.${P}_sunroof`, c.sunroof, { device_class: "shade" });
+    if (c.sunshade) put(`cover.${P}_sunshade`, c.sunshade, { device_class: "shade" });
+  }
   if (opts.noElectric) { delete S[`sensor.${P}_electric_range`]; }
   if (opts.at) {
     S[`device_tracker.${P}_location`] = { entity_id: `device_tracker.${P}_location`,
@@ -1880,3 +1890,109 @@ def test_a_missing_translation_key_falls_through_to_the_coded_default():
     got = _mount_lang("geely-card",
                       '''el._t("no.such.key", "Coded Default")''', "th")
     assert got == "Coded Default", got
+
+
+# --------------------------------------------- windows open/close + indicator
+
+def test_windows_cover_shows_open_close_and_lights_when_open():
+    """The RWS windows command shipped, but the card had no control for it.
+    The full card now carries a Windows Open/Close pair that lights when the
+    windows are open - the same cover row that already does sunroof/shade."""
+    got = _mount("geely-card", """(() => {
+            const pairs = [...el.shadowRoot.querySelectorAll('.cpair')];
+            const w = pairs.find(p => p.querySelector('[data-act="windows_open"]'));
+            if (!w) return { present: false };
+            return {
+                present: true,
+                on: w.classList.contains('on'),
+                acts: [...w.querySelectorAll('[data-act]')].map(b => b.dataset.act),
+            };
+        })()""", covers={"windows": "open"})
+    assert got["present"] is True, got
+    assert got["on"] is True, got                       # open -> the pair lights
+    assert got["acts"] == ["windows_open", "windows_close"], got
+
+
+def test_windows_cover_is_not_lit_when_closed():
+    got = _mount("geely-card", """(() => {
+            const p = [...el.shadowRoot.querySelectorAll('.cpair')]
+                .find(x => x.querySelector('[data-act="windows_open"]'));
+            return { on: p.classList.contains('on') };
+        })()""", covers={"windows": "closed"})
+    assert got["on"] is False, got
+
+
+def test_no_windows_control_without_the_cover_entity():
+    got = _mount("geely-card", """
+            !![...el.shadowRoot.querySelectorAll('[data-act="windows_open"]')].length
+        """)
+    assert got is False, got
+
+
+def test_pressing_windows_open_calls_the_cover_service():
+    got = _mount("geely-card", """(() => {
+            el.shadowRoot.querySelector('[data-act="windows_open"]').click();
+            return el._hass.serviceCalls;
+        })()""", covers={"windows": "closed"})
+    assert ["cover", "open_cover", {"entity_id": "cover.car_all_windows"}] in got, got
+
+
+def test_windows_show_their_open_percentage_when_partly_open():
+    """The car reports a per-window position (a vent crack ~8%), so a partly
+    open window reads e.g. "Windows 8%" rather than a bare "open"."""
+    got = _mount("geely-card", """
+            [...el.shadowRoot.querySelectorAll('.cpair')]
+              .find(p => p.querySelector('[data-act="windows_open"]'))
+              .querySelector('span').textContent.trim()
+        """, covers={"windows": "open", "windowsPos": 8})
+    assert got == "Windows 8%", got
+
+
+def test_windows_hide_the_percentage_when_fully_open_or_closed():
+    full = _mount("geely-card", """
+            [...el.shadowRoot.querySelectorAll('.cpair')]
+              .find(p => p.querySelector('[data-act="windows_open"]'))
+              .querySelector('span').textContent.trim()
+        """, covers={"windows": "open", "windowsPos": 100})
+    assert full == "Windows", full   # 100% -> just "Windows" (fully down)
+    closed = _mount("geely-card", """
+            [...el.shadowRoot.querySelectorAll('.cpair')]
+              .find(p => p.querySelector('[data-act="windows_open"]'))
+              .querySelector('span').textContent.trim()
+        """, covers={"windows": "closed", "windowsPos": 0})
+    assert closed == "Windows", closed
+
+
+# ------------------------------------- compact card: the windows chip + menu
+
+def test_compact_windows_chip_appears_only_when_open_with_a_proportional_fill():
+    got = _mount("geely-card-compact", """(() => {
+            const c = el.shadowRoot.querySelector('.chip.lvl[data-act="windows_open"], .chip.lvl[data-act="windows_menu"]');
+            return c ? { text: c.textContent.trim(), lvl: c.style.getPropertyValue('--lvl').trim() } : null;
+        })()""", covers={"windows": "open", "windowsPos": 8})
+    assert got is not None, "no windows chip while open"
+    assert "8%" in got["text"], got
+    assert got["lvl"] == "0.08", got            # 8% -> 0.08 of the chip lit
+
+
+def test_compact_windows_chip_absent_when_closed():
+    got = _mount("geely-card-compact", """
+            !!el.shadowRoot.querySelector('[data-act="windows_menu"]')
+        """, covers={"windows": "closed", "windowsPos": 0})
+    assert got is False, got
+
+
+def test_compact_windows_chip_opens_an_open_close_menu_that_acts():
+    got = _mount("geely-card-compact", """(() => {
+            document.querySelectorAll('dialog.win-menu, dialog .win-menu').forEach(d => {
+                const dlg = d.closest('dialog'); if (dlg) dlg.remove();
+            });
+            el.shadowRoot.querySelector('[data-act="windows_menu"]').click();
+            const menu = document.querySelector('.win-menu');
+            const labels = menu ? [...menu.querySelectorAll('button')].map(b => b.textContent.trim()) : [];
+            const open = menu && [...menu.querySelectorAll('button')].find(b => /open/i.test(b.textContent));
+            if (open) open.click();
+            return { labels, calls: el._hass.serviceCalls };
+        })()""", covers={"windows": "open", "windowsPos": 8})
+    assert got["labels"] == ["Open", "Close"], got
+    assert ["cover", "open_cover", {"entity_id": "cover.car_all_windows"}] in got["calls"], got

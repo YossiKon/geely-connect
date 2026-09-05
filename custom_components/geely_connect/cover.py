@@ -43,7 +43,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .api import GeelyControlError, redact
 from .const import DOMAIN, SERVICE_WINDOW
-from .helpers import walk as _walk, windows_open, schedule_refresh
+from .helpers import walk as _walk, windows_open, windows_position, schedule_refresh
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -152,3 +152,10 @@ class GeelyWindows(_BaseGeelyCover):
         # none of them is unknown rather than open.
         opened = windows_open(self.coordinator.data)
         return None if opened is None else not opened
+
+    @property
+    def current_cover_position(self) -> int | None:
+        # The car reports a per-corner winPos (0-100); expose the most-open
+        # corner so the % shows how far the windows are down - a vent crack
+        # reads ~8, not just "open". None when the car omits winPos entirely.
+        return windows_position(self.coordinator.data)
