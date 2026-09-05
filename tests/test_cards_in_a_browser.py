@@ -1880,3 +1880,60 @@ def test_a_missing_translation_key_falls_through_to_the_coded_default():
     got = _mount_lang("geely-card",
                       '''el._t("no.such.key", "Coded Default")''', "th")
     assert got == "Coded Default", got
+
+
+def test_every_shipped_language_covers_the_english_key_set():
+    """The fallback hides a gap, which is exactly why a gap needs catching here:
+    a language missing a key renders English inside an otherwise translated
+    card, and nobody who does not read that language will notice. Also pins the
+    `{token}` placeholders, since a translation that drops one silently loses
+    the number it was carrying (`{batt}% - {fuel}% fuel`)."""
+    # The table is a module-scope constant, so this reads the shipped source
+    # rather than the DOM - no browser needed for a structural invariant.
+    import re
+    src = _source(CARD)
+    body = src[src.index("const STR"):]
+    langs = re.findall(r"\n    ([a-z]{2}): \{", body)
+    assert "en" in langs and len(langs) > 1, langs
+
+    def block(lang):
+        start = body.index("\n    %s: {" % lang)
+        i = body.index("{", start)
+        depth = 0
+        for j in range(i, len(body)):
+            if body[j] == "{":
+                depth += 1
+            elif body[j] == "}":
+                depth -= 1
+                if depth == 0:
+                    return body[i:j + 1]
+        raise AssertionError("unterminated dictionary for " + lang)
+
+    pair = re.compile(r'"([^"]+)"\s*:\s*"((?:[^"\\]|\\.)*)"')
+    tok = re.compile(r"\{(\w+)\}")
+    dicts = {lang: dict(pair.findall(block(lang))) for lang in langs}
+    english = dicts["en"]
+    assert len(english) > 50, len(english)
+    for lang, table in dicts.items():
+        if lang == "en":
+            continue
+        missing = sorted(set(english) - set(table))
+        assert not missing, f"{lang} is missing {len(missing)} key(s): {missing}"
+        unknown = sorted(set(table) - set(english))
+        assert not unknown, f"{lang} defines keys English does not: {unknown}"
+        for key, text in table.items():
+            assert text.strip(), f"{lang}.{key} is empty"
+            # A translation may DROP a placeholder - Thai needs no {plural} -
+            # but inventing one it never receives renders the braces literally.
+            invented = set(tok.findall(text)) - set(tok.findall(english[key]))
+            assert not invented, (
+                f"{lang}.{key} uses {sorted(invented)}, which the card never "
+                f"substitutes: {text!r}")
+            # {plural} is fed the English letter "s" (or ""), so any language
+            # that does not pluralise by appending an s renders nonsense with
+            # it - the Italian draft read "1 apertur aperte" / "2 aperturs
+            # aperte". Translations phrase around the count instead.
+            assert "plural" not in tok.findall(text), (
+                f"{lang}.{key} uses {{plural}}, which is substituted with the "
+                f"English \"s\" - reword so the string works for any count: "
+                f"{text!r}")
