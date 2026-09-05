@@ -53,6 +53,24 @@ _LOCK_STATE_PATH = (
     "centralLockingStatus",
 )
 
+# The fallback for a trim that never sends the central field. A South African
+# E2 reports all four per-door locks and no `centralLockingStatus` at all, so
+# this entity sat at Unknown through every lock and unlock while the four door
+# sensors beside it read Locked correctly - the owner ended up rebuilding the
+# aggregate himself in a template (#72).
+#
+# Sound because these are the same four fields the door-lock sensors already
+# publish, and they were captured moving in lockstep with `centralLockingStatus`
+# on a car that sends both (1/1/1/1 locked, 0/0/0/0 unlocked). Used only when
+# the central field is missing, so a car that sends it is untouched.
+_DOOR_LOCK_PATH = (
+    "vehicleStatus", "additionalVehicleStatus", "drivingSafetyStatus",
+)
+_DOOR_LOCK_FIELDS = (
+    "doorLockStatusDriver", "doorLockStatusPassenger",
+    "doorLockStatusDriverRear", "doorLockStatusPassengerRear",
+)
+
 # How long to show the locking/unlocking spinner before falling back to
 # whatever the server reports.
 #
@@ -101,10 +119,21 @@ class GeelyLock(CoordinatorEntity, LockEntity):
 
     def _api_is_locked(self) -> bool | None:
         v = _walk(self.coordinator.data or {}, _LOCK_STATE_PATH)
-        if v is None:
+        if v is not None:
+            # 1 / 2 = locked (2 occasionally seen for double-locked); 0 = unlocked
+            return v in ("1", 1, "2", 2)
+        # No central field on this trim - fall back to the four door locks,
+        # which use the same codes. Locked only when every door that reports
+        # says locked; unknown while none of them do, so a car that sends
+        # neither still reads Unknown rather than a confident "unlocked".
+        safety = _walk(self.coordinator.data or {}, _DOOR_LOCK_PATH)
+        if not isinstance(safety, dict):
             return None
-        # 1 / 2 = locked (2 occasionally seen for double-locked); 0 = unlocked
-        return v in ("1", 1, "2", 2)
+        seen = [safety.get(f) for f in _DOOR_LOCK_FIELDS]
+        seen = [s for s in seen if s is not None]
+        if not seen:
+            return None
+        return all(s in ("1", 1, "2", 2) for s in seen)
 
     def _is_in_transition(self) -> bool:
         if self._pending_target_locked is None:

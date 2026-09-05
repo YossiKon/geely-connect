@@ -148,6 +148,68 @@ def test_lock_treats_unknown_status_codes_as_not_locked():
         assert entity.is_locked is False, junk
 
 
+# ------------------- #72: a trim that sends no central locking field --------
+
+def _door_lock_data(**fields):
+    """A payload with per-door locks and NO centralLockingStatus - the shape a
+    South African E2 sends."""
+    return {"vehicleStatus": {"additionalVehicleStatus": {
+        "drivingSafetyStatus": dict(fields)}}}
+
+
+def test_lock_falls_back_to_the_four_door_locks():
+    """Without this the entity sits at Unknown through every lock and unlock on
+    a car that reports the doors perfectly well (#72) - the owner had to
+    rebuild the aggregate in a template."""
+    _need_ha()
+    locked = _door_lock_data(
+        doorLockStatusDriver="1", doorLockStatusPassenger="1",
+        doorLockStatusDriverRear="1", doorLockStatusPassengerRear="1")
+    _, entity, _ = _make_lock(data=locked)
+    assert entity.is_locked is True
+
+    unlocked = _door_lock_data(
+        doorLockStatusDriver="0", doorLockStatusPassenger="0",
+        doorLockStatusDriverRear="0", doorLockStatusPassengerRear="0")
+    _, entity, _ = _make_lock(data=unlocked)
+    assert entity.is_locked is False
+
+
+def test_one_unlocked_door_means_the_car_is_not_locked():
+    """All four must agree before the car is called locked - a single open
+    latch is exactly what someone checks this entity to catch."""
+    _need_ha()
+    _, entity, _ = _make_lock(data=_door_lock_data(
+        doorLockStatusDriver="1", doorLockStatusPassenger="0",
+        doorLockStatusDriverRear="1", doorLockStatusPassengerRear="1"))
+    assert entity.is_locked is False
+    # A trim reporting only some of the four still answers from what it sends.
+    _, entity, _ = _make_lock(data=_door_lock_data(doorLockStatusDriver="1"))
+    assert entity.is_locked is True
+
+
+def test_the_central_field_still_wins_where_it_exists():
+    """The fallback must never override a car that sends the real thing, even
+    when the two disagree."""
+    _need_ha()
+    data = _door_lock_data(
+        centralLockingStatus="0",
+        doorLockStatusDriver="1", doorLockStatusPassenger="1",
+        doorLockStatusDriverRear="1", doorLockStatusPassengerRear="1")
+    _, entity, _ = _make_lock(data=data)
+    assert entity.is_locked is False, "the per-door fallback overrode the central field"
+
+
+def test_a_car_that_reports_no_lock_field_at_all_stays_unknown():
+    """Unknown, not a confident "unlocked" - the state nothing can be inferred
+    from must not read as a car standing open."""
+    _need_ha()
+    _, entity, _ = _make_lock(data=_door_lock_data())
+    assert entity.is_locked is None
+    _, entity, _ = _make_lock(data={})
+    assert entity.is_locked is None
+
+
 def test_lock_state_is_unknown_when_the_car_reports_nothing():
     _need_ha()
     for data in (None, {}, {"vehicleStatus": {}}):
