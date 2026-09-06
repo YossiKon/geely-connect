@@ -184,6 +184,7 @@
       "action.vent": "Vent",
       "boot.boot": "Boot",
       "boot.trunk": "Trunk",
+      "chip.charge_ready": "Ready {at} · {left} left",
       "chip.climate_on": "Climate on",
       "chip.driving": "Driving",
       "chip.locked": "Locked",
@@ -288,6 +289,7 @@
       "action.vent": "ระบายอากาศ",
       "boot.boot": "กระโปรงท้าย",
       "boot.trunk": "ท้ายรถ",
+      "chip.charge_ready": "พร้อม {at} · เหลือ {left}",
       "chip.climate_on": "แอร์เปิดอยู่",
       "chip.driving": "กำลังขับ",
       "chip.locked": "ล็อกแล้ว",
@@ -392,6 +394,7 @@
       "action.vent": "Ventilazione",
       "boot.boot": "Portellone",
       "boot.trunk": "Bagagliaio",
+      "chip.charge_ready": "Pronto {at} · {left} rimanenti",
       "chip.climate_on": "Clima acceso",
       "chip.driving": "In marcia",
       "chip.locked": "Bloccata",
@@ -1217,6 +1220,8 @@
       // A pending arm-timeout must not fire a render on a removed card.
       clearTimeout(this._armedTimer);
       this._armed = null;
+      // A charging countdown must not keep re-rendering a removed card.
+      this._ensureMinuteTick(false);
       // The expand dialog lives in document.body, so it will not be removed
       // with the card's own DOM - take it with us.
       if (this._expandDialog) {
@@ -1224,6 +1229,18 @@
         this._expandDialog.remove();
         this._expandDialog = null;
         this._expandCard = null;
+      }
+    }
+
+    // A once-a-minute self-render so a charging countdown ticks down between
+    // polls (the car reports new data only every few minutes). Idempotent: a
+    // render calls this each time and it keeps the single running timer.
+    _ensureMinuteTick(on) {
+      if (on && !this._minuteTick) {
+        this._minuteTick = setInterval(() => this._safeRender(), 60000);
+      } else if (!on && this._minuteTick) {
+        clearInterval(this._minuteTick);
+        this._minuteTick = null;
       }
     }
 
@@ -2215,7 +2232,7 @@
 
   class GeelyCardCompact extends GeelyCardBase {
     _watched() {
-      return ["sensor.battery", "sensor.electric_range", "sensor.charger_connection",
+      const w = ["sensor.battery", "sensor.electric_range", "sensor.charger_connection",
         // Watched because the head row prints it (#52). A value the card
         // draws but does not watch freezes on screen - the render is
         // skipped whenever the signature is unchanged.
@@ -2224,6 +2241,10 @@
         "binary_sensor.door_driver", "binary_sensor.door_passenger",
         "binary_sensor.door_rear_left", "binary_sensor.door_rear_right",
         "binary_sensor.trunk", "binary_sensor.hood", "binary_sensor.connected"];
+      // Only the opt-in countdown reads the finish time, so it is only watched
+      // when that option is on - default cards keep their existing signature.
+      if (this._config.charging_countdown) w.push("sensor.charge_complete");
+      return w;
     }
 
     getCardSize() { return 4; }
@@ -2261,6 +2282,33 @@
         ? windowsCover.attributes.current_position : null;
       const winFrac = typeof winPos === "number"
         ? Math.max(0, Math.min(1, winPos / 100)) : 1;
+
+      // Opt-in charging countdown (`charging_countdown: true`): the live power
+      // moves up to a status line under the title (as the full card shows it),
+      // and the chip below becomes a "ready by + time left" readout that ticks
+      // down each minute. Off by default, so an unset card is unchanged.
+      const countdown = !!this._config.charging_countdown;
+      const chargeComplete = countdown ? this._st("sensor.charge_complete") : null;
+      const chargingLine = countdown && s.charging
+        ? this._t("status.charging_line", "Charging{power}",
+            { power: power != null ? " · " + power.toFixed(1) + " kW" : "" })
+        : "";
+      const readyChip = (() => {
+        if (!countdown || !s.charging) return null;
+        if (chargeComplete && OK(chargeComplete)) {
+          const d = new Date(chargeComplete.state);
+          if (!isNaN(d)) {
+            const at = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+            const mins = Math.max(0, Math.round((d.getTime() - Date.now()) / 60000));
+            const left = mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
+            return this._t("chip.charge_ready", "Ready {at} · {left} left", { at, left });
+          }
+        }
+        return chargingWord;
+      })();
+      // Tick the "time left" down each minute while a countdown is on screen.
+      this._ensureMinuteTick(!!(readyChip && chargeComplete && OK(chargeComplete)));
+
       const chips = [
         // First, and only while it is true: the compact card falls back to a
         // "Parked" chip when nothing else applies, which on a moving car was the
@@ -2269,7 +2317,7 @@
         showParked && !driving && `<span class="chip">${esc(parkedWord)}</span>`,
         s.locked && `<span class="chip ${s.locked.state === "locked" ? "" : "warn"}">
             ${esc(s.locked.state === "locked" ? this._t("chip.locked", "Locked") : this._t("chip.unlocked", "Unlocked"))}</span>`,
-        s.charging && `<span class="chip on">${iconFilled("bolt")} ${power != null ? power.toFixed(1) + " kW" : esc(chargingWord)}</span>`,
+        s.charging && `<span class="chip on">${iconFilled("bolt")} ${countdown ? esc(readyChip) : (power != null ? power.toFixed(1) + " kW" : esc(chargingWord))}</span>`,
         !s.charging && s.conn && s.conn.state === "Plugged in" && `<span class="chip">${esc(this._t("chip.plugged_in", "Plugged in"))}</span>`,
         climateOn && `<span class="chip on">${esc(this._t("chip.climate_on", "Climate on"))}</span>`,
         s.doorsOpen.length > 0 && `<span class="chip warn">${esc(this._t("chip.n_open", "{count} open", { count: s.doorsOpen.length }))}</span>`,
@@ -2283,6 +2331,8 @@
         .title { font-size:13px; font-weight:600; letter-spacing:.02em; display:flex; align-items:center; gap:7px; }
         .dot { width:6px; height:6px; border-radius:50%; background:${ACCENT}; }
         .dot.off { background:${AMBER}; }
+        .status { font-size:12px; color: var(--secondary-text-color); margin-top:3px; }
+        .status.charging { color:${ACCENT}; font-weight:600; }
         .hero { display:flex; align-items:center; gap:14px; margin:8px 0 2px; }
         .hero .n { font-size:44px; }
         .hero .u { font-size:13px; color: var(--secondary-text-color); margin-left:3px; }
@@ -2301,6 +2351,7 @@
               (battSize || inTemp == null) ? "" : this._t("label.temp_in", "{temp}° in", { temp: Math.round(inTemp) }),
             ].filter(Boolean).join(" · ")}</span>
           </div>
+          ${chargingLine ? `<div class="status charging">${esc(chargingLine)}</div>` : ""}
           <div class="hero">
             <div>
               ${battSize ? `<div class="battpct num" style="font-size:${battSize}px;font-weight:${battBold ? 700 : 400}">${batt}%${inTemp == null ? "" : ` · ${Math.round(inTemp)}°`}</div>` : ""}

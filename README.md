@@ -305,6 +305,7 @@ Everything else is optional:
 | `battery_bold:` | `true` | Set `false` to draw the battery-% headline in a regular weight instead of bold |
 | `charge_time_format:` | `min` | How **Time to full** reads while charging: `min` (e.g. `249 min`) or `hm` for hours + minutes (e.g. `4h 9m`) |
 | `show_parked:` | `false` | Compact card only. `true` adds a **Parked** chip next to Locked while the car is stationary, matching the full card's status |
+| `charging_countdown:` | `false` | Compact card only. `true` moves the live charging power up to a **status line under the title** (as the full card shows it) and turns the charging chip into a **ready-by time + countdown** (e.g. `Ready 10:22 · 2h 15m left`) that ticks down each minute |
 | `car_image:` | *none* | Path or URL to your own photo of the car (e.g. `/local/geely/mycar.png` for a file in `config/www/geely/`). It replaces the drawn car while keeping the live overlay - headlights, tail lights, charge port and the open-panel markers. Transparent PNG/WebP, side-on, front to the left works best |
 | `car_image_hotspots:` | *sensible defaults* | Fine-tune where the overlay lights sit on your image, as percentages, if a different crop needs it - e.g. `{headlight: [8, 46], taillight: [94, 37], port: [86, 40]}` |
 

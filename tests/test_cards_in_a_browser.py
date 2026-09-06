@@ -829,6 +829,97 @@ def test_the_charging_banner_fallback_still_shows_power():
         assert "6.83 kW" in text, (tag, text)
 
 
+# ------------------------ opt-in compact charging countdown (charging_countdown)
+
+_COMPACT_COUNTDOWN_SCRIPT = r"""(arg) => {
+    const el = document.createElement("geely-card-compact");
+    document.body.appendChild(el);
+    el.setConfig(arg.cfg);
+    const hass = window.mkHass({});
+    hass.states["sensor.car_charging_power"] = {
+        entity_id: "sensor.car_charging_power", state: arg.power,
+        attributes: { unit_of_measurement: "kW", device_class: "power" } };
+    if (arg.completeMins !== null) {
+        const iso = new Date(Date.now() + arg.completeMins * 60000).toISOString();
+        hass.states["sensor.car_charge_complete"] = {
+            entity_id: "sensor.car_charge_complete", state: iso,
+            attributes: { device_class: "timestamp" } };
+    }
+    el.hass = hass;
+    const status = el.shadowRoot.querySelector(".status.charging");
+    const chip = [...el.shadowRoot.querySelectorAll(".chip")]
+        .find(c => /kW|Ready|Charging/.test(c.textContent));
+    const out = {
+        status: status ? status.textContent.replace(/\s+/g, " ").trim() : null,
+        chip: chip ? chip.textContent.replace(/\s+/g, " ").trim() : null,
+        tick: !!el._minuteTick,
+    };
+    el.remove();   // disconnectedCallback clears the tick timer
+    return out;
+}"""
+
+
+def test_compact_charging_countdown_moves_power_up_and_shows_ready_and_left():
+    """With `charging_countdown: true` the live power becomes a status line under
+    the title (like the full card) and the chip becomes a ready-by + time-left
+    readout."""
+    got = _evaluate(_COMPACT_COUNTDOWN_SCRIPT,
+                    arg={"cfg": {"charging_countdown": True},
+                         "power": "1.7", "completeMins": 135})
+    assert got["status"] and "1.7 kW" in got["status"], got
+    assert got["chip"] and "Ready" in got["chip"] and "left" in got["chip"], got
+    assert "kW" not in got["chip"], got          # power moved to the status line
+    assert got["tick"] is True, got              # a live countdown is ticking
+
+
+def test_compact_charging_default_keeps_the_kw_chip_and_no_top_line():
+    """Unset (the default), the card is unchanged: the kW chip stays and no
+    charging status line appears, so existing users see no difference."""
+    got = _evaluate(_COMPACT_COUNTDOWN_SCRIPT,
+                    arg={"cfg": {}, "power": "1.7", "completeMins": 135})
+    assert got["status"] is None, got
+    assert got["chip"] and "1.7 kW" in got["chip"], got
+    assert "Ready" not in (got["chip"] or ""), got
+    assert got["tick"] is False, got
+
+
+def test_compact_charging_countdown_falls_back_without_a_finish_time():
+    """Opted in and charging but the car has not reported a finish time yet: the
+    chip reads plainly 'Charging' and nothing ticks - a countdown needs a target."""
+    got = _evaluate(_COMPACT_COUNTDOWN_SCRIPT,
+                    arg={"cfg": {"charging_countdown": True},
+                         "power": "1.7", "completeMins": None})
+    assert got["status"] and "1.7 kW" in got["status"], got
+    assert got["chip"] and "Charging" in got["chip"], got
+    assert "Ready" not in got["chip"], got
+    assert got["tick"] is False, got
+
+
+def test_compact_charging_countdown_stops_ticking_when_charging_ends():
+    """The once-a-minute self-render is armed only while a countdown is shown and
+    cleared the moment charging stops, so a parked car is not re-rendering
+    forever."""
+    got = _evaluate(r"""() => {
+        const el = document.createElement("geely-card-compact");
+        document.body.appendChild(el);
+        el.setConfig({ charging_countdown: true });
+        const on = window.mkHass({});
+        on.states["sensor.car_charging_power"] = { entity_id: "sensor.car_charging_power",
+            state: "1.7", attributes: { unit_of_measurement: "kW", device_class: "power" } };
+        on.states["sensor.car_charge_complete"] = { entity_id: "sensor.car_charge_complete",
+            state: new Date(Date.now() + 3600000).toISOString(),
+            attributes: { device_class: "timestamp" } };
+        el.hass = on;
+        const during = !!el._minuteTick;
+        el.hass = window.mkHass({});   // no charging_power -> not charging
+        const after = !!el._minuteTick;
+        el.remove();
+        return { during, after };
+    }""")
+    assert got["during"] is True, got
+    assert got["after"] is False, got
+
+
 # ------------------------------------------- #29: the climate row on a phone
 
 _ROWS_PROBE = """(() => {
