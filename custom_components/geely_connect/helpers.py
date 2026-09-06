@@ -242,6 +242,29 @@ def windows_open(data: Any) -> bool | None:
     return False if any_seen else None
 
 
+def windows_position(data: Any) -> int | None:
+    """How far open the windows are, 0-100, as the most-open corner.
+
+    The car reports a per-corner `winPos*` alongside `winStatus*`; the command
+    range is 0-100 (step 4), and a vent crack reads ~8. Returns the maximum so
+    the aggregate "All Windows" cover reads how open the most-open window is,
+    or None when the car publishes no `winPos*` field at all.
+    """
+    climate = walk(data or {}, _CLIMATE_PATH) or {}
+    best: int | None = None
+    for corner in WINDOW_CORNERS:
+        v = climate.get(f"winPos{corner}")
+        if v is None:
+            continue
+        try:
+            n = int(float(v))
+        except (TypeError, ValueError):
+            continue
+        n = max(0, min(100, n))
+        best = n if best is None else max(best, n)
+    return best
+
+
 def schedule_refresh(hass: HomeAssistant, coordinator, *delays: float,
                      after: Callable[[], None] | None = None) -> None:
     """Poll the car again a little after a command, without blocking the call.
