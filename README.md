@@ -1011,12 +1011,13 @@ vehicle read (status, position, capabilities and the two charging-reported
 entities), and - for a migrated car addressed by its vehicle token - remote
 commands through the new gateway's own control route: find / lights (confirmed
 by two owners), windows, sunshade and vent, rapid heat / cool, G-Clean, seat
-and steering-wheel heat, defrost, and the GPS position wake. **Door lock /
-unlock is deliberately not enabled on that new control route yet** - its
-mapping waits for a second owner's confirmation, because a wrong guess there
-could unlock a car; until then those two buttons answer with a clear "not
-mapped" error rather than sending anything. Non-AU regions are still
-unverified.
+and steering-wheel heat, defrost, the GPS position wake, and - since v1.51.0 -
+**door lock / unlock**. That last one was held back from August until a second
+owner had run the cycle on his own car, because a reversed mapping there opens
+a vehicle instead of securing it; two Australian cars now lock and unlock as
+mapped. A service the catalogue does not cover still answers with a clear "not
+mapped" error rather than sending a guessed body to a car. Non-AU regions are
+still unverified.
 
 **Migrated accounts.** When the official app moves an account onto the new
 platform, the old backend stops knowing the car - every read answers
