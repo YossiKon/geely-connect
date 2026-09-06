@@ -9,6 +9,14 @@ blueprint:
     distinct sound); an early unplug clears it quietly instead.
 
 
+    It also catches the easy-to-miss case where the car is plugged in but not
+    actually charging - a wall switch left off, for instance. If a set time
+    passes after plug-in with no session started, and the battery is below the
+    reminder level, you get a "check the wall switch" alert. It is skipped near
+    full, where being plugged in and idle is normal and the "charged" alert
+    already covers the top end.
+
+
     Android (Home Assistant Companion app) only for the full effect - the
     ticking timer, the pinned status-bar icon and the "alert once" behaviour are
     all Android notification features. On iOS you still get a notification that
@@ -134,6 +142,45 @@ blueprint:
           step: 0.5
           unit_of_measurement: "%"
           mode: box
+    plug_reminder_below:
+      name: "Plugged-in reminder: only below (%)"
+      description: >
+        The "plugged in but not charging" reminder fires only when the battery
+        is below this. Above it, being plugged in and idle is normal (the car is
+        as good as full) and the reminder is skipped. Set to 0 to turn the
+        reminder off entirely.
+      default: 95
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+          mode: box
+    plug_reminder_delay:
+      name: "Plugged-in reminder: wait (minutes)"
+      description: >
+        How long the car may sit plugged in without a charging session starting
+        before the reminder fires. This grace period gives a normal plug-in time
+        to begin charging - and the cloud time to report it - so it does not nag
+        the instant you plug in. Three minutes suits most setups.
+      default: 3
+      selector:
+        number:
+          min: 1
+          max: 30
+          step: 1
+          unit_of_measurement: min
+          mode: box
+    plug_reminder_channel:
+      name: "Plugged-in reminder channel"
+      description: >
+        A separate channel for the "check the wall switch" reminder, so you can
+        give it its own sound/importance in Android. Keep it different from the
+        countdown and charge-finished channels above.
+      default: Car plugged in
+      selector:
+        text:
 
 variables:
   connection_entity: !input connection_sensor
@@ -142,8 +189,14 @@ variables:
   power_entity: !input power_sensor
   range_entity: !input range_sensor
   full_v: !input full_level
+  remind_below: !input plug_reminder_below
   not_full: "{{ (states(battery_entity) | float(0)) < full_v }}"
   batt_now: "{{ states(battery_entity) | float(0) | round | int }}"
+  # Plugged in, no session running, and not near full. float(101) so an unknown
+  # battery reads "not below the level" and never nags.
+  plugged_idle: >-
+    {{ states(connection_entity) == 'Plugged in'
+       and (states(battery_entity) | float(101)) < remind_below }}
   finish: >-
     {{ as_timestamp(states(complete_entity), 0) | timestamp_custom('%-I:%M %p', true) }}
   power_txt: >-
@@ -158,6 +211,16 @@ trigger:
     entity_id: !input connection_sensor
   - platform: state
     entity_id: !input charge_complete_sensor
+  # Plugged in but still not charging after the grace period -> wall-switch
+  # reminder. The `for` gives a real plug-in time to start (and the cloud time
+  # to report it); the id lets the reminder branch fire only off this timer and
+  # never the instant the plug goes in.
+  - platform: state
+    entity_id: !input connection_sensor
+    to: "Plugged in"
+    for:
+      minutes: !input plug_reminder_delay
+    id: plug_grace
   # Drives the "charged" alert off the battery reaching full, held briefly so a
   # single odd reading can't fire it.
   - platform: numeric_state
@@ -182,6 +245,11 @@ action:
                 tag: geely_charging
           - service: !input notify_target
             data:
+              message: clear_notification
+              data:
+                tag: geely_plug_reminder
+          - service: !input notify_target
+            data:
               title: "✅ Charged"
               message: "{{ full_txt }}"
               data:
@@ -204,6 +272,12 @@ action:
           - condition: template
             value_template: "{{ not_full }}"
         sequence:
+          # Charging is under way: retire any "check the wall switch" reminder.
+          - service: !input notify_target
+            data:
+              message: clear_notification
+              data:
+                tag: geely_plug_reminder
           - service: !input notify_target
             data:
               title: "🔌 Charging"
@@ -245,6 +319,28 @@ action:
                 sticky: false
                 notification_icon: !input icon
                 color: "#43A047"
+                clickAction: !input dashboard_path
+      # ---- Plugged in but not charging: wall-switch reminder ----------------
+      # Fires only off the grace timer (never the instant the plug goes in), and
+      # only while still idle and below the reminder level - so a plug-in that
+      # started charging in time, or a top-up near full, is left alone.
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.id == 'plug_grace' }}"
+          - condition: template
+            value_template: "{{ plugged_idle }}"
+        sequence:
+          - service: !input notify_target
+            data:
+              title: "🔌 Plugged in - not charging"
+              message: "Check the wall switch - the car isn't charging (battery {{ batt_now }}%)."
+              data:
+                tag: geely_plug_reminder
+                channel: !input plug_reminder_channel
+                importance: high
+                sticky: false
+                notification_icon: mdi:power-plug-off
+                color: "#E53935"
                 clickAction: !input dashboard_path
   # No default: the last "charged"/"stopped" message stays put - a stray trigger
   # while idle can never wipe it, nor race the estimate blinking to unknown.

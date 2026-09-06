@@ -231,6 +231,16 @@
       entity_id: sensor.my_geely_ex5_battery
       above: 99.5
       for: "00:00:20"
+    # Plugged in but still not charging after a grace period -> wall-switch
+    # reminder (a switch left off at the socket). The "for" gives a normal
+    # plug-in time to start - and the cloud time to report it - and the id lets
+    # the reminder branch fire only off this timer, never the instant you plug
+    # in. TUNE: 00:03:00 grace.
+    - trigger: state
+      entity_id: sensor.my_geely_ex5_charger_connection
+      to: "Plugged in"
+      for: "00:03:00"
+      id: plug_grace
   actions:
     - choose:
         # TRUE full: clear the countdown, then a "charged" alert on its OWN
@@ -247,6 +257,11 @@
                 message: clear_notification
                 data:
                   tag: geely_charging
+            - action: notify.mobile_app_your_phone
+              data:
+                message: clear_notification
+                data:
+                  tag: geely_plug_reminder
             - action: notify.mobile_app_your_phone
               data:
                 title: "✅ Charged"
@@ -275,6 +290,12 @@
               value_template: >-
                 {{ (states('sensor.my_geely_ex5_battery') | float(0)) < 99.5 }}
           sequence:
+            # Charging is under way: retire any wall-switch reminder.
+            - action: notify.mobile_app_your_phone
+              data:
+                message: clear_notification
+                data:
+                  tag: geely_plug_reminder
             - action: notify.mobile_app_your_phone
               data:
                 title: "🔌 Charging"
@@ -332,6 +353,35 @@
                   sticky: false
                   notification_icon: mdi:ev-station
                   color: "#43A047"
+                  clickAction: /lovelace/car
+        # Plugged in but not charging (e.g. wall switch off): fires only off the
+        # grace timer, and only while still idle and below the reminder level -
+        # so a plug-in that started charging in time, or a top-up near full, is
+        # left alone. TUNE: 95 - only nag below this; the "charged" branch above
+        # covers the top end.
+        - conditions:
+            - condition: template
+              value_template: "{{ trigger.id == 'plug_grace' }}"
+            - condition: state
+              entity_id: sensor.my_geely_ex5_charger_connection
+              state: "Plugged in"
+            - condition: numeric_state
+              entity_id: sensor.my_geely_ex5_battery
+              below: 95
+          sequence:
+            - action: notify.mobile_app_your_phone
+              data:
+                title: "🔌 Plugged in - not charging"
+                message: >-
+                  Check the wall switch - the car isn't charging (battery
+                  {{ states('sensor.my_geely_ex5_battery') | float(0) | round | int }}%).
+                data:
+                  tag: geely_plug_reminder
+                  channel: Car plugged in
+                  importance: high
+                  sticky: false
+                  notification_icon: mdi:power-plug-off
+                  color: "#E53935"
                   clickAction: /lovelace/car
   mode: queued
   max: 10
