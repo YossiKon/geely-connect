@@ -173,6 +173,27 @@ def _translate_command(service_id: str, command: str,
     """
     p = {q.get("key"): q.get("value") for q in (parameters or [])}
 
+    if service_id == "RDL_2":                       # lock
+        return "RDL", "start", [{"key": "door", "value": "all"}]
+
+    if service_id == "RDU_2":
+        # RDU is a general "open" service selected by target; the command
+        # differs per target. Directions were checked against the car's own
+        # centralLockingStatus, not the names: RDU+stop UNLOCKS, RDL+start
+        # LOCKS. Mapped the other way round lock.lock silently unlocks the
+        # car, which is why this was the one mapping held back until a second
+        # owner had run the cycle on his own vehicle - two AU cars now lock
+        # and unlock as written (#55). An unrecognised target still returns
+        # None rather than guessing a direction on a door.
+        target = p.get("target")
+        if target == "trunk":                       # tailgate
+            return "RDU", "stop", [{"key": "target", "value": "trunk"}]
+        if target == "hood":                        # frunk (no entity yet)
+            return "RDU", "start", [{"key": "target", "value": "hood"}]
+        if target:
+            return None
+        return "RDU", "stop", [{"key": "door", "value": "all"}]   # unlock
+
     if service_id in ("RCE_2", "RCE"):
         level = p.get("rce.level")
         seat = p.get("rce.heat") or p.get("rce.ventilation")

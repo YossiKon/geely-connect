@@ -69,3 +69,29 @@ def test_air_clean_maps_to_rcc():
 
 def test_an_uncaptured_service_is_refused():
     assert tc("SOMETHING_NEW", "start", []) is None
+
+
+# ---- lock / unlock -----------------------------------------------------
+# The directions are the held part: verified against centralLockingStatus,
+# not the service names, because RDU+stop UNLOCKS and RDL+start LOCKS. This
+# stays single-source until a second new-platform owner confirms the cycle.
+
+def test_lock_is_rdl_start():
+    assert tc("RDL_2", "start", [{"key": "door", "value": "all"}]) == (
+        "RDL", "start", [{"key": "door", "value": "all"}])
+
+
+def test_unlock_is_rdu_stop():
+    assert tc("RDU_2", "start", [{"key": "door", "value": "all"}]) == (
+        "RDU", "stop", [{"key": "door", "value": "all"}])
+
+
+def test_tailgate_and_frunk_are_rdu_targets():
+    assert tc("RDU_2", "start", [{"key": "target", "value": "trunk"}]) == (
+        "RDU", "stop", [{"key": "target", "value": "trunk"}])
+    assert tc("RDU_2", "start", [{"key": "target", "value": "hood"}]) == (
+        "RDU", "start", [{"key": "target", "value": "hood"}])
+
+
+def test_an_uncaptured_rdu_target_is_refused():
+    assert tc("RDU_2", "start", [{"key": "target", "value": "sunroof"}]) is None
