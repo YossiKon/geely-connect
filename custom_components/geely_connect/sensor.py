@@ -91,6 +91,9 @@ _TIRE_CORNERS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
 # park_brake, charger_connected) correctly have neither.
 _MEASUREMENT_KEYS = {
     "battery", "range", "interior_temp", "exterior_temp", "speed", "cabin_humidity",
+    # Altitude is a measurement, not a total: it rises and falls with the road,
+    # and total_increasing would read every descent as a counter rollover.
+    "altitude",
     "12v_battery", "12v_voltage", "avg_consumption", "avg_speed",
     "tire_pressure_fl", "tire_pressure_fr", "tire_pressure_rl", "tire_pressure_rr",
     "tire_temp_fl", "tire_temp_fr", "tire_temp_rl", "tire_temp_rr",
@@ -230,6 +233,14 @@ SENSOR_SPECS: tuple[tuple, ...] = (
     ("cabin_humidity",      "Cabin Humidity",       (*_POLL,  "relHumSts"),                            PERCENTAGE,                       SensorDeviceClass.HUMIDITY,    "float", None),
     ("exterior_temp",       "Exterior Temperature", (*_CLIM,  "exteriorTemp"),                         UnitOfTemperature.CELSIUS,        SensorDeviceClass.TEMPERATURE, "float", None),
     ("speed",               "Speed",                (*_BASIC, "speed"),                                UnitOfSpeed.KILOMETERS_PER_HOUR,  SensorDeviceClass.SPEED,       "float", None),
+    # The car's own altitude, which until now existed only as an attribute on
+    # the device tracker - and an attribute carries no unit and no state class,
+    # so it could be read but never graphed or kept in long-term statistics
+    # (#77). Metres, on the evidence of two cars on two continents: 1768 on a
+    # Colombian EX2 and 41 on a South African E2, both plausible for where they
+    # are and neither plausible in any other unit. The tracker attribute stays
+    # where it is; this is the same number with somewhere to live.
+    ("altitude",            "Altitude",             (*_BASIC, "position", "altitude"),                 UnitOfLength.METERS,              SensorDeviceClass.DISTANCE,    "float", None),
     ("engine_state",        "Engine State",         (*_BASIC, "engineStatus"),                         None,                             None,                          "map",   _ENGINE_STATE_MAP),
     ("park_brake",          "Park Brake",           (*_SAFE,  "electricParkBrakeStatus"),              None,                             None,                          "map",   _PARK_BRAKE_MAP),
     ("charger_connected",   "Charger Connection",   (*_EV,    "statusOfChargerConnection"),            None,                             None,                          "map",   _CHARGER_CONNECTION_MAP),
@@ -351,6 +362,7 @@ _PRECISION_BY_UNIT: dict[str, int] = {
     UnitOfLength.KILOMETERS: 1,               # odometers read x.x; ranges are ints (see below)
     UnitOfTemperature.CELSIUS: 1,
     UnitOfSpeed.KILOMETERS_PER_HOUR: 0,
+    UnitOfLength.METERS: 0,                   # altitude: the car sends whole metres
     UnitOfElectricPotential.VOLT: 1,          # 12 V battery health lives in the first decimal
     UnitOfElectricCurrent.AMPERE: 1,
     UnitOfPower.KILO_WATT: 2,                 # 7.68 kW - the second decimal is ~10 W, still real

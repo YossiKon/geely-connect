@@ -518,6 +518,54 @@ def test_speed_is_published_when_speed_validity_is_absent():
     assert _speed("50").native_value == 50.0
 
 
+# ------------------------------- #77: altitude ------------------------------
+
+def _altitude(value):
+    """The altitude sensor over a basicVehicleStatus position block."""
+    import copy
+    data = copy.deepcopy(STATUS)
+    pos = data["vehicleStatus"]["basicVehicleStatus"].setdefault("position", {})
+    if value is None:
+        pos.pop("altitude", None)
+    else:
+        pos["altitude"] = value
+
+    class C(_Coord):
+        pass
+    C.data = data
+    sensor = load("sensor")
+    spec = next(s for s in sensor.SENSOR_SPECS if s[0] == "altitude")
+    return sensor.GeelySensor(C(), FAKE_VIN, "Geely EX5 (0000)", *spec,
+                              pressure_unit="psi")
+
+
+def test_altitude_is_a_metre_measurement_not_an_attribute():
+    """It lived only as a device-tracker attribute, which carries no unit and
+    no state class - so it could be read but never graphed or kept in long-term
+    statistics (#77). The two real values behind the unit: 1768 on a Colombian
+    car, 41 on a South African one."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    from homeassistant.components.sensor import SensorStateClass
+    from homeassistant.const import UnitOfLength
+    entity = _altitude("1768")
+    assert entity.native_value == 1768.0
+    assert entity.native_unit_of_measurement == UnitOfLength.METERS
+    assert entity.state_class == SensorStateClass.MEASUREMENT, (
+        "without a state class Home Assistant records no statistics, which is "
+        "the half of #77 that makes it graphable")
+    assert _altitude("41").native_value == 41.0
+
+
+def test_altitude_is_unknown_when_the_car_omits_it():
+    """A car that sends no altitude gets an empty sensor, not a confident 0 -
+    sea level is a real place."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    assert _altitude(None).native_value is None
+    assert _altitude("").native_value is None
+
+
 # --------------------------- #24: exteriorTempValidity ----------------------
 
 def _ext_temp(temp, validity=None, offset=0.0):
