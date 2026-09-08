@@ -169,6 +169,7 @@ def test_an_entry_with_no_verdict_at_all_behaves_like_a_bev():
 _CHARGING_KEYS = frozenset({
     "charger_connected", "time_to_full_min", "charge_complete",
     "charge_power", "charge_current", "charge_voltage",
+    "dc_charge_current", "dc_charge_voltage",
     "bs_charger_plugged_in", "sw_charging", "sw_scheduled_charging",
     "time_scheduled_charging_start", "time_scheduled_charging_end",
 })

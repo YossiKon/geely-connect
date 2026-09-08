@@ -556,6 +556,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
            GeelyChargePowerSensor(coordinator, vin, device_name),
            GeelyChargeCurrentSensor(coordinator, vin, device_name),
            GeelyChargeVoltageSensor(coordinator, vin, device_name),
+           # DC-only views of a fast charge - the pile's current and its own
+           # output voltage - blank on AC and idle, so a dashboard can show a
+           # fast charge on its own without the AC/DC entities' idle noise.
+           GeelyDCChargeCurrentSensor(coordinator, vin, device_name),
+           GeelyDCChargeVoltageSensor(coordinator, vin, device_name),
            # The same DC pair, read for what it is rather than as a charge:
            # the pack's own power flow, which is what the car's dashboard
            # shows while driving. Signed, so one entity covers both
@@ -1223,6 +1228,19 @@ def _charge_leg(data: dict) -> tuple[float, float, bool] | None:
     return None
 
 
+def _dc_charging(data: dict) -> bool:
+    """True only while a real DC (fast-charge) session is delivering power.
+
+    Reuses the leg election above rather than re-deriving it: the DC-specific
+    sensors then light up on exactly the sessions Charging Power calls DC, and
+    stay `None` the rest of the time - which matters because the DC fields read
+    stale numbers when idle (a car parked or *driving* still reports a
+    `dcChargePileUAct` from its last fast charge). A gap beats a stale reading.
+    """
+    leg = _charge_leg(data or {})
+    return leg is not None and leg[2] is False and (leg[0] > 0 or leg[1] > 0)
+
+
 # Where a single-phase supply stops and a three-phase one begins. Mains are
 # 100-250 V single-phase; three-phase is 380-415 V line-to-line, and 400 V is
 # what an EX5 reports on one (#36).
@@ -1345,6 +1363,78 @@ class GeelyChargeVoltageSensor(CoordinatorEntity, _AutoPrecision):
     def native_value(self):
         leg = _charge_leg(self.coordinator.data or {})
         return None if leg is None else round(leg[0], 1)
+
+
+class GeelyDCChargeCurrentSensor(CoordinatorEntity, _AutoPrecision):
+    """Amps flowing in during a DC fast charge - `dcChargeIAct`, as a magnitude.
+
+    The AC/DC "Charge Current" entity already shows this while a DC session is
+    live; this one is the DC-only view, blank on AC and idle, so a dashboard can
+    show the fast-charge current on its own. Gated on the same DC verdict Charging
+    Power uses, so it never publishes the stale idle value the field carries.
+    """
+
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.CURRENT
+    _attr_native_unit_of_measurement = UnitOfElectricCurrent.AMPERE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:current-dc"
+
+    def __init__(self, coordinator, vin: str, device_name: str) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"geely_{vin}_dc_charge_current"
+        self._attr_name = "DC Charge Current"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, vin)}, manufacturer="Geely", name=device_name)
+
+    @property
+    def native_value(self):
+        # Read the magnitude off the elected leg rather than the raw field: the
+        # leg is only DC when dcChargeIAct already parsed, so there is no second
+        # failure mode to guard here.
+        leg = _charge_leg(self.coordinator.data or {})
+        if leg is None or leg[2] is not False or (leg[0] <= 0 and leg[1] <= 0):
+            return None
+        return round(leg[1], 1)
+
+
+class GeelyDCChargeVoltageSensor(CoordinatorEntity, _AutoPrecision):
+    """The DC charger's own output voltage - `dcChargePileUAct`.
+
+    Deliberately the *pile* (charger) voltage, not `dcChargeUAct`: that one is
+    the pack, which the AC/DC Charge Voltage entity already reports and which a
+    car can send mis-scaled (1586 V, #17). The pile field is what the fast
+    charger says it is delivering. Same DC gate and the same plausibility window,
+    so an absent or nonsensical reading is a gap, not a wrong number.
+    """
+
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.VOLTAGE
+    _attr_native_unit_of_measurement = UnitOfElectricPotential.VOLT
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:current-dc"
+
+    def __init__(self, coordinator, vin: str, device_name: str) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"geely_{vin}_dc_charge_voltage"
+        self._attr_name = "DC Charge Voltage"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, vin)}, manufacturer="Geely", name=device_name)
+
+    @property
+    def native_value(self):
+        data = self.coordinator.data or {}
+        if not _dc_charging(data):
+            return None
+        try:
+            volts = float(_walk(data, (*_EV, "dcChargePileUAct")))
+        except (TypeError, ValueError):
+            return None
+        if not _PACK_VOLTS_MIN <= volts <= _PACK_VOLTS_MAX:
+            return None
+        return round(volts, 1)
 
 
 # The window a real traction pack's voltage can occupy. Below is a reading
