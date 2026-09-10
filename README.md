@@ -33,7 +33,7 @@ polished setup on top.
 ## ✨ Highlights
 
 - 🔒 **Security-first** - verified TLS plus public-key pinning.
-- 📊 **Everything enabled** - all 84 entities are on from the start (97 on a
+- 📊 **Everything enabled** - all 86 entities are on from the start (99 on a
   hybrid), no duplicates, nothing to switch on by hand.
 - 🧮 **Computed extras** - charging power, charge completion time, range at full
   charge and efficiency, none of which the car reports itself.
@@ -530,6 +530,7 @@ Location (device tracker) - GPS position on the map, with altitude.
 | **Charge Complete** | When charging finishes, as a time rather than a minute count - so a notification can fire on it |
 | **Charging Power** | How fast the car is charging, in kW. The car reports volts and amps but never their product, so this is the only place the charge rate exists. A real `power` entity, so it records long-term statistics and can be graphed alongside your house load. Reads 0 kW unless the car is genuinely charging: the connection field alone is not enough, because some cars never move it off "Plugged in" through an entire DC fast charge, so the DC contactor and the sign of the pack current count as well. Without that gate the pack pair - which carries traction current while you drive - publishes a 17 kW "charge" on the motorway |
 | **Charge Voltage** / **Charge Current** | The two halves behind that number (diagnostic). Worth a look when a charge is slower than expected - a derated circuit shows up as low current, not low voltage. The car sends an AC pair and a DC pair and never labels them, so the **DC contactor** decides which one is live: closed means a DC session, open means the AC leg. Comparing the two by apparent power used to do this job and was wrong - one car reports a nonsense 1586 V on the DC pair during AC charging, which won that comparison and published 25 kW on a 6 kW wallbox |
+| **DC Charge Current** / **DC Charge Voltage** | The same fast charge, on its own (diagnostic). Blank on an AC session and blank when idle, so a dashboard can show a DC charge without the pair above reporting through every wallbox charge. The voltage here is deliberately the **charger's** own output (`dcChargePileUAct`), not the pack's - the pack figure is what Charge Voltage already reports and what one car sends mis-scaled. Both stay blank rather than publishing the stale numbers these fields keep between sessions |
 | **Pack Power** | The battery's own power flow in kW, signed the way the car signs it: positive leaving the pack, negative going in. This is the figure the car's dashboard shows while driving - about 17 kW up a hill, and around −1.5 kW on a 1.8 kW wall charge, the difference being the onboard charger's losses and the 12 V systems. Reads unknown rather than a number when the pack voltage the car reports is physically impossible - one car sends about 1586 V during AC charging, which would otherwise publish −25 kW into long-term statistics |
 | **Range At Full Charge** | Remaining range extrapolated to 100% at the current efficiency, so it's comparable week to week. Blank below 10% charge, where the estimate is mostly noise |
 | **Last Trip** | How far the last completed journey went, worked out from the odometer between engine-on and engine-off |
@@ -1118,7 +1119,7 @@ enabling. Everything the car reports, plus the computed extras above.
 
 The main thing that varies by car is propulsion: the thirteen fuel and engine
 entities are created only for a car with a tank, so a battery-electric EX5 gets
-84 entities and a PHEV gets 97. That's a decision made once at startup from your
+86 entities and a PHEV gets 99. That's a decision made once at startup from your
 account's `powerType` plus the car's own telemetry - there is no option to set.
 
 Two more - `Charging (reported)` and `Plugged In (reported)` - are built only for

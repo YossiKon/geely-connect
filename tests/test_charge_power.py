@@ -549,3 +549,50 @@ def test_a_negative_ac_current_is_never_published_as_a_charge_current():
     del ev["dcChargeUAct"], ev["dcChargeIAct"]
     amps = _make("GeelyChargeCurrentSensor", data).native_value
     assert amps is None or amps >= 0, amps
+
+
+# ------------------------------------------- DC-only current / voltage views ---
+
+def test_dc_sensors_show_the_pile_readings_during_a_dc_session():
+    """A live DC fast charge: the DC Charge Current is the magnitude of
+    dcChargeIAct, and the DC Charge Voltage is the pile's own output
+    (dcChargePileUAct), not the pack's dcChargeUAct."""
+    data = _charging(dcDcConnectStatus="3", dcChargeUAct="400.0",
+                     dcChargeIAct="-125.0", dcChargePileUAct="398.5")
+    assert _make("GeelyDCChargeCurrentSensor", data).native_value == 125.0
+    assert _make("GeelyDCChargeVoltageSensor", data).native_value == 398.5
+
+
+def test_dc_sensors_are_blank_when_idle_even_with_stale_pile_values():
+    """The DC fields keep their last-session numbers when parked (or driving),
+    so the sensors must read None off a session, not publish 396 V forever."""
+    data = _status(dcChargePileUAct="396.0", dcChargeIAct="7.6")
+    assert _make("GeelyDCChargeCurrentSensor", data).native_value is None
+    assert _make("GeelyDCChargeVoltageSensor", data).native_value is None
+
+
+def test_dc_sensors_stay_blank_through_an_ac_session():
+    """An AC wallbox is charging and the DC pile field still carries a stale
+    reading - the DC-only entities must not leak it into an AC charge."""
+    data = _charging(chargeUAct="240.0", chargeIAct="30.0",
+                     dcChargePileUAct="396.0", dcChargeIAct="7.6")
+    assert _make("GeelyDCChargeCurrentSensor", data).native_value is None
+    assert _make("GeelyDCChargeVoltageSensor", data).native_value is None
+
+
+def test_dc_voltage_rejects_an_implausible_pile_reading():
+    """The same plausibility wall Pack Power uses: a DC session whose pile
+    voltage is nonsense reads None, while the current still reports."""
+    data = _charging(dcDcConnectStatus="3", dcChargeUAct="400.0",
+                     dcChargeIAct="-125.0", dcChargePileUAct="1586.0")
+    assert _make("GeelyDCChargeVoltageSensor", data).native_value is None
+    assert _make("GeelyDCChargeCurrentSensor", data).native_value == 125.0
+
+
+def test_dc_voltage_is_none_when_the_pile_field_is_absent():
+    """A DC session the car reports without a pile voltage: the current still
+    reports off the pack pair, but the voltage has nothing to show."""
+    data = _charging(dcDcConnectStatus="3", dcChargeUAct="400.0",
+                     dcChargeIAct="-125.0")   # no dcChargePileUAct
+    assert _make("GeelyDCChargeVoltageSensor", data).native_value is None
+    assert _make("GeelyDCChargeCurrentSensor", data).native_value == 125.0
