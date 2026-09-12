@@ -114,6 +114,14 @@ def _valid_user_id(uid: Any) -> bool:
     return isinstance(uid, str) and bool(_USER_ID_RE.match(uid))
 
 
+class _LegacyProvisionError(Exception):
+    """Carries the abort reason a failed legacy provisioning should show."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
 def _storage_paths(hass, vin: str) -> tuple[str, str]:
     if not _valid_vin(vin):
         raise ValueError("refusing to build storage path for invalid VIN")
@@ -377,6 +385,78 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema({vol.Required("vin"): vol.In(options)}),
         )
 
+    async def _provision_legacy(self, vin: str, vehicle: dict) -> dict[str, Any]:
+        """The legacy half of an entry: region, device id, and a fresh mTLS cert.
+
+        One resolver for both callers. A first setup needs these four keys, and
+        so does an entry coming back from the new platform - going there drops
+        them, and the return trip used to restore only the session token, which
+        left an entry that could not set up at all (#81). Provisioning is the
+        same work either way: the device id is derived, not issued, and
+        re-provisioning a cert for a VIN this account owns is what a fresh
+        install does anyway.
+
+        Raises _LegacyProvisionError carrying the abort reason, rather than
+        returning a FlowResult - which is itself a dict and would be
+        indistinguishable from the credentials on the way out.
+        """
+        # Which Geely backend this car lives on. It comes from the vehicle
+        # record, not from the country the user picked: the two can differ, and
+        # signing against the wrong one is what produces the opaque 1501
+        # "geelyos verify error".
+        # The fields region resolution reads, logged so an unrecognised market
+        # can be diagnosed from a normal debug log. Region/market codes only -
+        # but the record also carries the VIN and nickname, so it goes through
+        # redact() rather than being printed whole.
+        _LOGGER.debug(
+            "vehicle region fields: %s",
+            geely_api.redact({
+                k: vehicle.get(k) for k in (
+                    "tspInfo", "edgeInfo", "serviceRegion", "saleMarket",
+                    "dcCode", "deliveryCountryCode", "tcamMarket",
+                )
+            }),
+        )
+        region = resolve_vehicle_region(vehicle) or DEFAULT_REGION
+        if region in UNSUPPORTED_REGIONS:
+            _LOGGER.error(
+                "vehicle %s is registered in the %s region (%s), for which no "
+                "app credentials are available", vin[-4:], region,
+                UNSUPPORTED_REGIONS[region],
+            )
+            raise _LegacyProvisionError("wrong_region")
+        backend = region_config(region)
+        _LOGGER.debug("provisioning against the %s backend (%s)",
+                      region, backend["cert_host"])
+
+        device_id = hashlib.md5(f"ha:{self._user_id}:{vin}".encode()).hexdigest()
+        cert_path, key_path = _storage_paths(self.hass, vin)
+        try:
+            await self.hass.async_add_executor_job(
+                lambda: geely_api.provision_user_cert(
+                    app_id=backend["app_id"],
+                    app_secret=backend["app_secret"],
+                    user_id=self._user_id,
+                    cidpsso_token=self._cidpsso_token,
+                    cert_out_path=cert_path,
+                    key_out_path=key_path,
+                    cert_host=backend["cert_host"],
+                )
+            )
+        except geely_api.GeelyRegionError as e:
+            _LOGGER.error("cert provisioning refused: %s", e)
+            raise _LegacyProvisionError("wrong_region") from e
+        except Exception as e:
+            _LOGGER.exception("cert provisioning failed")
+            raise _LegacyProvisionError("cert_failed") from e
+
+        return {
+            CONF_REGION:    region,
+            CONF_DEVICE_ID: device_id,
+            CONF_CERT_PATH: cert_path,
+            CONF_KEY_PATH:  key_path,
+        }
+
     async def _finish_with_vehicle(self, vehicle: dict) -> FlowResult:
         vin = vehicle["vin"]
 
@@ -419,6 +499,28 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             new_data[CONF_USER_ID] = self._user_id
             new_data[CONF_DEVICE_IDFA] = self._idfa
             new_data[CONF_DEVICE_IDFV] = self._idfv
+            # An entry returning from the new platform arrives without the
+            # legacy half - the zeekr branch below drops it - and a refreshed
+            # token cannot set up an entry that has no device id, no region and
+            # no client certificate. Writing one anyway is what left an owner
+            # with `KeyError: 'device_id'` on every reload and no way back
+            # except restoring the whole instance from a backup (#81). A
+            # legacy->legacy re-auth still keeps its own credentials and skips
+            # this: the check is for what is missing, not for where the entry
+            # has been.
+            # Region is deliberately not in this list: entries created before
+            # regions were tracked carry none and resolve to EU, which is the
+            # backend they were provisioned against. Re-provisioning those
+            # would be a behaviour change for working installs.
+            if any(not new_data.get(k) for k in (
+                    CONF_DEVICE_ID, CONF_CERT_PATH, CONF_KEY_PATH)):
+                _LOGGER.info(
+                    "this entry has no credentials for the original backend "
+                    "(it was on the new platform); provisioning them again")
+                try:
+                    new_data.update(await self._provision_legacy(vin, vehicle))
+                except _LegacyProvisionError as e:
+                    return self.async_abort(reason=e.reason)
             self.hass.config_entries.async_update_entry(self._reauth_entry, data=new_data)
             await self.hass.config_entries.async_reload(self._reauth_entry.entry_id)
             return self.async_abort(
@@ -429,55 +531,10 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         await self.async_set_unique_id(f"{self._email}:{vin}")
         self._abort_if_unique_id_configured()
 
-        # Which Geely backend this car lives on. It comes from the vehicle
-        # record, not from the country the user picked: the two can differ, and
-        # signing against the wrong one is what produces the opaque 1501
-        # "geelyos verify error".
-        # The fields region resolution reads, logged so an unrecognised market
-        # can be diagnosed from a normal debug log. Region/market codes only -
-        # but the record also carries the VIN and nickname, so it goes through
-        # redact() rather than being printed whole.
-        _LOGGER.debug(
-            "vehicle region fields: %s",
-            geely_api.redact({
-                k: vehicle.get(k) for k in (
-                    "tspInfo", "edgeInfo", "serviceRegion", "saleMarket",
-                    "dcCode", "deliveryCountryCode", "tcamMarket",
-                )
-            }),
-        )
-        region = resolve_vehicle_region(vehicle) or DEFAULT_REGION
-        if region in UNSUPPORTED_REGIONS:
-            _LOGGER.error(
-                "vehicle %s is registered in the %s region (%s), for which no "
-                "app credentials are available", vin[-4:], region,
-                UNSUPPORTED_REGIONS[region],
-            )
-            return self.async_abort(reason="wrong_region")
-        backend = region_config(region)
-        _LOGGER.debug("provisioning against the %s backend (%s)",
-                      region, backend["cert_host"])
-
-        device_id = hashlib.md5(f"ha:{self._user_id}:{vin}".encode()).hexdigest()
-        cert_path, key_path = _storage_paths(self.hass, vin)
         try:
-            await self.hass.async_add_executor_job(
-                lambda: geely_api.provision_user_cert(
-                    app_id=backend["app_id"],
-                    app_secret=backend["app_secret"],
-                    user_id=self._user_id,
-                    cidpsso_token=self._cidpsso_token,
-                    cert_out_path=cert_path,
-                    key_out_path=key_path,
-                    cert_host=backend["cert_host"],
-                )
-            )
-        except geely_api.GeelyRegionError as e:
-            _LOGGER.error("cert provisioning refused: %s", e)
-            return self.async_abort(reason="wrong_region")
-        except Exception:
-            _LOGGER.exception("cert provisioning failed")
-            return self.async_abort(reason="cert_failed")
+            legacy = await self._provision_legacy(vin, vehicle)
+        except _LegacyProvisionError as e:
+            return self.async_abort(reason=e.reason)
 
         metadata = vehicle_metadata(vehicle)
         # The title needs something to show even for a car with neither a
@@ -489,13 +546,11 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data={
                 CONF_EMAIL:              self._email,
                 CONF_COUNTRY_CODE:       self._country_code,
-                CONF_REGION:             region,
                 CONF_CIDPSSO_TOKEN:      self._cidpsso_token,
                 CONF_USER_ID:            self._user_id,
                 CONF_VIN:                vin,
-                CONF_DEVICE_ID:          device_id,
-                CONF_CERT_PATH:          cert_path,
-                CONF_KEY_PATH:           key_path,
+                # region, device id and the mTLS cert paths
+                **legacy,
                 CONF_DEVICE_IDFA:        self._idfa,
                 CONF_DEVICE_IDFV:        self._idfv,
                 **metadata,

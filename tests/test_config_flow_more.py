@@ -88,9 +88,14 @@ class _Entry:
     def __init__(self, email=EMAIL):
         self.entry_id = "e1"
         self.version = 6
+        # A real legacy entry always carries the three provisioned
+        # credentials - they are written when it is created, and a re-auth
+        # that finds them missing now re-provisions rather than writing a
+        # token into an entry that cannot set up (#81).
         self.data = {"vin": FAKE_VIN, "email": email, "user_id": USER_ID,
                      "cidpsso_token": "old-token", "device_idfa": "A",
-                     "device_idfv": "V"}
+                     "device_idfv": "V", "device_id": "dev-1",
+                     "cert_path": "/c/cert.pem", "key_path": "/c/key.pem"}
         self.options: dict = {}
 
 
@@ -278,6 +283,66 @@ def test_reauth_through_the_code_step_updates_only_the_credentials():
     changed = {k for k in entry.data if entry.data[k] != before[k]}
     assert changed <= {"cidpsso_token", "user_id",
                        "device_idfa", "device_idfv"}, changed
+
+
+def _returning_from_zeekr() -> "_Entry":
+    """An entry as the new platform leaves it: legacy credentials dropped,
+    zeekr session keys and the platform marker in their place."""
+    entry = _Entry()
+    for dropped in ("device_id", "cert_path", "key_path", "region"):
+        entry.data.pop(dropped, None)
+    entry.data["platform"] = "zeekr"
+    entry.data["zeekr_access_token"] = "zk-token"
+    return entry
+
+
+def test_a_reauth_returning_from_the_new_platform_reprovisions_the_legacy_half():
+    """#81: coming back, the entry has no device id, no certificate and no
+    region - and a refreshed token cannot set one up. The return trip used to
+    write the token anyway, which left setup raising KeyError on every reload."""
+    cf, flow = _flow()
+    _prime(flow)
+    entry = _returning_from_zeekr()
+    flow._reauth_entry = entry
+    provisioned = []
+    cf.geely_api.cidpsso_login = lambda *a, **k: _login_ok(token="tok-2")
+    cf.geely_api.list_vehicles = lambda *a, **k: [_vehicle()]
+    cf.geely_api.provision_user_cert = lambda **kw: provisioned.append(kw)
+
+    res = asyncio.run(flow.async_step_code({"code": "123456"}))
+
+    assert res["type"] == "abort" and res["reason"] == "reauth_successful"
+    assert provisioned, "the client certificate was never re-provisioned"
+    assert entry.data["device_id"] == hashlib.md5(
+        f"ha:{USER_ID}:{FAKE_VIN}".encode()).hexdigest()
+    assert entry.data["cert_path"].endswith("cert.pem")
+    assert entry.data["key_path"].endswith("key.pem")
+    assert entry.data["region"] == "EU"
+    assert entry.data["cidpsso_token"] == "tok-2"
+    assert "platform" not in entry.data, "the zeekr marker must not survive"
+    assert "zeekr_access_token" not in entry.data
+
+
+def test_a_return_from_the_new_platform_that_cannot_provision_leaves_the_entry_alone():
+    """A named abort beats an entry updated into a state that cannot set up:
+    the old token still works on the platform the entry is actually on."""
+    cf, flow = _flow()
+    _prime(flow)
+    entry = _returning_from_zeekr()
+    flow._reauth_entry = entry
+
+    def boom(**kw):
+        raise RuntimeError("cert host refused")
+
+    cf.geely_api.cidpsso_login = lambda *a, **k: _login_ok(token="tok-2")
+    cf.geely_api.list_vehicles = lambda *a, **k: [_vehicle()]
+    cf.geely_api.provision_user_cert = boom
+
+    res = asyncio.run(flow.async_step_code({"code": "123456"}))
+
+    assert res["type"] == "abort" and res["reason"] == "cert_failed"
+    assert entry.data["cidpsso_token"] == "old-token", "the entry was written"
+    assert "device_id" not in entry.data
 
 
 def test_an_account_with_every_car_configured_aborts_cleanly():

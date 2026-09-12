@@ -490,6 +490,30 @@ def test_sustained_failure_reuses_the_snapshot_then_gives_up():
         raise AssertionError("the third consecutive failure did not surface")
 
 
+def test_an_entry_back_from_the_new_platform_asks_for_reauth_not_a_keyerror():
+    """#81: the new platform drops the legacy credentials, and an entry that
+    came back without them used to die on `KeyError: 'device_id'` inside
+    async_setup_entry - a traceback against an entry that would never load and
+    carried no button. The owner who hit it got out by restoring the whole
+    instance from a backup. Re-authentication is the remedy, so say so."""
+    m = _mod()
+    from homeassistant.exceptions import ConfigEntryAuthFailed
+
+    for missing in ("device_id", "cert_path", "key_path", "cidpsso_token"):
+        entry = _entry()
+        del entry.data[missing]
+        try:
+            _setup(m, entry=entry)
+        except ConfigEntryAuthFailed as e:
+            assert missing in str(e), (
+                f"the message must name what is missing, got {e!r}")
+        except KeyError:  # pragma: no cover - the bug this test exists for
+            raise AssertionError(
+                f"a missing {missing} still raises KeyError from setup")
+        else:
+            raise AssertionError(f"a missing {missing} set up anyway")
+
+
 def test_an_expired_session_starts_reauth_not_a_retry_loop():
     m = _mod()
     api_mod = load("api")

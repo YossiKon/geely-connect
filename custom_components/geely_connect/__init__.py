@@ -445,6 +445,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                      or d.get(CONF_ZEEKR_ENC_VIN) or ""),
         )
     else:
+        # An entry that visited the new platform and came back has no legacy
+        # credentials: going there drops them (they are dead on a migrated
+        # account), and the return trip restored only the session token. The
+        # code below used to index them, so setup died on
+        # `KeyError: 'device_id'` inside async_setup_entry - which Home
+        # Assistant can only show as a traceback against an entry that will
+        # never load, with no button on it. The owner who hit it got out by
+        # restoring the whole instance from a backup (#81). Asking for
+        # re-authentication instead puts the remedy in the UI, and the flow
+        # now re-provisions the missing half when it sees this state.
+        missing = [k for k in (CONF_USER_ID, CONF_CIDPSSO_TOKEN, CONF_DEVICE_ID,
+                               CONF_CERT_PATH, CONF_KEY_PATH) if not d.get(k)]
+        if missing:
+            raise ConfigEntryAuthFailed(
+                "this vehicle has no credentials for the original Geely "
+                f"backend (missing {', '.join(missing)}) - re-authenticate to "
+                "provision them again"
+            )
         # Entries created before regions were tracked carry no CONF_REGION and
         # resolve to EU, which is the backend they were provisioned against.
         backend = region_config(d.get(CONF_REGION))

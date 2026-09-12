@@ -217,9 +217,14 @@ class _Entry:
     def __init__(self, email=EMAIL):
         self.entry_id = "e1"
         self.version = 6
+        # A real legacy entry always carries the three provisioned
+        # credentials - they are written when it is created, and a re-auth
+        # that finds them missing now re-provisions rather than writing a
+        # token into an entry that cannot set up (#81).
         self.data = {"vin": FAKE_VIN, "email": email, "user_id": USER_ID,
                      "cidpsso_token": "old-token", "device_idfa": "A",
-                     "device_idfv": "V"}
+                     "device_idfv": "V", "device_id": "dev-1",
+                     "cert_path": "/c/cert.pem", "key_path": "/c/key.pem"}
         self.options: dict = {}
 
 
