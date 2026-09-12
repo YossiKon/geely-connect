@@ -185,6 +185,41 @@ def test_the_device_name_updates_unless_the_user_renamed_it():
     assert gone.updates == []
 
 
+def test_the_device_lookup_prefers_the_entry_scoped_method_when_it_exists():
+    """Home Assistant 2027.8 removes the registry-wide async_get_device, and
+    the replacement takes the owning entry because identifiers are no longer
+    unique across entries. It is absent on older cores this integration still
+    supports, so both lookups have to work - and the new one has to be called
+    with the entry id, not with the same argument shape as the old one."""
+    m = _mod()
+    entry = types.SimpleNamespace(entry_id="e1", data={
+        "vin": FAKE_VIN, "vehicle_nickname": "Rocket",
+        "vehicle_model_code": "E245-J1"})
+
+    class _Dev:
+        def __init__(self):
+            self.id, self.name, self.name_by_user = "d1", "Geely EX5 (0000)", None
+
+    class _NewDevReg:
+        """A core that has made the switch: the old method is gone entirely."""
+
+        def __init__(self):
+            self.asked, self.updates = [], []
+
+        def async_get_device_by_identifier(self, identifier, config_entry_id):
+            self.asked.append((identifier, config_entry_id))
+            return _Dev()
+
+        def async_update_device(self, did, name=None):
+            self.updates.append((did, name))
+
+    new = _NewDevReg()
+    with _Patched(m, dr=types.SimpleNamespace(async_get=lambda h: new)):
+        m._refresh_device_name(object(), entry)
+    assert new.asked == [(("geely_connect", FAKE_VIN), "e1")]
+    assert new.updates == [("d1", "Rocket EX5 (0000)")]
+
+
 def test_reenable_touches_only_what_the_integration_disabled():
     m = _mod()
     from homeassistant.helpers import entity_registry as real_er

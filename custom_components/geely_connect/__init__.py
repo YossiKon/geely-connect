@@ -235,7 +235,18 @@ def _refresh_device_name(hass: HomeAssistant, entry: ConfigEntry) -> None:
     vin = entry.data.get(CONF_VIN)
     if not vin:
         return
-    device = device_registry.async_get_device(identifiers={(DOMAIN, vin)})
+    # Home Assistant 2027.8 removes the registry-wide lookup: an identifier is
+    # no longer unique across config entries, so the replacement is scoped to
+    # the entry that owns the device - which is the right lookup here anyway,
+    # since this entry created it. The new method does not exist on every
+    # version this integration supports (the HACS floor is 2024.12, and 2026.7
+    # still ships only the old one), so ask the registry for it rather than
+    # importing it and failing to load on anything older.
+    by_identifier = getattr(device_registry, "async_get_device_by_identifier", None)
+    if by_identifier is not None:
+        device = by_identifier((DOMAIN, vin), entry.entry_id)
+    else:
+        device = device_registry.async_get_device(identifiers={(DOMAIN, vin)})
     if device is None:
         return
     new_name = _resolve_device_name(entry.data)
