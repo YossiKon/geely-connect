@@ -50,6 +50,7 @@ import hashlib
 import hmac
 import http.client
 import json
+import logging
 import random
 import ssl
 import string
@@ -60,6 +61,8 @@ from typing import Any
 from urllib.parse import urlparse, parse_qsl, quote
 
 from .api import redact
+
+_LOGGER = logging.getLogger(__name__)
 
 # Public protocol identity, embedded in the shipped app APK and extractable
 # by anyone - the same pattern as the legacy integration's per-region app
@@ -126,6 +129,28 @@ _X_VIN_MATERIAL: tuple[tuple[bytes, bytes, str], ...] = (
     (b"a01a6db985a2f5d4", b"ed446b8b8845013d", "PR #57"),
     (b"2a25d6c112dcf841", b"53bd2ae715ff176f", "Geely Global EM (com.geely.global.em, AU/SEA)"),
 )
+
+
+# How the gateway answers a candidate x-vin it cannot decrypt (verified live):
+# HTTP 400 with this code. Any other failure is not a verdict on the key.
+_X_VIN_REJECTED_HINTS = ("079025", "decrypt x-vin")
+# ...and how a dead session answers everything, x-vin or not. `079021` is the
+# single-session eviction ("The account is currently logged in elsewhere"),
+# which the phone app triggers the moment it signs in.
+_SESSION_DEAD_HINTS = ("079021", "logged in elsewhere", "401", "403", "token",
+                       "unauthor", "expired", "not logged in")
+
+
+def _x_vin_rejected(exc: Exception) -> bool:
+    low = str(exc).lower()
+    return any(h in low for h in _X_VIN_REJECTED_HINTS)
+
+
+def _session_dead(exc: Exception) -> bool:
+    if isinstance(exc, ZeekrAuthError):
+        return True
+    low = str(exc).lower()
+    return not _x_vin_rejected(exc) and any(h in low for h in _SESSION_DEAD_HINTS)
 
 
 def derive_x_vin(vin: str, key: bytes, iv: bytes) -> str:
@@ -949,19 +974,45 @@ class ZeekrClient:
         non-raising empty response is not accepted either. Restores the
         client's previous x-vin on the way out, so a failed probe never
         disturbs a value already in use.
+
+        Every candidate's outcome is logged at debug and, when none matches,
+        summarised at warning - an owner on an app build nobody has captured
+        (#84, iOS) otherwise saw nothing at all: the flow swallowed each
+        rejection and stored an empty token in silence. Two failures are told
+        apart: a `079025` is the gateway's verdict on the KEY, so the probe
+        answers "" and the caller can say so; a dead session answers every
+        candidate the same way whatever the key, so when that is all the
+        probe saw it raises instead, and the adapter's renewal gets its turn.
+        Neither log line carries the VIN or a candidate value.
         """
         if not self.access_token or not vin:
             return ""
         saved = self.enc_vin
+        outcomes: list[str] = []
+        failures: list[Exception] = []
         try:
-            for key, iv, _note in _X_VIN_MATERIAL:
+            for key, iv, note in _X_VIN_MATERIAL:
                 candidate = derive_x_vin(vin, key, iv)
                 self.enc_vin = candidate
                 try:
                     if self.capabilities_new():   # non-empty => resolved to a car
+                        _LOGGER.debug("x-vin probe: accepted by the gateway (%s)", note)
                         return candidate
-                except (ZeekrAuthError, ZeekrApiError):
-                    continue
+                    outcome = "empty catalogue"
+                except (ZeekrAuthError, ZeekrApiError) as exc:
+                    failures.append(exc)
+                    outcome = f"{type(exc).__name__}: {str(exc)[:80]}"
+                _LOGGER.debug("x-vin probe: rejected (%s): %s", note, outcome)
+                outcomes.append(f"{note}: {outcome}")
+            if failures and len(failures) == len(_X_VIN_MATERIAL) \
+                    and all(_session_dead(e) for e in failures):
+                raise failures[-1]
+            _LOGGER.warning(
+                "x-vin auto-derivation: none of the %d known app builds matched "
+                "this vehicle (%s). Paste the token from your app under "
+                "Configure -> Vehicle token; the derivation is retried at every "
+                "start, so a release that adds your build fixes this by itself",
+                len(_X_VIN_MATERIAL), "; ".join(outcomes))
             return ""
         finally:
             self.enc_vin = saved

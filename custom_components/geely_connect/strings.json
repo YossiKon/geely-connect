@@ -86,5 +86,11 @@
         }
       }
     }
+  },
+  "issues": {
+    "x_vin_missing": {
+      "title": "{name}: the new-platform vehicle token could not be derived",
+      "description": "This vehicle lives on the new Geely EM platform, and the token it is addressed by there (the x-vin) could not be derived from any app build this integration knows - the gateway rejected every candidate. Until it has one, rapid warming and cooling, the capability catalogue and the new-gateway status read stay off.\n\nOpen **Configure** on the Geely Connect entry and paste the token from your phone into **Vehicle token for the new platform (x-vin)**. The derivation is retried at every start, so a release that adds your app build clears this by itself."
+    }
   }
 }

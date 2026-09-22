@@ -12,7 +12,7 @@ from conftest import FAKE_VIN, have_homeassistant, load
 from run import skip
 
 from test_init_lifecycle import _FakeCoordinator, _er_module, _instant_sleep
-from test_init_lifecycle import _EntityRegistry
+from test_init_lifecycle import _EntityRegistry, _ir_module
 
 
 def _mod():
@@ -80,6 +80,23 @@ class _FakeZeekrApi:
     def __init__(self, **kw):
         self.kw = kw
         self._hf_takes = [("mock-hf-new", 1750000001)]
+        # The x-vin surface the setup-time derivation uses (#84): what the
+        # entry handed over, what a probe answers (or raises), what was adopted.
+        self.enc_vin = kw.get("enc_vin") or ""
+        self.probe_result = ""
+        self.probe_exc = None
+        self.probes = []
+        self.adopted = []
+
+    def probe_x_vin(self, vin):
+        self.probes.append(vin)
+        if self.probe_exc is not None:
+            raise self.probe_exc
+        return self.probe_result
+
+    def adopt_enc_vin(self, value):
+        self.adopted.append(value)
+        self.enc_vin = value or ""
 
     def vehicle_status(self):
         return {"code": "1000", "data": {"vehicleStatus": {
@@ -125,9 +142,10 @@ class _Patched:
             setattr(self.mod, k, v)
 
 
-def _setup_zeekr(m, hass=None, entry=None, api_tweak=None):
+def _setup_zeekr(m, hass=None, entry=None, api_tweak=None, ir=None):
     hass = hass or _Hass()
     entry = entry or _zeekr_entry()
+    ir = ir if ir is not None else _ir_module()
     made = {}
 
     def _api_factory(**kw):
@@ -145,7 +163,7 @@ def _setup_zeekr(m, hass=None, entry=None, api_tweak=None):
     fast = types.SimpleNamespace(sleep=_instant_sleep,
                                  CancelledError=asyncio.CancelledError)
     with _Patched(m, ZeekrAdapter=_api_factory, DataUpdateCoordinator=_FakeCoordinator,
-                  er=_er_module(_EntityRegistry([])),
+                  er=_er_module(_EntityRegistry([])), ir=ir,
                   dr=types.SimpleNamespace(
                       async_get=lambda h: types.SimpleNamespace(
                           async_get_device=lambda identifiers: None)),
@@ -197,3 +215,92 @@ def test_zeekr_hf_renewal_is_persisted_into_the_entry():
     n = len(hass.config_entries.updates)
     asyncio.run(_FakeCoordinator.instance.refresh())
     assert len(hass.config_entries.updates) == n, "spurious entry update"
+
+
+# ------------------------------------------ #84: the x-vin, derived at setup
+
+def test_setup_derives_a_missing_x_vin_and_stores_it_before_the_first_refresh():
+    """The flow derives once and stores "" when no build matches; nothing tried
+    again, so a key pair added in a later release could only reach an owner by
+    removing and re-adding the entry. Now every setup probes while the entry
+    has no token, adopts a match for this session, writes it into the entry -
+    and clears the Repairs issue that a failed probe raises."""
+    m = _mod()
+    ir = _ir_module()
+
+    def _match(api):
+        api.probe_result = "DERIVED-XVIN=="
+
+    ok, hass, entry, api = _setup_zeekr(m, api_tweak=_match, ir=ir)
+    assert ok is True
+    assert api.probes == [FAKE_VIN], "the probe must be given the plain VIN"
+    assert api.adopted == ["DERIVED-XVIN=="], "the adapter did not take the token"
+    stored = [u["data"] for u in hass.config_entries.updates if "data" in u]
+    assert stored and stored[0]["zeekr_enc_vin"] == "DERIVED-XVIN==", stored
+    assert stored[0]["zeekr_access_token"] == "mock-at", "the rest of the entry must survive"
+    assert ir.created == [], ir.created
+    assert ("geely_connect", "x_vin_missing_e1") in ir.deleted, ir.deleted
+    # No flag left behind for the update listener to eat on the user's next
+    # real options change: the write happens before the listener exists.
+    assert "_skip_reload_once" not in hass.data["geely_connect"]["e1"]
+
+
+def test_a_probe_that_matches_no_build_raises_the_repairs_issue():
+    m = _mod()
+    ir = _ir_module()
+    ok, hass, entry, api = _setup_zeekr(m, ir=ir)     # probe_result "" by default
+    assert ok is True
+    assert api.probes == [FAKE_VIN]
+    assert api.adopted == []
+    assert not [u for u in hass.config_entries.updates if "zeekr_enc_vin" in u.get("data", {})]
+    assert len(ir.created) == 1, ir.created
+    domain, issue_id, kw = ir.created[0]
+    assert (domain, issue_id) == ("geely_connect", "x_vin_missing_e1")
+    assert kw["translation_key"] == "x_vin_missing"
+    assert kw["is_fixable"] is False and kw["severity"] == "warning"
+    assert kw["translation_placeholders"] == {"name": "My EX5 (0000)"}, kw
+    assert ir.deleted == [], "nothing to clear on a failed probe"
+
+
+def test_an_entry_that_already_has_a_token_is_not_probed_and_the_issue_clears():
+    m = _mod()
+    for where in ("options", "data"):
+        ir = _ir_module()
+        entry = _zeekr_entry()
+        if where == "options":
+            entry.options = {"zeekr_enc_vin": "PASTED=="}
+        else:
+            entry.data = {**entry.data, "zeekr_enc_vin": "STORED=="}
+        ok, hass, entry, api = _setup_zeekr(m, entry=entry, ir=ir)
+        assert ok is True, where
+        assert api.probes == [], (where, "a token in hand must not be re-derived")
+        assert ir.created == [], where
+        assert ir.deleted == [("geely_connect", "x_vin_missing_e1")], (where, ir.deleted)
+
+
+def test_a_dead_session_at_the_probe_is_not_reported_as_a_missing_key():
+    """`079021` answers every candidate whatever the key, so the probe raises
+    and the adapter renews; when even that fails it surfaces as GeelyAuthError.
+    That is a session problem for the first refresh and the re-auth prompt,
+    not a key problem for Repairs - so neither branch of the issue fires."""
+    m = _mod()
+    ir = _ir_module()
+    gae = load("api").GeelyAuthError
+
+    def _dead(api):
+        api.probe_exc = gae("logged in elsewhere")
+
+    ok, hass, entry, api = _setup_zeekr(m, api_tweak=_dead, ir=ir)
+    assert ok is True, "setup itself must carry on"
+    assert api.probes == [FAKE_VIN]
+    assert api.adopted == []
+    assert ir.created == [] and ir.deleted == [], (ir.created, ir.deleted)
+    # Any other failure is best-effort too: setup carries on, no issue either way.
+    ir2 = _ir_module()
+
+    def _broken(api):
+        api.probe_exc = RuntimeError("socket closed")
+
+    ok, hass, entry, api = _setup_zeekr(m, api_tweak=_broken, ir=ir2)
+    assert ok is True
+    assert ir2.created == [] and ir2.deleted == []

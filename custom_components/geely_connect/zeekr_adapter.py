@@ -43,6 +43,11 @@ _LOGGER = logging.getLogger(__name__)
 _AUTH_HINTS = (
     "token", "auth", "login", "session", "expired", "unauthor",
     "sign in", "401", "403", "credential",
+    # The single-session eviction the docstring on _renew_hf describes. Its
+    # text is "logged in elsewhere", which none of the hints above matched, so
+    # the one error a renewal exists to recover from was the one it never
+    # retried on.
+    "079021", "logged in elsewhere",
 )
 
 
@@ -375,6 +380,25 @@ class ZeekrAdapter:
                 if isinstance(exc2, ZeekrApiError) and not _looks_authy(str(exc2)):
                     raise
                 raise GeelyAuthError(str(exc2)) from exc2
+
+    # ---- x-vin -------------------------------------------------------------
+
+    @property
+    def enc_vin(self) -> str:
+        """The new-platform vehicle token in use, "" when the entry has none."""
+        return self._client.enc_vin or ""
+
+    def adopt_enc_vin(self, value: str) -> None:
+        """Take a token derived at setup into use for this session."""
+        self._client.enc_vin = value or ""
+
+    def probe_x_vin(self, vin: str) -> str:
+        """Derive and gateway-verify the x-vin from the plain VIN, "" when no
+        known app build matches. Runs through the renewal wrapper so a dead
+        session is renewed once and retried rather than read as "no build
+        matched" - the probe raises in that case precisely so this can happen.
+        """
+        return self._authed(self._client.probe_x_vin, vin) or ""
 
     # ---- coordinator surface ----------------------------------------------
 

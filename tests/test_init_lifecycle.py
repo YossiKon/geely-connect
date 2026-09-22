@@ -133,6 +133,26 @@ def _er_module(registry, per_entry=None):
                                          fromlist=["RegistryEntryDisabler"]).RegistryEntryDisabler)
 
 
+class _IssueRegistry:
+    """Stands in for homeassistant.helpers.issue_registry: records the Repairs
+    issues the integration raises and clears (#84)."""
+
+    def __init__(self):
+        self.created = []
+        self.deleted = []
+        self.IssueSeverity = types.SimpleNamespace(WARNING="warning", ERROR="error")
+
+    def async_create_issue(self, hass, domain, issue_id, **kw):
+        self.created.append((domain, issue_id, kw))
+
+    def async_delete_issue(self, hass, domain, issue_id):
+        self.deleted.append((domain, issue_id))
+
+
+def _ir_module():
+    return _IssueRegistry()
+
+
 def test_only_obsolete_unique_ids_are_purged():
     m = _mod()
     mk = lambda eid, uid, platform="geely_connect": types.SimpleNamespace(
@@ -1002,19 +1022,27 @@ def test_removal_shreds_the_key_directory_but_only_inside_our_storage():
         os.makedirs(vin_dir)
         open(os.path.join(vin_dir, "key.pem"), "w").write("KEY")
         entry = types.SimpleNamespace(
-            data={"cert_path": os.path.join(vin_dir, "cert.pem")})
-        asyncio.run(m.async_remove_entry(hass, entry))
+            entry_id="e1", data={"cert_path": os.path.join(vin_dir, "cert.pem")})
+        ir = _ir_module()
+        with _Patched(m, ir=ir):
+            asyncio.run(m.async_remove_entry(hass, entry))
         assert not os.path.exists(vin_dir), "the key must not outlive the entry"
+        # Nor may the x-vin Repairs issue, which would point at a Configure
+        # page that no longer exists (#84).
+        assert ir.deleted == [("geely_connect", "x_vin_missing_e1")], ir.deleted
 
         outside = os.path.join(root, "not-ours")
         os.makedirs(outside)
         open(os.path.join(outside, "key.pem"), "w").write("KEY")
         evil = types.SimpleNamespace(
-            data={"cert_path": os.path.join(outside, "cert.pem")})
-        asyncio.run(m.async_remove_entry(hass, evil))
+            entry_id="e2", data={"cert_path": os.path.join(outside, "cert.pem")})
+        with _Patched(m, ir=_ir_module()):
+            asyncio.run(m.async_remove_entry(hass, evil))
         assert os.path.exists(outside), "a path outside our storage was deleted"
 
-        asyncio.run(m.async_remove_entry(hass, types.SimpleNamespace(data={})))
+        with _Patched(m, ir=_ir_module()):
+            asyncio.run(m.async_remove_entry(
+                hass, types.SimpleNamespace(entry_id="e3", data={})))
 
 
 def test_a_failed_shred_warns_instead_of_blocking_the_removal():
@@ -1026,12 +1054,12 @@ def test_a_failed_shred_warns_instead_of_blocking_the_removal():
         vin_dir = os.path.join(root, ".storage", "geely_connect", "vin1")
         os.makedirs(vin_dir)
         entry = types.SimpleNamespace(
-            data={"cert_path": os.path.join(vin_dir, "cert.pem")})
+            entry_id="e1", data={"cert_path": os.path.join(vin_dir, "cert.pem")})
 
         def _boom(*a, **k):
             raise OSError("file locked")
 
-        with _Patched(m, shutil=types.SimpleNamespace(rmtree=_boom)):
+        with _Patched(m, shutil=types.SimpleNamespace(rmtree=_boom), ir=_ir_module()):
             asyncio.run(m.async_remove_entry(hass, entry))
         assert os.path.exists(vin_dir), "the failure path must not half-delete"
 

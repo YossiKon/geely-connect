@@ -18,7 +18,12 @@ from homeassistant.exceptions import (
     HomeAssistantError,
     ServiceValidationError,
 )
-from homeassistant.helpers import config_validation as cv, device_registry as dr, entity_registry as er
+from homeassistant.helpers import (
+    config_validation as cv,
+    device_registry as dr,
+    entity_registry as er,
+    issue_registry as ir,
+)
 from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
@@ -395,6 +400,29 @@ def _adaptive_interval(data: dict, idle_streak: int, profile: dict) -> timedelta
     return timedelta(seconds=secs)
 
 
+def _x_vin_issue_id(entry: ConfigEntry) -> str:
+    return f"x_vin_missing_{entry.entry_id}"
+
+
+def _x_vin_repair(hass: HomeAssistant, entry: ConfigEntry, *, missing: bool) -> None:
+    """Raise, or clear, the Repairs issue for a new-platform entry with no
+    x-vin. The issue names the Configure field the token goes in, which is
+    the one thing an owner on an uncaptured app build needs to know (#84);
+    before it, the only symptom was rapid climate failing with "needs the
+    new-platform x-vin" and a catalogue of zero rows in the log.
+    """
+    if missing:
+        ir.async_create_issue(
+            hass, DOMAIN, _x_vin_issue_id(entry),
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="x_vin_missing",
+            translation_placeholders={"name": _resolve_device_name(entry.data)},
+        )
+    else:
+        ir.async_delete_issue(hass, DOMAIN, _x_vin_issue_id(entry))
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Geely (international) from a config entry."""
     await cards.async_register_cards(hass)
@@ -444,6 +472,37 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             enc_vin=(entry.options.get(CONF_ZEEKR_ENC_VIN)
                      or d.get(CONF_ZEEKR_ENC_VIN) or ""),
         )
+        # The x-vin, derived again at every start while the entry has none.
+        # The flow derives it once at setup and stores "" when no known app
+        # build matches - which is what an owner on an uncaptured build (iOS,
+        # #84) got, silently, and nothing ever tried again: a key pair added
+        # in a later release could only reach him by removing and re-adding
+        # the entry. Now a restart is enough. Before the first refresh, so the
+        # status read and the catalogue take the new-gateway path in this
+        # same setup; persisted into the entry before the update listener
+        # below is registered, so the write reloads nothing. A dead session
+        # is not a missing key: the probe raises for that, and it is left to
+        # the first refresh, which raises the re-auth prompt if it is real.
+        if api.enc_vin:
+            _x_vin_repair(hass, entry, missing=False)
+        else:
+            derived = None
+            try:
+                derived = await hass.async_add_executor_job(api.probe_x_vin, d[CONF_VIN])
+            except GeelyAuthError as e:
+                _LOGGER.debug("x-vin derivation skipped, the session needs "
+                              "re-authentication: %s", e)
+            except Exception as e:  # noqa: BLE001 - derivation is best-effort only
+                _LOGGER.debug("x-vin derivation failed at setup: %s", e)
+            if derived:
+                api.adopt_enc_vin(derived)
+                hass.config_entries.async_update_entry(
+                    entry, data={**d, CONF_ZEEKR_ENC_VIN: derived})
+                _LOGGER.info("derived a working new-platform x-vin for this "
+                             "vehicle at setup; stored in the entry")
+                _x_vin_repair(hass, entry, missing=False)
+            elif derived == "":
+                _x_vin_repair(hass, entry, missing=True)
     else:
         # An entry that visited the new platform and came back has no legacy
         # credentials: going there drops them (they are dead on a migrated
@@ -980,6 +1039,9 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     and certificate would outlive the integration on disk, unreferenced and
     unnoticed, including inside every backup taken afterwards.
     """
+    # A Repairs issue outliving the entry it was about would point at a
+    # Configure page that no longer exists.
+    ir.async_delete_issue(hass, DOMAIN, _x_vin_issue_id(entry))
     cert_path = entry.data.get(CONF_CERT_PATH)
     if not cert_path:
         return

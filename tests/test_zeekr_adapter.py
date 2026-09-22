@@ -136,6 +136,49 @@ def test_a_200_wrapped_auth_error_triggers_a_silent_renewal():
         _restore_idaas()
 
 
+def test_the_single_session_eviction_now_counts_as_an_auth_error():
+    """The adapter's own docstring names `079021 The account is currently logged
+    in elsewhere` as the error a renewal exists to recover from - and none of
+    the hints matched its text, so it was the one error never retried on."""
+    assert ad._looks_authy("code=079021 message=The account is currently logged in elsewhere")
+    assert not ad._looks_authy("HTTP 400: 079025 Decrypt X-VIN failed")
+
+
+def test_probe_x_vin_renews_a_dead_session_and_retries():
+    """The client's probe raises on a session-shaped failure precisely so this
+    wrapper gets its turn: one renewal, then the probe again with the fresh
+    access token, and the derived value comes back (#84)."""
+    _patch_idaas()
+    try:
+        a, c = _make_adapter(password="hunter2", hf_token="mock-hf",
+                             hf_expiry=10 ** 15)
+        calls = {"n": 0}
+
+        def _probe(vin):
+            calls["n"] += 1
+            assert vin == FAKE_VIN
+            if c.access_token == "mock-at":
+                raise zc.ZeekrApiError(
+                    "code=079021 message=The account is currently logged in elsewhere")
+            return "DERIVED-XVIN=="
+
+        c.probe_x_vin = _probe
+        assert a.enc_vin == ""
+        assert a.probe_x_vin(FAKE_VIN) == "DERIVED-XVIN=="
+        assert calls["n"] == 2, "the probe should be retried after renewal"
+        assert c.access_token == "mock-at-new", "renewal did not re-mint the session"
+        # A genuine "no build matched" passes through as "".
+        c.probe_x_vin = lambda vin: ""
+        assert a.probe_x_vin(FAKE_VIN) == ""
+        # And adoption puts the token where every new-gateway call reads it.
+        a.adopt_enc_vin("DERIVED-XVIN==")
+        assert a.enc_vin == "DERIVED-XVIN==" and c.enc_vin == "DERIVED-XVIN=="
+        a.adopt_enc_vin("")
+        assert a.enc_vin == ""
+    finally:
+        _restore_idaas()
+
+
 def test_silent_renewal_chain_and_token_take():
     _patch_idaas()
     try:
