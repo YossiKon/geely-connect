@@ -60,7 +60,15 @@ SPECS: tuple[tuple[str, str, tuple[str, ...], BinarySensorDeviceClass | None, tu
     # on/off underneath, and the device class only decides what that is called
     # on screen, so nothing keyed on the state moves.
     ("hood_open",            "Hood",              (*_SAFE, "engineHoodOpenStatus"),         BinarySensorDeviceClass.OPENING, ("1", 1)),
-    ("driver_seatbelt",      "Driver Seatbelt",   (*_SAFE, "seatBeltStatusDriver"),         None,                            ("true", True)),
+    # SAFETY, so the label says which way round the field is: on = Unsafe.
+    # Measured on a real E2 by the owner who first questioned it (#72): the
+    # entity read Off with the belt buckled and On with it released, wait for
+    # a poll in between - so `true` is UNBUCKLED. Two E2 files read `true`
+    # parked; an EX5 file reads `false` on all seven belts parked with the
+    # engine off, which fits the same reading whether that car reports the
+    # bare buckle or a warning that needs an occupant. Nothing keyed on the
+    # state moves: on/off is unchanged, only what the frontend calls it.
+    ("driver_seatbelt",      "Driver Seatbelt",   (*_SAFE, "seatBeltStatusDriver"),         BinarySensorDeviceClass.SAFETY,  ("true", True)),
     # `statusOfChargerConnection` - values:
     #   0 = unplugged
     #   1 / 2 / 3 = a cable is present
