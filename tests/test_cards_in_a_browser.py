@@ -73,6 +73,11 @@ window.mkHass = (opts) => {
   if (opts.steeringWheelHeat !== undefined) {
     put(`switch.${P}_steering_wheel_heat`, opts.steeringWheelHeat);
   }
+  // The Charging switch exists only on a car with a start/stop control
+  // (#72), which is what the strip's `charging` button keys on (#83).
+  if (opts.charging !== undefined) {
+    put(`switch.${P}_charging`, opts.charging);
+  }
   put(`sensor.${P}_speed`, opts.speed === undefined ? "0" : opts.speed,
       { unit_of_measurement: opts.speedUnit || "km/h" });
   // A car with a tank. The integration only creates these when the propulsion
@@ -1940,14 +1945,14 @@ def test_the_summary_card_makes_the_car_a_button_that_opens_the_full_card():
 
 # ----------------------------------- #68/#70: the card speaks the UI language
 
-def _mount_lang(tag, probe, lang, **hass_opts):
+def _mount_lang(tag, probe, lang, *, cfg=None, **hass_opts):
     """Mount a card whose fake hass carries a frontend language, so the card's
     own string table (bundled in the JS - translations/*.json can't reach a
     Lovelace card, #68) is exercised. `probe` is JS with `el` in scope."""
     script = f"""() => {{
         const el = document.createElement({json.dumps(tag)});
         document.body.appendChild(el);
-        el.setConfig({{}});
+        el.setConfig({json.dumps(cfg or {})});
         const h = window.mkHass({json.dumps(hass_opts)});
         h.locale = {{ language: {json.dumps(lang)} }};
         el.hass = h;
@@ -2038,6 +2043,72 @@ def test_every_shipped_language_covers_the_english_key_set():
                 f"{lang}.{key} uses {{plural}}, which is substituted with the "
                 f"English \"s\" - reword so the string works for any count: "
                 f"{text!r}")
+
+
+# ------------------------------------------ #83: the strip's buttons are yours
+
+_ACTS = "[...el.shadowRoot.querySelectorAll('.actions [data-act]')].map((b) => b.dataset.act)"
+
+
+def test_the_strip_and_mini_draw_their_usual_buttons_by_default():
+    """The option must move nothing for anyone who never sets it. mkHass locks
+    the doors, so the lock slot draws Unlock."""
+    assert _mount("geely-card-strip", _ACTS) == ["unlock", "rapidheat", "rapidcool", "trunk", "find"]
+    assert _mount("geely-card-mini", _ACTS) == ["unlock", "rapidheat", "rapidcool"]
+    # A Charging switch on the car adds nothing until it is asked for.
+    assert _mount("geely-card-strip", _ACTS, charging="on") == [
+        "unlock", "rapidheat", "rapidcool", "trunk", "find"]
+
+
+def test_buttons_picks_the_strips_buttons_in_the_order_given():
+    """Unlock and stop charging are the two presses of a morning (#83); the
+    strip can now be exactly those. Unknown names are skipped, not drawn dead,
+    and an empty list is an empty row."""
+    got = _mount("geely-card-strip", _ACTS, cfg={"buttons": ["charging", "lock"]}, charging="on")
+    assert got == ["charging_sw", "unlock"], got
+    got = _mount("geely-card-strip", _ACTS,
+                 cfg={"buttons": ["find", "bogus", "Lock", "refresh", "climate"]})
+    assert got == ["find", "unlock", "refresh", "climate"], got
+    assert _mount("geely-card-strip", _ACTS, cfg={"buttons": []}) == []
+    # The mini honours it too.
+    got = _mount("geely-card-mini", _ACTS, cfg={"buttons": ["charging", "refresh"]}, charging="off")
+    assert got == ["charging_sw", "refresh"], got
+
+
+def test_the_charging_button_needs_the_switch_and_says_which_way_it_goes():
+    """A car with no start/stop control has no Charging switch (#72) and gets
+    no button for it, rather than one that could only ever fail. Where the
+    switch exists the button reads Stop while charging and Start otherwise,
+    lit while charging."""
+    probe = """(() => {
+        const b = el.shadowRoot.querySelector('[data-act="charging_sw"]');
+        return b ? { label: b.querySelector("span").textContent.trim(),
+                     title: b.getAttribute("title"), on: b.classList.contains("on") } : null;
+    })()"""
+    assert _mount("geely-card-strip", probe, cfg={"buttons": ["charging", "find"]}) is None
+    assert _mount("geely-card-strip", _ACTS, cfg={"buttons": ["charging", "find"]}) == ["find"]
+    on = _mount("geely-card-strip", probe, cfg={"buttons": ["charging"]}, charging="on")
+    assert on == {"label": "Stop charging", "title": "Start / stop charging", "on": True}, on
+    off = _mount("geely-card-strip", probe, cfg={"buttons": ["charging"]}, charging="off")
+    assert off == {"label": "Start charging", "title": "Start / stop charging", "on": False}, off
+    # And it localizes like every other label on the card.
+    th = _mount_lang("geely-card-strip",
+                     """el.shadowRoot.querySelector('[data-act="charging_sw"] span').textContent""",
+                     "th", cfg={"buttons": ["charging"]}, charging="on")
+    assert th and not th.isascii(), th
+
+
+def test_tapping_the_charging_button_toggles_the_charging_switch():
+    script = """() => {
+        const el = document.createElement("geely-card-strip");
+        document.body.appendChild(el);
+        el.setConfig({ buttons: ["charging"], cooldown: 0 });
+        const hass = window.mkHass({ charging: "on" });
+        el.hass = hass;
+        el.shadowRoot.querySelector('[data-act="charging_sw"]').click();
+        return hass.serviceCalls.map((c) => [c[0], c[1], c[2].entity_id]);
+    }"""
+    assert _evaluate(script) == [["switch", "toggle", "switch.car_charging"]]
 
 
 # --------------------------------------------- windows open/close + indicator

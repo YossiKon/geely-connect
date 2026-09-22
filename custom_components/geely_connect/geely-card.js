@@ -179,6 +179,8 @@
       "action.rapid_cool": "Rapid cool",
       "action.rapid_heat": "Rapid heat",
       "action.schedule": "Schedule",
+      "action.start_charging": "Start charging",
+      "action.stop_charging": "Stop charging",
       "action.sync": "Sync",
       "action.unlock": "Unlock",
       "action.vent": "Vent",
@@ -284,6 +286,8 @@
       "action.rapid_cool": "เย็นเร็ว",
       "action.rapid_heat": "อุ่นเร็ว",
       "action.schedule": "ตั้งเวลา",
+      "action.start_charging": "เริ่มชาร์จ",
+      "action.stop_charging": "หยุดชาร์จ",
       "action.sync": "ซิงก์",
       "action.unlock": "ปลดล็อก",
       "action.vent": "ระบายอากาศ",
@@ -389,6 +393,8 @@
       "action.rapid_cool": "Raffreddamento rapido",
       "action.rapid_heat": "Riscaldamento rapido",
       "action.schedule": "Programma",
+      "action.start_charging": "Avvia la ricarica",
+      "action.stop_charging": "Ferma la ricarica",
       "action.sync": "Sincronizza",
       "action.unlock": "Sblocca",
       "action.vent": "Ventilazione",
@@ -1928,6 +1934,66 @@
           <span>${esc(label)}</span><b>${esc(value)}</b></div>`;
     }
 
+    /* The icon buttons on the strip and mini cards, chosen with `buttons:`
+     * (#83). An owner who unlocks the car and stops the charge every morning
+     * had a strip whose buttons were rapid heat and cool - fixed, and not the
+     * two he presses. Names, drawn in the order given: lock (follows the car:
+     * Lock or Unlock), heat, cool, trunk, find, charging, climate, refresh.
+     * An unknown name is skipped rather than drawn as a dead button, and so
+     * is a name whose entity this car does not have - `charging` needs the
+     * Charging switch, which a car with no start/stop control (#72) no longer
+     * gets. The defaults are exactly what each card drew before the option. */
+    _iconButtons(s, defaults) {
+      const names = Array.isArray(this._config.buttons) ? this._config.buttons : defaults;
+      const locked = s.locked && s.locked.state === "locked";
+      const preset = this._preset();
+      const out = [];
+      for (const raw of names) {
+        switch (String(raw).toLowerCase()) {
+          case "lock":
+            out.push(locked
+              ? this._actBtn("unlock", this._t("action.unlock", "Unlock"), "unlock")
+              : this._actBtn("lock", this._t("action.lock", "Lock"), "lock"));
+            break;
+          case "heat":
+            out.push(this._actBtn("rapidheat", this._t("action.rapid_heat", "Rapid heat"), "heat",
+              { title: this._t("tooltip.rapid_heat", RAPID_HEAT_HINT), on: preset === "Rapid Warming" }));
+            break;
+          case "cool":
+            out.push(this._actBtn("rapidcool", this._t("action.rapid_cool", "Rapid cool"), "cool",
+              { title: this._t("tooltip.rapid_cool", RAPID_COOL_HINT), on: preset === "Rapid Cooling" }));
+            break;
+          case "trunk":
+            out.push(this._actBtn("trunk", this._bootWord(), "trunk", { title: this._bootTitle() }));
+            break;
+          case "find":
+            out.push(this._actBtn("find", this._t("action.find", "Find"), "find"));
+            break;
+          case "charging": {
+            const sw = this._st("switch.charging");
+            if (!sw) break;
+            const on = sw.state === "on";
+            out.push(this._actBtn("charging_sw",
+              on ? this._t("action.stop_charging", "Stop charging")
+                 : this._t("action.start_charging", "Start charging"),
+              "bolt", { on, title: this._t("tooltip.charging_toggle", "Start / stop charging") }));
+            break;
+          }
+          case "climate": {
+            const c = this._st("climate.climate");
+            if (!c) break;
+            out.push(this._actBtn("climate", this._t("action.climate", "Climate"), "climate",
+              { on: c.state !== "off" && c.state !== "unavailable" }));
+            break;
+          }
+          case "refresh":
+            out.push(this._actBtn("refresh", this._t("action.sync", "Sync"), "refresh"));
+            break;
+        }
+      }
+      return out.join("");
+    }
+
     _actBtn(key, label, ic, opts = {}) {
       const cls = [
         "act",
@@ -2676,7 +2742,7 @@
   class GeelyCardStrip extends GeelyCardBase {
     _watched() {
       return ["sensor.battery", "sensor.electric_range", "sensor.charging_power",
-        "sensor.charger_connection",
+        "sensor.charger_connection", "switch.charging",
         "lock.doors", "climate.climate", "binary_sensor.connected",
         "binary_sensor.door_driver", "binary_sensor.door_passenger",
         "binary_sensor.door_rear_left", "binary_sensor.door_rear_right",
@@ -2746,13 +2812,7 @@
               <div class="status ${driving ? "warn" : s.charging ? "charging" : s.doorsOpen.length ? "warn" : ""}">${esc(statusLine)}</div>
             </div>
             <div class="actions">
-              ${locked
-                ? this._actBtn("unlock", this._t("action.unlock", "Unlock"), "unlock")
-                : this._actBtn("lock", this._t("action.lock", "Lock"), "lock")}
-              ${this._actBtn("rapidheat", this._t("action.rapid_heat", "Rapid heat"), "heat", { title: this._t("tooltip.rapid_heat", RAPID_HEAT_HINT), on: this._preset() === "Rapid Warming" })}
-              ${this._actBtn("rapidcool", this._t("action.rapid_cool", "Rapid cool"), "cool", { title: this._t("tooltip.rapid_cool", RAPID_COOL_HINT), on: this._preset() === "Rapid Cooling" })}
-              ${this._actBtn("trunk", this._bootWord(), "trunk", { title: this._bootTitle() })}
-              ${this._actBtn("find", this._t("action.find", "Find"), "find")}
+              ${this._iconButtons(s, ["lock", "heat", "cool", "trunk", "find"])}
             </div>
           </div>
           ${this._bars(s)}
@@ -2771,7 +2831,7 @@
       // both did.
       return ["sensor.battery", "sensor.electric_range",
         "sensor.interior_temperature", "sensor.charging_power",
-        "sensor.charger_connection",
+        "sensor.charger_connection", "switch.charging",
         "lock.doors", "climate.climate", "binary_sensor.connected",
         "binary_sensor.door_driver", "binary_sensor.door_passenger",
         "binary_sensor.door_rear_left", "binary_sensor.door_rear_right",
@@ -2845,11 +2905,7 @@
             <div class="status ${driving ? "warn" : s.charging ? "charging" : s.doorsOpen.length ? "warn" : ""}">${esc(statusLine)}</div>
           </div>
           <div class="actions">
-            ${locked
-              ? this._actBtn("unlock", this._t("action.unlock", "Unlock"), "unlock")
-              : this._actBtn("lock", this._t("action.lock", "Lock"), "lock")}
-            ${this._actBtn("rapidheat", this._t("action.rapid_heat", "Rapid heat"), "heat", { title: this._t("tooltip.rapid_heat", RAPID_HEAT_HINT), on: preset === "Rapid Warming" })}
-            ${this._actBtn("rapidcool", this._t("action.rapid_cool", "Rapid cool"), "cool", { title: this._t("tooltip.rapid_cool", RAPID_COOL_HINT), on: preset === "Rapid Cooling" })}
+            ${this._iconButtons(s, ["lock", "heat", "cool"])}
           </div>
         </div>`;
       this._wire();
@@ -3286,7 +3342,7 @@
       {
         type: "geely-card-strip",
         name: "Geely Card (strip)",
-        description: "One row: range, battery, lock state - and lock, rapid heat / cool, trunk and find as icon buttons.",
+        description: "One row: range, battery, lock state - and icon buttons you choose with buttons: (lock, rapid heat / cool, trunk and find by default; charging, climate and refresh available).",
         preview: true,
       },
       {
