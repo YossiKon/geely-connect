@@ -60,6 +60,17 @@ def _targets(entry: dict) -> set[str]:
     return _split(entry.get("valueEnum")) | _split(_params_to_dict(entry).get("door"))
 
 
+# Rows only the 1.0 scheme carries - how two real E2 catalogues (#72) declare
+# unlock, charging and the scheduled trip. Their presence is positive evidence
+# that the catalogue is a 1.0 one, which is what lets an absent 2.0 row be
+# read as "not fitted" rather than "not declared".
+_SCHEME_1_0_ROWS = ("remote_charge_1", "remote_lock_unlock", "booking_travel_1")
+
+
+def _speaks_1_0(by_id: dict[str, dict]) -> bool:
+    return any(fid in by_id for fid in _SCHEME_1_0_ROWS)
+
+
 def parse(items: list[dict]) -> dict[str, Any]:
     """Return a flat capability summary derived from the raw catalog list.
 
@@ -223,8 +234,19 @@ def parse(items: list[dict]) -> dict[str, Any]:
         out["charging.enabled"] = True
     elif "remote_charge_1" in by_id:
         out["charging.enabled"] = False
+    # Parking Comfort, by the same evidence standard. The 1.0 catalogue
+    # enumerates its remote controls one by one (lock, trunk, windows, window
+    # vent, AC, charge, scheduled trip) and has no parking-comfort row in any
+    # spelling; the E2's own app has no such option (#72); and the RSM start
+    # sent from here sat unexecuted at the gateway for two minutes (8070 on
+    # every retry of the stop) on a car that answers lock commands within a
+    # second. So a catalogue that names the 1.0 scheme and no
+    # `parking_comfortable_2` gets no switch. Absent from a catalogue that
+    # names neither scheme stays permissive, as everywhere else here.
     if enabled("parking_comfortable_2"):
         out["parking_comfort.enabled"] = True
+    elif _speaks_1_0(by_id):
+        out["parking_comfort.enabled"] = False
     # Scheduled charging, by the same rule. The switch and the two time
     # entities write charge-server slot 6 with the rbc* body, which is
     # `apt_charging_single_cycle_G2` (GEEA 2.0, startTime/endTime/Cycle). The

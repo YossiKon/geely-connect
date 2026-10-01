@@ -297,3 +297,21 @@ def test_a_catalogue_that_names_neither_charge_scheme_stays_permissive():
 def test_the_g2_row_alone_keeps_scheduled_charging_on():
     out = cap.parse([_entry("apt_charging_single_cycle_G2", True)])
     assert out["scheduled_charging.enabled"] is True
+
+
+def test_a_1_0_catalogue_gets_no_parking_comfort_switch():
+    """The E2's app has no Parking Comfort option and its catalogue no row for
+    it in either spelling, while the RSM start sent from here sat unexecuted
+    for two minutes (#72). Any one of the 1.0 rows marks the scheme; a
+    catalogue that names neither scheme stays permissive."""
+    for marker in ("remote_charge_1", "remote_lock_unlock", "booking_travel_1"):
+        out = cap.parse([_entry(marker, True), _entry("honk_flash", True)])
+        assert out["parking_comfort.enabled"] is False, marker
+    # The 2.0 row wins when both are declared.
+    out = cap.parse([_entry("remote_lock_unlock", True),
+                     _entry("parking_comfortable_2", True)])
+    assert out["parking_comfort.enabled"] is True
+    # No scheme named at all: nothing said, as before.
+    out = cap.parse([_entry("honk_flash", True)])
+    assert "parking_comfort.enabled" not in out
+    assert cap._speaks_1_0({"honk_flash": {}}) is False

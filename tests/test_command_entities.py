@@ -782,9 +782,13 @@ def test_an_e2_catalogue_ends_up_with_no_charging_controls_at_all():
     asyncio.run(sw.async_setup_entry(hass, _Entry(), lambda e, *a, **k: got.extend(e)))
     names = sorted(type(e).__name__ for e in got)
     assert "GeelyScheduledChargingSwitch" not in names, names
-    assert f"geely_{FAKE_VIN}_sw_charging" not in [e._attr_unique_id for e in got], got
-    # The other table-driven switch survives, so the rule cut only charging.
-    assert f"geely_{FAKE_VIN}_sw_parking_comfort" in [e._attr_unique_id for e in got], got
+    uids = [e._attr_unique_id for e in got]
+    assert f"geely_{FAKE_VIN}_sw_charging" not in uids, got
+    # Parking Comfort goes with them on a 1.0 catalogue - the app has no such
+    # option on that car (#72) - while the dedicated switches survive, so the
+    # rule cut exactly the controls the owner reported pressing to no effect.
+    assert f"geely_{FAKE_VIN}_sw_parking_comfort" not in uids, got
+    assert "GeelyWindowVentilationSwitch" in names and "GeelyDefrostSwitch" in names, names
     got = []
     asyncio.run(t.async_setup_entry(hass, _Entry(), lambda e, *a, **k: got.extend(e)))
     assert got == [], got
