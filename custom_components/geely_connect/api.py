@@ -1134,6 +1134,46 @@ class GeelyApi:
             lambda: _check_control_resp(
                 self._authed_apis_call("POST", path, body_bytes)))
 
+    def scheduled_trip_set(self, *, command: str, scheduled_time_ms: str,
+                           ac: str = "true", bw: str = "1", bwl: str = "1") -> dict:
+        """Arm or disarm the app's "Scheduled trip" (charge-server bizType 4).
+
+        The body is the official app's own, captured on a real EX5 (#4, 13
+        August) in both directions - the master toggle that the app shows as
+        *Scheduled trip*, with *Cabin Comfort* (`ac`) and *Battery Temperature
+        Maintenance* (`bw`, level `bwl`) as its contents and `scheduledTime`
+        the departure in epoch milliseconds. The two captures differ in
+        `command` alone: `stop` keeps the schedule's contents and disarms it.
+        `bizType` is the integer 4 here, where the sibling bodies carry
+        strings - copied from the capture rather than tidied.
+
+        Not a switch, deliberately. Arming sends the departure back, so the
+        caller must have *read* the current slot first and send that value,
+        never one it invented - a control that silently moved somebody's
+        07:00 would be worse than no control. `set_scheduled_trip` in
+        __init__ does exactly that read, and refuses without one.
+        """
+        body = {
+            "vet": "",
+            "ac": ac,
+            "bwl": bwl,
+            "scheduledTime": str(scheduled_time_ms),
+            "timerId": "",
+            "bizType": 4,
+            "bw": bw,
+            "vst": "",
+            "scheduleList": [],
+            "timestamp": str(int(time.time() * 1000)),
+            "command": command,
+        }
+        body_bytes = json.dumps(body, separators=(",", ":")).encode()
+        path = f"/charge-server/ecarx_charge_set/{self.vin}"
+        return self._recorded(
+            f"scheduled_trip {command}",
+            {"scheduledTime": str(scheduled_time_ms), "ac": ac, "bw": bw, "bwl": bwl},
+            lambda: _check_control_resp(
+                self._authed_apis_call("POST", path, body_bytes)))
+
     # ---- WRITE (control) ----
 
     # ---- Command trail (read by diagnostics) ----

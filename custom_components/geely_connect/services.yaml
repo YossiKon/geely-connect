@@ -83,6 +83,45 @@ fire_rapid:
       selector:
         text:
 
+set_scheduled_trip:
+  name: Set scheduled trip
+  description: >
+    Arm or disarm the official app's "Scheduled trip" - the schedule that
+    carries Cabin Comfort and Battery Temperature Maintenance for a departure
+    time. The request is the app's own, captured on a real EX5. The car's
+    current schedule is read first and sent back unchanged apart from what you
+    set here, so the departure is never invented; if the car has no schedule
+    and you give no departure, nothing is sent. Not yet confirmed to move a
+    real car - judge it by the Battery Temperature Maintenance sensor and the
+    app's Scheduled trip screen, never by the response.
+  fields:
+    command:
+      name: Command
+      description: start arms the schedule, stop disarms it.
+      required: false
+      default: start
+      selector:
+        select:
+          options:
+            - start
+            - stop
+    departure:
+      name: Departure
+      description: >
+        The departure date and time, in Home Assistant's time zone. Leave it
+        out to keep the departure the car already holds.
+      required: false
+      example: "2026-10-02 07:00:00"
+      selector:
+        datetime:
+    vin:
+      name: VIN
+      description: VIN of the target vehicle. Optional if you have only one vehicle configured.
+      required: false
+      example: L6T00000000000000
+      selector:
+        text:
+
 fire_control:
   name: Fire control command
   description: >

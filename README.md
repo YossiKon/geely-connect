@@ -910,7 +910,7 @@ to attach as the diagnostics file.
 
 ### 3. Probe a control the integration doesn't expose yet
 
-Two admin-only actions in **Developer Tools → Actions**, for feature work rather
+Three admin-only actions in **Developer Tools → Actions**, for feature work rather
 than daily use:
 
 - **`geely_connect.fire_control`** - any `serviceId` + parameters through the
@@ -920,6 +920,15 @@ than daily use:
   real command only surfaced when an owner captured the app itself (#4).
 - **`geely_connect.fire_rapid`** - the compound rapid warm/cool body, with the
   seat positions, level and any extra field you choose.
+- **`geely_connect.set_scheduled_trip`** - the app's **Scheduled trip** toggle
+  (the schedule that carries Cabin Comfort and Battery Temperature
+  Maintenance), `start` or `stop`, with an optional `departure`. The request is
+  the app's own, captured on a real EX5 in both directions (#4). The car's
+  current schedule is read first and sent back unchanged apart from what you
+  set, so a departure is never invented - with no schedule on the car and no
+  departure given, nothing is sent. **Not yet confirmed to move a real car**:
+  judge it by the Battery Temperature Maintenance sensor and the app's own
+  Scheduled trip screen.
 
 > ⚠️ **A "Success" here proves nothing.** The gateway answers `code 1000` to any
 > well-formed request, including one naming a seat position the car does not

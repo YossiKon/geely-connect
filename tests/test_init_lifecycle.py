@@ -330,7 +330,17 @@ class _FakeApi:
         self.calls.append(f"charge{biz}")
         if self.charge_error is not None:
             raise self.charge_error
+        if biz == "4":
+            # Slot 4 as a real EX5 answered it with a trip set (#4).
+            return {"code": 1000, "data": getattr(self, "slot4", {
+                "btActive": "false", "ac": "true", "bizType": 4,
+                "scheduledTime": "1787229000000", "vet": "", "btTempActive": "true",
+                "bw": "1", "bwl": "1", "vst": "", "id": 282456})}
         return {"code": 1000, "data": {"rbcStartTime": "23:00"}}
+
+    def scheduled_trip_set(self, **kw):
+        self.calls.append(("trip", kw))
+        return {"code": 1000, "success": True}
 
     def request_position_refresh(self):
         self.calls.append("position")
@@ -792,6 +802,128 @@ def test_a_named_vin_picks_that_car_and_not_the_first_one_loaded():
     assert first.calls == [] and second.calls == [("control", "RCT", [], "start")]
 
 
+# ------------------------------------------------------ set_scheduled_trip ---
+# The app's Scheduled trip toggle (#4), built on the rule the thread settled
+# on: read slot 4 first, send its contents back with only the command - and,
+# when given, the departure - changed, and refuse when there is nothing to
+# send. Never a switch, because an invented departure would move the owner's.
+
+def test_scheduled_trip_stop_sends_back_what_the_car_holds():
+    m = _mod()
+    api = _FakeApi()
+    _, run = _service(m, {"e1": {"vin": FAKE_VIN, "api": api}},
+                      {"command": "stop"}, name="set_scheduled_trip")
+    run()
+    assert api.calls[0] == "charge4", "the slot must be read before anything is sent"
+    (kind, kw), = [c for c in api.calls if isinstance(c, tuple)]
+    assert kind == "trip"
+    assert kw == {"command": "stop", "scheduled_time_ms": "1787229000000",
+                  "ac": "true", "bw": "1", "bwl": "1"}
+
+
+def test_scheduled_trip_start_with_a_departure_sends_it_in_ha_time():
+    m = _mod()
+    api = _FakeApi()
+    dt_util = load("__init__").dt_util
+    from datetime import datetime
+    _, run = _service(m, {"e1": {"vin": FAKE_VIN, "api": api}},
+                      {"command": "start", "departure": datetime(2026, 10, 2, 7, 0)},
+                      name="set_scheduled_trip")
+    run()
+    (_, kw), = [c for c in api.calls if isinstance(c, tuple)]
+    want = str(int(dt_util.as_timestamp(datetime(2026, 10, 2, 7, 0)) * 1000))
+    assert kw["scheduled_time_ms"] == want, (kw, want)
+    assert kw["command"] == "start"
+    # The rest of the schedule travels as the car holds it, not as defaults.
+    api.slot4 = {"bizType": 4, "scheduledTime": "1", "ac": "false", "bw": "0", "bwl": "2"}
+    api.calls.clear()
+    run()
+    (_, kw), = [c for c in api.calls if isinstance(c, tuple)]
+    assert (kw["ac"], kw["bw"], kw["bwl"]) == ("false", "0", "2")
+
+
+def test_scheduled_trip_refuses_to_invent_a_departure():
+    """A car with no trip set and a call with no departure: nothing is sent,
+    and the error says why. Defaults for ac/bw/bwl apply only once there IS a
+    departure, as on a car that answers the generic empty envelope."""
+    m = _mod()
+    from homeassistant.exceptions import ServiceValidationError
+    api = _FakeApi()
+    api.slot4 = {"bizType": 4, "scheduleList": [], "bw": "", "startTime": "", "endTime": ""}
+    _, run = _service(m, {"e1": {"vin": FAKE_VIN, "api": api}},
+                      {"command": "start"}, name="set_scheduled_trip")
+    try:
+        run()
+    except ServiceValidationError as e:
+        assert "no departure" in str(e)
+    else:
+        raise AssertionError("a departure was invented")
+    assert not [c for c in api.calls if isinstance(c, tuple)], "nothing may be sent"
+    # With a departure given, the empty envelope's blanks fall back to the
+    # captured defaults rather than travelling as "".
+    from datetime import datetime
+    _, run = _service(m, {"e1": {"vin": FAKE_VIN, "api": api}},
+                      {"command": "start", "departure": datetime(2026, 10, 2, 7, 0)},
+                      name="set_scheduled_trip")
+    run()
+    (_, kw), = [c for c in api.calls if isinstance(c, tuple)]
+    assert (kw["ac"], kw["bw"], kw["bwl"]) == ("true", "1", "1")
+
+
+def test_scheduled_trip_surfaces_a_failed_read_and_an_unmapped_platform():
+    m = _mod()
+    from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+    api = _FakeApi()
+    api.charge_error = NotImplementedError("new-platform charge-server GET not mapped yet")
+    _, run = _service(m, {"e1": {"vin": FAKE_VIN, "api": api}},
+                      {"command": "stop"}, name="set_scheduled_trip")
+    try:
+        run()
+    except ServiceValidationError as e:
+        assert "not mapped" in str(e)
+    else:
+        raise AssertionError("an unmapped platform looked like a success")
+    api.charge_error = RuntimeError("socket closed")
+    try:
+        run()
+    except HomeAssistantError as e:
+        assert "could not read" in str(e) and "socket closed" in str(e)
+    else:
+        raise AssertionError("a failed read looked like a success")
+    assert not [c for c in api.calls if isinstance(c, tuple)]
+    # A read that answers no dict at all is an empty schedule, not a crash.
+    api.charge_error = None
+    api.slot4 = None
+    orig = api.charge_server_get
+    api.charge_server_get = lambda biz: {"code": 1000, "data": "nonsense"}
+    try:
+        run()
+    except ServiceValidationError as e:
+        assert "no departure" in str(e)
+    else:
+        raise AssertionError("a non-dict read was not treated as empty")
+    api.charge_server_get = orig
+
+
+def test_scheduled_trip_reads_the_car_back_afterwards():
+    m = _mod()
+
+    class _Coord:
+        def __init__(self):
+            self.refreshes = 0
+
+        async def async_request_refresh(self):
+            self.refreshes += 1
+
+    coord = _Coord()
+    hass, run = _service(m, {"e1": {"vin": FAKE_VIN, "api": _FakeApi(),
+                                    "coordinator": coord}},
+                         {"command": "stop"}, name="set_scheduled_trip")
+    with _Patched(m, schedule_refresh=lambda h, c, *d: setattr(c, "scheduled", d)):
+        run()
+    assert coord.scheduled == (6, 12), "no read-back after the write"
+
+
 # ------------------------------------------------------------- fire_rapid ---
 # The compound bizType=7 body is the one that carries the seats, and it was
 # never addressable by hand: fire_control speaks the telematics PUT, this is the
@@ -956,7 +1088,8 @@ def test_the_services_register_once_but_a_missing_one_is_still_added():
 
     hass = _Hass()
     hass.services.registered.update({"fire_control": object(),
-                                     "fire_rapid": object()})
+                                     "fire_rapid": object(),
+                                     "set_scheduled_trip": object()})
     assert _register(hass) == [], "a second registration must be a no-op"
 
     partial = _Hass()

@@ -70,6 +70,32 @@ def test_scheduled_charging_posts_to_the_charge_server_path():
     assert sent["path"].startswith("/charge-server/ecarx_charge_set/")
 
 
+def test_scheduled_trip_is_the_captured_biztype_4_body():
+    """The app's own body for the Scheduled trip toggle, captured on a real EX5
+    in both directions (#4): the two captures differ in `command` alone, and
+    `bizType` travels as the integer 4 there, not the string the sibling bodies
+    carry. Every key is sent, including the empty ones."""
+    a = _fake_api()
+    sent = _capture(a)
+    a.scheduled_trip_set(command="start", scheduled_time_ms="1786624200000",
+                         ac="true", bw="1", bwl="1")
+    assert sent["method"] == "POST"
+    assert sent["path"] == f"/charge-server/ecarx_charge_set/{FAKE_VIN}"
+    body = sent["body"]
+    assert body["bizType"] == 4 and isinstance(body["bizType"], int)
+    assert body["command"] == "start"
+    assert body["scheduledTime"] == "1786624200000"
+    assert body["ac"] == "true" and body["bw"] == "1" and body["bwl"] == "1"
+    assert body["vet"] == "" and body["vst"] == "" and body["timerId"] == ""
+    assert body["scheduleList"] == []
+    assert body["timestamp"].isdigit() and len(body["timestamp"]) == 13
+    assert set(body) == {"vet", "ac", "bwl", "scheduledTime", "timerId", "bizType",
+                         "bw", "vst", "scheduleList", "timestamp", "command"}
+    a.scheduled_trip_set(command="stop", scheduled_time_ms=1786624200000)
+    assert sent["body"]["command"] == "stop"
+    assert sent["body"]["scheduledTime"] == "1786624200000", "an int departure is sent as text"
+
+
 def test_control_sends_the_telematics_shape():
     a = _fake_api()
     sent = _capture(a)

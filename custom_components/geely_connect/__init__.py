@@ -886,7 +886,7 @@ def _register_debug_service(hass: HomeAssistant) -> None:
     # registered together today, so a guard on a sibling's name would silently
     # skip whichever service is added next.
     if all(hass.services.has_service(DOMAIN, name)
-           for name in ("fire_control", "fire_rapid")):
+           for name in ("fire_control", "fire_rapid", "set_scheduled_trip")):
         return
 
     schema = vol.Schema({
@@ -1011,16 +1011,72 @@ def _register_debug_service(hass: HomeAssistant) -> None:
         )
         _read_back(bundle)
 
+    # The app's "Scheduled trip" - the master toggle over Cabin Comfort and
+    # Battery Temperature Maintenance - as a service, which is the half of #4
+    # that stayed open after the sensor shipped. The write is the app's own
+    # captured body (api.scheduled_trip_set); what makes it safe to offer is
+    # the order of operations here: slot 4 is READ first and its contents -
+    # the departure above all - are sent back as they are, with only the
+    # command (and, when given, the departure) changed. No read, no write:
+    # a control that invented a departure would silently move the owner's
+    # 07:00, which is why this is not a switch. A switch would also need a
+    # readable armed/disarmed state, and slot 4 has not been captured
+    # disarmed. bizType 4 stays unreachable from fire_rapid for the same
+    # reason: there, a malformed probe would clobber the schedule.
+    trip_schema = vol.Schema({
+        vol.Optional("command", default="start"): vol.In(["start", "stop"]),
+        vol.Optional("departure"): cv.datetime,
+        vol.Optional("vin"): cv.string,
+    })
+
+    async def _handle_trip(call: ServiceCall) -> None:
+        entry_id, bundle = _target(call.data.get("vin"))
+        api = bundle["api"]
+        command = call.data.get("command", "start")
+        departure = call.data.get("departure")
+        try:
+            resp = await hass.async_add_executor_job(api.charge_server_get, "4")
+        except NotImplementedError as e:
+            raise ServiceValidationError(
+                f"the scheduled trip is not mapped on this platform yet: {e}") from e
+        except Exception as e:  # noqa: BLE001 - the read decides, so it must be seen
+            raise HomeAssistantError(f"could not read the current scheduled trip: {e}") from e
+        current = resp.get("data") if isinstance(resp, dict) else None
+        current = current if isinstance(current, dict) else {}
+        if departure is not None:
+            scheduled_ms = str(int(dt_util.as_timestamp(departure) * 1000))
+        else:
+            scheduled_ms = str(current.get("scheduledTime") or "")
+        if not scheduled_ms:
+            raise ServiceValidationError(
+                "no departure to send: the car has no scheduled trip set and "
+                "none was given")
+        kwargs = {
+            "command": command,
+            "scheduled_time_ms": scheduled_ms,
+            "ac": str(current.get("ac") or "true"),
+            "bw": str(current.get("bw") or "1"),
+            "bwl": str(current.get("bwl") or "1"),
+        }
+        resp = await _send(entry_id, f"set_scheduled_trip {command}", functools.partial(
+            api.scheduled_trip_set, **kwargs))
+        _LOGGER.warning("set_scheduled_trip %s departure=%s ac=%s bw=%s bwl=%s → response=%s",
+                        command, scheduled_ms, kwargs["ac"], kwargs["bw"], kwargs["bwl"],
+                        redact(resp))
+        _read_back(bundle)
+
     # Admin-only. The entities are the supported surface and stay available to
-    # every Home Assistant user; these two forward an arbitrary command
-    # straight to the car, including ones no entity exposes, so they are raw
-    # escape hatches rather than features and are gated to administrators the
-    # way Home Assistant gates its other raw services.
+    # every Home Assistant user; these forward a command straight to the car,
+    # including ones no entity exposes, so they are raw escape hatches rather
+    # than features and are gated to administrators the way Home Assistant
+    # gates its other raw services.
     async_register_admin_service(hass, DOMAIN, "fire_control", _handle, schema=schema)
     async_register_admin_service(hass, DOMAIN, "fire_rapid", _handle_rapid,
                                  schema=rapid_schema)
-    _LOGGER.info("Registered geely_connect.fire_control and .fire_rapid "
-                 "debug services (admin only)")
+    async_register_admin_service(hass, DOMAIN, "set_scheduled_trip", _handle_trip,
+                                 schema=trip_schema)
+    _LOGGER.info("Registered geely_connect.fire_control, .fire_rapid and "
+                 ".set_scheduled_trip services (admin only)")
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
