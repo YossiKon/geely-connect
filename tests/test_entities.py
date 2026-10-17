@@ -251,7 +251,8 @@ def test_the_promoted_fields_stay_on_both_platforms():
 # Live only on the secondary status block or the charge-server - or, for
 # Parking Comfort, behind a command the new route does not map (#88).
 _UNSERVED_KEYS = frozenset({
-    "bs_battery_temp_maintenance", "sw_scheduled_charging",
+    "bs_battery_temp_maintenance", "bs_scheduled_trip_weekly",
+    "bs_scheduled_trip_one_off", "sw_scheduled_charging",
     "time_scheduled_charging_start", "time_scheduled_charging_end",
     "sw_parking_comfort",
 })
@@ -886,17 +887,13 @@ def test_every_other_binary_sensor_still_treats_unknown_as_off():
     assert bs.GeelyBinarySensor(C(), FAKE_VIN, "Geely", *spec).is_on is False
 
 
-def _btm(value):
-    """The battery-temperature-maintenance sensor reading one raw value."""
+def _trip(key, field, value):
+    """One Scheduled-trip sensor reading one raw slot-4 value."""
     import copy
     bs = load("binary_sensor")
-    spec = next(s for s in bs.SPECS if s[0] == "battery_temp_maintenance")
+    spec = next(s for s in bs.SPECS if s[0] == key)
     data = copy.deepcopy(STATUS)
-    data.setdefault("_state", {})
-    if value is None:
-        data["_state"].pop("btTempActive", None)
-    else:
-        data["_state"]["btTempActive"] = value
+    data["_scheduled_trip"] = {} if value is None else {field: value}
 
     class C(_Coord):
         pass
@@ -904,26 +901,63 @@ def _btm(value):
     return bs.GeelyBinarySensor(C(), FAKE_VIN, "Geely", *spec)
 
 
-def test_battery_temperature_maintenance_reads_the_flag_three_sources_agree_on():
-    """The half of #4 open since 4 August, and it needed no new request - the
-    field was already in the secondary status block.
+def _btm(value):
+    """The battery-temperature-maintenance sensor reading one raw value."""
+    return _trip("battery_temp_maintenance", "bw", value)
 
-    On one EX5 the app shows the toggle on, `_state.btTempActive` reads 1, and
-    the vendor's schedule endpoint returns `btTempActive: "true"` beside a
-    `scheduledTime` that decodes to exactly the 22:30 the app displays. A
-    Starray reads 0, which is the off half."""
+
+def test_battery_temperature_maintenance_reads_bw_from_the_scheduled_trip():
+    """An owner switched the toggle off with the weekday schedule armed, and
+    slot 4's `bw` alone went 1 -> 0 while `btActive` and `btTempActive` held
+    (#4). The flag this sensor used to read, `btTempActive`, is a one-off
+    trip being armed - it matched the toggle on the first car by chance."""
     if not have_homeassistant():
         skip("homeassistant not installed")
-    assert _btm(1).is_on is True
     assert _btm("1").is_on is True
-    assert _btm("true").is_on is True
+    assert _btm(1).is_on is True
+    assert _btm("0").is_on is False
     assert _btm(0).is_on is False
-    assert _btm("false").is_on is False
+
+
+def test_battery_temperature_maintenance_ignores_the_trip_flags():
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    for field in ("btActive", "btTempActive"):
+        assert _trip("battery_temp_maintenance", field, "true").is_on is None
+
+
+def test_a_bw_in_another_scheme_reads_unknown_not_off():
+    """A 1.0 car answers `bw: "false"` in a shape nobody has decoded (#72)."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    assert _btm("false").is_on is None
 
 
 def test_a_car_that_never_reports_the_flag_says_unknown_not_off():
-    """A trim without the feature, or a payload fetched before the secondary
-    block arrives, must not claim the maintenance is switched off."""
+    """A trim without the feature, or a payload fetched before slot 4
+    arrives, must not claim the maintenance is switched off."""
     if not have_homeassistant():
         skip("homeassistant not installed")
     assert _btm(None).is_on is None
+
+
+def test_the_scheduled_trip_sensors_tell_the_weekday_schedule_from_a_one_off():
+    """The four states one owner read in #4: `btActive` followed the weekday
+    schedule and `btTempActive` a one-off trip for the next day."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    weekly = lambda v: _trip("scheduled_trip_weekly", "btActive", v).is_on
+    one_off = lambda v: _trip("scheduled_trip_one_off", "btTempActive", v).is_on
+    assert (weekly("true"), weekly("false"), weekly(None)) == (True, False, None)
+    assert (one_off("true"), one_off("false"), one_off(None)) == (True, False, None)
+
+
+def test_a_1_0_car_gets_no_scheduled_trip_sensors():
+    """Its catalogue declares `booking_travel_1`, whose slot 4 is another
+    shape, so the poll does not read it and no sensor waits on it."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    trip = {"bs_battery_temp_maintenance", "bs_scheduled_trip_weekly",
+            "bs_scheduled_trip_one_off"}
+    assert trip <= _keys(_build_all())
+    assert not trip & _keys(_build_all(capabilities={"scheduled_trip.enabled": False}))

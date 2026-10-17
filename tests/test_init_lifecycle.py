@@ -524,6 +524,7 @@ def test_setup_builds_the_bundle_and_forwards_every_platform():
     assert "fire_control" in services
     assert coord.data["_state"] == {"sentry": "1"}
     assert coord.data["_scheduled_charging"] == {"rbcStartTime": "23:00"}
+    assert coord.data["_scheduled_trip"]["bw"] == "1"
     assert api.kw["vin"] == FAKE_VIN
 
 
@@ -541,7 +542,9 @@ def test_an_api_without_the_secondary_endpoints_is_not_asked_for_them():
     asyncio.run(coord.refresh())
     assert ok and "status" in api.calls
     assert "state" not in api.calls and "charge6" not in api.calls, api.calls
+    assert "charge4" not in api.calls, api.calls
     assert "_state" not in coord.data and "_scheduled_charging" not in coord.data
+    assert "_scheduled_trip" not in coord.data
 
 
 def test_a_refresh_press_is_spent_where_there_is_no_state_block_to_wait_for():
@@ -1559,6 +1562,38 @@ def test_a_car_whose_catalogue_names_slot_2_reads_its_schedule_there():
     asyncio.run(coord.refresh())
     assert api.calls.count("charge2") == before + 1, api.calls
     assert coord.data["_scheduled_charging"] == _E2_SLOT_2
+
+
+def _one_zero_trip_catalogue(api):
+    api.fetch_capabilities = lambda: [
+        {"functionId": "booking_travel_1", "valueEnable": True, "paramsJson": []}]
+
+
+def test_the_scheduled_trip_is_read_on_every_secondary_poll():
+    """Battery Temperature Maintenance is slot 4's `bw` and nowhere in the
+    status block (#4), so slot 4 is polled beside the charging schedule."""
+    m = _mod()
+    ok, hass, _, api, coord, _ = _setup(m)
+    hass.data["geely_connect"]["e1"]["poll_state"]["force_secondary"] = True
+    before = api.calls.count("charge4")
+    asyncio.run(coord.refresh())
+    assert ok and api.calls.count("charge4") == before + 1, api.calls
+    assert coord.data["_scheduled_trip"]["bw"] == "1"
+
+
+def test_a_1_0_car_stops_reading_the_scheduled_trip_once_its_catalogue_says_so():
+    """The first refresh runs before the catalogue; what it read from slot 4 is
+    dropped, and no poll after asks again (#72)."""
+    m = _mod()
+    ok, hass, _, api, coord, _ = _setup(m, api_tweak=_one_zero_trip_catalogue)
+    poll = hass.data["geely_connect"]["e1"]["poll_state"]
+    assert ok and poll["read_trip"] is False
+    assert "_scheduled_trip" not in coord.data
+    poll["force_secondary"] = True
+    before = api.calls.count("charge4")
+    asyncio.run(coord.refresh())
+    assert api.calls.count("charge4") == before, api.calls
+    assert "_scheduled_trip" not in coord.data
 
 
 def test_every_other_car_keeps_reading_slot_6():

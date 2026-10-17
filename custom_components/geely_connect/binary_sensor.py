@@ -27,6 +27,8 @@ _CLIM = ("vehicleStatus", "additionalVehicleStatus", "climateStatus")
 _EV   = ("vehicleStatus", "additionalVehicleStatus", "electricVehicleStatus")
 # The secondary status endpoint, where the *Active flags live.
 _STATE = ("_state",)
+# Charge-server slot 4, the app's Scheduled trip.
+_TRIP = ("_scheduled_trip",)
 
 # (key, friendly_name, path, device_class, on_when_value_in)
 # Friendly names drop the redundant "open" / "unlocked" suffix - HA's
@@ -42,6 +44,8 @@ _ICONS: dict[str, str] = {
     "tank_flap":        "mdi:gas-station",
     "steering_wheel_heating": "mdi:steering",
     "battery_temp_maintenance": "mdi:battery-heart-variant",
+    "scheduled_trip_weekly": "mdi:calendar-sync",
+    "scheduled_trip_one_off": "mdi:calendar-clock",
 }
 
 
@@ -154,29 +158,28 @@ SPECS: tuple[tuple[str, str, tuple[str, ...], BinarySensorDeviceClass | None, tu
     # E2 sends 1 in every file from it, all parked (#72), which fits 1 for
     # engaged; the cards' driving lock reads this entity there.
     ("park_brake_engaged",   "Park Brake Engaged", (*_SAFE, "electricParkBrakeStatus"),     None,                            ("3", 3, "1", 1), (), ("9", 9, "0", 0)),
-    # Battery Temperature Maintenance, the half of #4 that had been open since
-    # 4 August. It is the app's "Scheduled trip -> Battery Temperature
-    # Maintenance" toggle, and the read side needs no new request: the field is
-    # already in the secondary status block this integration polls.
+    # The app's "Scheduled trip" screen, from charge-server slot 4 (#4). One
+    # owner read it in four states, changing one thing at a time:
     #
-    # Identified by three sources agreeing on one car (#4), rather than by the
-    # flag-watching test an owner was asked to run:
-    #   - the app screenshot shows the toggle ON;
-    #   - `_state.btTempActive` reads 1 on that car;
-    #   - the vendor's own schedule endpoint (charge-server bizType 4, read
-    #     into the diagnostics report since v1.40.0) returns
-    #     `btTempActive: "true"` alongside `scheduledTime` decoding to exactly
-    #     the 22:30 the app displays.
-    # A Starray reads 0 here, which is the off half of the pair.
+    #   state                              btActive  btTempActive  bw
+    #   weekday schedule on                true      false         1
+    #   weekday schedule off               false     false         1
+    #   one-off trip for the next day      false     true          1
+    #   weekday on, battery temp off       true      false         0
     #
-    # Then the entity was watched changing: the same owner switched the
-    # scheduled trip off and it followed to Off. That is worth more than the
-    # three snapshots above, because a field can agree with a setting once by
-    # coincidence and cannot track it by coincidence.
+    # So `btActive` is the weekday schedule, `btTempActive` a one-off trip, and
+    # `bw` the Battery Temperature Maintenance toggle - the only field that
+    # moved when that alone was switched off. This sensor used to read
+    # `btTempActive`, which agreed with the toggle on the first car only
+    # because that car's 22:30 trip was a one-off. It keeps its unique_id, so
+    # it now says what its name always claimed.
     #
-    # `btActive` is deliberately NOT this field - it reads 0/false on the car
-    # whose maintenance is on, so whatever it is, it is something else.
-    ("battery_temp_maintenance", "Battery Temperature Maintenance", (*_STATE, "btTempActive"), None, ("1", 1, "true", True)),
+    # `bw` is "1"/"0" on the EX5 scheme. A 1.0 car answers `bw: "false"` in
+    # another shape (#72) and gets none of these, so anything but 1/0 reads
+    # unknown rather than off.
+    ("battery_temp_maintenance", "Battery Temperature Maintenance", (*_TRIP, "bw"),           None, ("1", 1), (), ("0", 0)),
+    ("scheduled_trip_weekly",    "Scheduled Trip Weekly",           (*_TRIP, "btActive"),     None, ("true", True, "1", 1)),
+    ("scheduled_trip_one_off",   "Scheduled Trip One-off",          (*_TRIP, "btTempActive"), None, ("true", True, "1", 1)),
 )
 
 # Removed (redundant with proper entities):
@@ -200,6 +203,9 @@ HYBRID_SPECS: tuple[tuple[str, str, tuple[str, ...], BinarySensorDeviceClass | N
 # yet: there they could only ever read unknown (#88) - a tile that never says
 # anything is worse than no tile. See helpers.api_serves.
 _STATE_ONLY = frozenset(s[0] for s in SPECS if s[2][:1] == _STATE)
+# Read from slot 4, which only an EX5-scheme car answers in this shape: the new
+# platform does not serve it, and a 1.0 car's catalogue rules it out.
+_TRIP_ONLY = frozenset(s[0] for s in SPECS if s[2][:1] == _TRIP)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entities: AddEntitiesCallback) -> None:
@@ -211,11 +217,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
     specs = SPECS + (HYBRID_SPECS if verdict and verdict.has_tank else ())
     charges = verdict.charges if verdict else True
     serves_state = api_serves(bundle.get("api"), "state")
+    reads_trip = (api_serves(bundle.get("api"), "charge_server")
+                  and (bundle.get("capabilities") or {}).get("scheduled_trip.enabled") is not False)
     entities: list[BinarySensorEntity] = [
         GeelyBinarySensor(coordinator, vin, device_name, *s) for s in specs
         # No socket, no plug sensor - see Verdict.charges.
         if (charges or s[0] != "charger_plugged_in")
         and (serves_state or s[0] not in _STATE_ONLY)
+        and (reads_trip or s[0] not in _TRIP_ONLY)
     ]
     # Connectivity: is the integration currently reaching the car's cloud?
     entities.append(GeelyConnectivity(coordinator, vin, device_name))

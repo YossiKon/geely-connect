@@ -36,7 +36,7 @@ polished setup on top.
 ## ✨ Highlights
 
 - 🔒 **Security-first** - verified TLS plus public-key pinning.
-- 📊 **Everything enabled** - all 86 entities are on from the start (99 on a
+- 📊 **Everything enabled** - all 88 entities are on from the start (101 on a
   hybrid), no duplicates, nothing to switch on by hand.
 - 🧮 **Computed extras** - charging power, charge completion time, range at full
   charge and efficiency, none of which the car reports itself.
@@ -516,14 +516,15 @@ The **Trunk Lock** sensor is worth knowing about separately: it reads the tailga
 **Battery Temperature Maintenance** reads the app's *Scheduled trip → Battery
 Temperature Maintenance* toggle. It is a setting rather than a live activity:
 on means the car will condition the pack before the scheduled departure, not
-that it is doing so now. Three sources on one car agree on the decode
-([#4](https://github.com/YossiKon/geely-connect/issues/4)) - the app screenshot,
-the status flag, and the vendor's own schedule endpoint, whose departure time
-decodes to exactly the time the app shows. A second car now questions it: a
-Starray EM-i read in three states (#4) had the flag follow a **one-off** trip,
-and stay off while a weekday schedule was armed with battery warming on. So it
-may report "a one-off trip is armed" rather than the battery setting. One more
-test settles it, and the sensor changes if it confirms.
+that it is doing so now. It comes from the vendor's own schedule endpoint, read
+in four states on a Starray EM-i with one thing changed at a time
+([#4](https://github.com/YossiKon/geely-connect/issues/4)): switching only
+this toggle off moved one field and nothing else.
+
+**Scheduled Trip Weekly** and **Scheduled Trip One-off** sit beside it: whether
+the app's weekday schedule is armed, and whether a one-off departure is. Before
+this the battery sensor read the one-off flag, which agreed with the toggle on
+the first car only because that car's trip was a one-off.
 
 **Park Brake Engaged** sits beside the *Park Brake* text sensor - on/off for an
 automation, a word for a dashboard. Only the two codes real cars send are
@@ -1149,12 +1150,13 @@ enabling. Everything the car reports, plus the computed extras above.
 
 The main thing that varies by car is propulsion: the thirteen fuel and engine
 entities are created only for a car with a tank, so a battery-electric EX5 gets
-86 entities and a PHEV gets 99. That's a decision made once at startup from your
+88 entities and a PHEV gets 101. That's a decision made once at startup from your
 account's `powerType` plus the car's own telemetry - there is no option to set.
 
 A car on the new Geely EM platform gets a few fewer. Its schedule and
 secondary-status endpoints are not mapped yet, so *Scheduled Charging* (the
-switch and its two times) and *Battery Temperature Maintenance* are left out
+switch and its two times), *Battery Temperature Maintenance* and the two
+*Scheduled Trip* sensors are left out
 rather than built to read unknown - and with a vehicle token, so is *Parking
 Comfort*, whose command is not mapped on that route either.
 

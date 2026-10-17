@@ -261,11 +261,10 @@ def _purge_unserved_entities(hass: HomeAssistant, entry: ConfigEntry, api: Any) 
     that list is global, and these are working entities on every car whose
     api serves them."""
     gone: list[str] = []
-    if not api_serves(api, "state"):
-        gone.append("_bs_battery_temp_maintenance")
     if not api_serves(api, "charge_server"):
         gone += ["_sw_scheduled_charging", "_time_scheduled_charging_start",
-                 "_time_scheduled_charging_end"]
+                 "_time_scheduled_charging_end", "_bs_battery_temp_maintenance",
+                 "_bs_scheduled_trip_weekly", "_bs_scheduled_trip_one_off"]
     if not api_can_send(api, SERVICE_PARKING_COMFORT):
         gone.append("_sw_parking_comfort")
     if not gone:
@@ -627,8 +626,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Efficient-polling state: cycle counter, idle streak, last-change signature.
     # `charge_slot` is the charge-server slot the schedule lives in: 6, until
     # the catalogue says 2 (an E2, #72) - read after the first refresh.
+    # `read_trip` is whether slot 4, the scheduled trip, is read: until the
+    # catalogue says the car speaks its 1.0 scheme, where that slot answers
+    # in another shape (#72).
     poll_state = {"cycle": 0, "idle": 0, "sig": None, "fix_odo": None,
-                  "charge_slot": "6"}
+                  "charge_slot": "6", "read_trip": True}
     # Chosen polling profile (Eco / Normal / Live) from setup.
     profile = POLL_PROFILES.get(
         # Options win over data: the polling mode can be changed after setup.
@@ -756,6 +758,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             data["_state"] = prev["_state"]
         if "_scheduled_charging" in prev:
             data["_scheduled_charging"] = prev["_scheduled_charging"]
+        if "_scheduled_trip" in prev:
+            data["_scheduled_trip"] = prev["_scheduled_trip"]
 
         # A user pressing Refresh Data means "fetch everything now" - three
         # presses in four otherwise re-fetched nothing but the main status,
@@ -799,6 +803,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     _LOGGER.error("scheduled-charging fetch: TLS pin check failed: %s", e)
                 except Exception as e:  # noqa: BLE001
                     _LOGGER.debug("scheduled-charging fetch non-fatal failure: %s", e)
+            # Slot 4, the app's Scheduled trip. Battery Temperature
+            # Maintenance lives here as `bw` and nowhere in the status block:
+            # an owner switched it off with the weekday schedule armed, and
+            # `bw` alone went 1 -> 0 while both *Active flags held (#4).
+            if api_serves(api, "charge_server") and poll_state["read_trip"]:
+                try:
+                    st = await _call_with_retry(api.charge_server_get, "4")
+                    if st.get("code") in _SUCCESS_CODES and isinstance(st.get("data"), dict):
+                        data["_scheduled_trip"] = st["data"]
+                except GeelyTLSPinError as e:
+                    _LOGGER.error("scheduled-trip fetch: TLS pin check failed: %s", e)
+                except Exception as e:  # noqa: BLE001
+                    _LOGGER.debug("scheduled-trip fetch non-fatal failure: %s", e)
             # Cleared only once the fetch it asked for has actually been
             # attempted to completion. Clearing it before, as this did for a
             # day, meant one failed vehicle-state call silently swallowed the
@@ -881,6 +898,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if capabilities.get("scheduled_charging.slot_2"):
         poll_state["charge_slot"] = "2"
         await _read_slot_2_now(hass, api, coordinator, _SUCCESS_CODES)
+    # The first refresh read slot 4 too; on a 1.0 car that answer is another
+    # shape, so it is dropped rather than read by entities that are not built.
+    if capabilities.get("scheduled_trip.enabled") is False:
+        poll_state["read_trip"] = False
+        (coordinator.data or {}).pop("_scheduled_trip", None)
 
     # What the car is powered by, decided once from the first refresh. Platforms
     # read this rather than each deciding for itself, so a PHEV cannot end up
@@ -1105,7 +1127,7 @@ def _register_debug_service(hass: HomeAssistant) -> None:
     # 07:00, which is why this is not a switch. A switch would also need a
     # readable armed state, and the one car read armed and disarmed (#4)
     # splits it in two: `btActive` for the weekday schedule, `btTempActive`
-    # for a one-off. bizType 4 stays unreachable from fire_rapid for the same
+    # for a one-off - read, not written, by the two Scheduled Trip sensors. bizType 4 stays unreachable from fire_rapid for the same
     # reason: there, a malformed probe would clobber the schedule.
     trip_schema = vol.Schema({
         vol.Optional("command", default="start"): vol.In(["start", "stop"]),
