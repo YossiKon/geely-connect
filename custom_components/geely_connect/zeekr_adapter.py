@@ -35,8 +35,10 @@ from typing import Any
 
 from .api import GeelyAuthError, GeelyControlError
 from .zeekr_client import (
-    GATEWAY, ZeekrApiError, ZeekrAuthError, ZeekrClient, ZeekrIdaas,
+    ZeekrApiError, ZeekrAuthError, ZeekrClient, ZeekrIdaas,
 )
+
+from .zeekr_regions import ZeekrRegion
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -290,7 +292,8 @@ class ZeekrAdapter:
                  hf_token: str = "", vehicle_model: str = "",
                  password: str = "", country_code: str = "AU",
                  timezone: str = "UTC", hf_expiry: int = 0,
-                 gateway: str = GATEWAY, enc_vin: str = "") -> None:
+                 gateway: str | None = None, enc_vin: str = "",
+                 profile: ZeekrRegion | None = None) -> None:
         self.vin = vin
         self.user_id = user_id
         self._email = email
@@ -299,7 +302,7 @@ class ZeekrAdapter:
         # HF JWT expiry as an absolute epoch, from the entry (0 = unknown).
         self._hf_expiry_ts: int = int(hf_expiry) if hf_expiry else 0
         self._client = ZeekrClient(email=email, password="", gateway=gateway,
-                                   vehicle_model=vehicle_model)
+                                   vehicle_model=vehicle_model, profile=profile)
         self._client.timezone = timezone
         self._client.country_code = country_code
         self._client.access_token = access_token
@@ -346,7 +349,7 @@ class ZeekrAdapter:
         if not self._password:
             raise ZeekrAuthError(
                 "no stored password for HF renewal - reauthenticate")
-        token_value = ZeekrIdaas(country=self._country_code).login_by_email_password(
+        token_value = ZeekrIdaas(country=self._country_code, profile=self._client.profile).login_by_email_password(
             self._email, self._password)
         self._client.login_tsp(token_value)
         self._hf_expiry_ts = int(time.time()) + self._client.hf_expires_in

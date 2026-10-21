@@ -42,6 +42,8 @@ _REDACT = {
     # addresses and controls the car. redact() (the first pass) already masks
     # it by normalised name; this is the belt to that pass's braces.
     "zeekr_enc_vin",
+    "hmac_access_key", "hmac_secret", "snc_secret", "vin_key", "vin_iv",
+    "vin_key_hex", "vin_iv_hex", "eu_app_keys",
 }
 
 

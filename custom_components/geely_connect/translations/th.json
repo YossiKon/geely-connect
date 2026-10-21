@@ -42,7 +42,8 @@
           "country_code": "ประเทศ",
           "pressure_unit": "หน่วยแรงดันลมยาง",
           "poll_mode": "โหมดการดึงข้อมูล",
-          "store_password": "บันทึกรหัสผ่านไว้ เพื่อให้เซสชันต่ออายุอัตโนมัติ"
+          "store_password": "บันทึกรหัสผ่านไว้ เพื่อให้เซสชันต่ออายุอัตโนมัติ",
+          "zeekr_region": "New-app server region"
         }
       },
       "zeekr_pick": {
@@ -60,7 +61,8 @@
       "invalid_code": "รหัสนี้ไม่ถูกต้อง อาจหมดอายุแล้ว (รหัสใช้ได้เพียงครั้งเดียว)",
       "invalid_credentials": "อีเมลหรือรหัสผ่านไม่ถูกต้อง หากบัญชีนี้เพิ่งเริ่มใช้แอป Geely ตัวใหม่ ให้เปิดแอปบนมือถือแล้วตั้งค่าให้เสร็จก่อน (แอปจะตั้งรหัสผ่านและเชื่อมต่อรถให้) แล้วลองใหม่อีกครั้ง",
       "no_vehicles": "ล็อกอินสำเร็จ แต่ไม่พบรถในบัญชีนี้ เปิดแอป Geely ตัวใหม่บนมือถือแล้วตรวจสอบว่าเชื่อมต่อรถไว้แล้ว จากนั้นลองใหม่อีกครั้ง",
-      "unknown": "เกิดข้อผิดพลาดบางอย่าง ตรวจสอบล็อกเพื่อดูรายละเอียด"
+      "unknown": "เกิดข้อผิดพลาดบางอย่าง ตรวจสอบล็อกเพื่อดูรายละเอียด",
+      "eu_app_keys_required": "European app keys are missing or invalid. Put your own geely_eu_app_keys.json in the Home Assistant configuration directory, then try again. See docs/LOCAL-EU-KEYS.md."
     },
     "abort": {
       "already_configured": "รถ Geely คันนี้ตั้งค่าไว้แล้ว",

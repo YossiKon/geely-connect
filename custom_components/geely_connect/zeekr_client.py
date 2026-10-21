@@ -1,5 +1,8 @@
 """Zeekr-platform client for the new Geely EM backend (com.geely.global.em 1.1.0).
 
+European app profile: com.geely.global 1.1.1, explicitly selected in the
+new-app flow; see zeekr_regions.py and docs/LOCAL-EU-KEYS.md.
+
 Standalone, additive module: does NOT touch the existing Ecarx/APAC client.
 Port spec derived from static analysis + emulator extraction + LIVE capture
 of the app's own forced-migration flow (2026-08-10):
@@ -61,6 +64,7 @@ from typing import Any
 from urllib.parse import urlparse, parse_qsl, quote
 
 from .api import redact
+from .zeekr_regions import ZeekrRegion
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -194,7 +198,8 @@ def _sign_v1(*, method: str, path: str, query: str, accept: str, nonce: str,
 def _hf_request(method: str, path: str, *, query: str = "", body: bytes = b"",
                 token: str | None = None, vin: str | None = None,
                 vehicle_model: str = "", timezone: str = "UTC",
-                device_identifier: str | None = None) -> dict:
+                device_identifier: str | None = None,
+                gateway: str | None = None) -> dict:
     """Signed call to the old Ecarx platform (api.ecloudkr.com) with the HF
     identity (GEELY-APP-NEW + new-app secret + device headers), mirroring the
     new app's own HF client (HFOkHttpClientUtil.RequestInterceptor + SignUtil).
@@ -237,7 +242,7 @@ def _hf_request(method: str, path: str, *, query: str = "", body: bytes = b"",
         sig_version="1.0", timestamp_ms=ts_ms, body=body, secret=HF_SECRET)
     headers["x-timestamp"] = ts_ms
 
-    p = urlparse(HF_GATEWAY)
+    p = urlparse(gateway or HF_GATEWAY)
     if p.scheme == "https":
         ctx = ssl.create_default_context()
         conn: http.client.HTTPConnection = http.client.HTTPSConnection(
@@ -487,18 +492,22 @@ def idaas_sign(*, method: str, path: str, query: str, xdate: str,
 
 def idaas_headers(method: str, path: str, body: bytes, query: str = "",
                   xdate: str | None = None, country: str = "AU",
-                  token: str | None = None) -> dict:
+                  token: str | None = None,
+                  profile: ZeekrRegion | None = None) -> dict:
     xdate = xdate or _http_date_gmt()
+    access_key = profile.hmac_access_key if profile else HMAC_ACCESS_KEY
+    secret = profile.hmac_secret if profile else HMAC_SECRET
+    msg_client = profile.msg_client_id if profile else MSG_CLIENT_ID
     headers = {
-        "msgClientId": MSG_CLIENT_ID,
+        "msgClientId": msg_client,
         "Device-Name": "Pixel 9 Pro XL",
-        "msgAppId": MSG_APP_ID,
+        "msgAppId": profile.msg_app_id if profile else MSG_APP_ID,
         "App-Code": CLIENT_ID,
         "RegistCountry": country,
         "appCode": "eu-app",
         "Client-Id": CLIENT_ID,
         "Call-Source": "android",
-        "AppVersion": "1.1.0",
+        "AppVersion": profile.app_version if profile else "1.1.0",
         "Brand": "GEELY",
         "Language": "en",
         "Device-Type": "app",
@@ -506,15 +515,18 @@ def idaas_headers(method: str, path: str, body: bytes, query: str = "",
         "Country": country,
         "appSecret": "zeekr_tis",
         "X-Language": "en",
-        "app-authorization": MSG_CLIENT_ID,
+        "app-authorization": msg_client,
         "X-HMAC-ALGORITHM": "hmac-sha256",
-        "X-HMAC-SIGNATURE": idaas_sign(method=method, path=path, query=query, xdate=xdate),
-        "X-HMAC-ACCESS-KEY": HMAC_ACCESS_KEY,
-        "X-HMAC-DIGEST": hmac_sha256_b64(body),
+        "X-HMAC-SIGNATURE": idaas_sign(method=method, path=path, query=query, xdate=xdate,
+                                        access_key=access_key, secret=secret),
+        "X-HMAC-ACCESS-KEY": access_key,
+        "X-HMAC-DIGEST": hmac_sha256_b64(body, secret),
         "X-DATE": xdate,
         "Content-Type": "application/json; charset=utf-8",
         "User-Agent": "okhttp/4.12.0",
     }
+    if profile:
+        headers["Tmp-Tenant-Code"] = TMP_TENANT
     if token:
         headers["Authorization"] = token  # raw tokenValue, no Bearer prefix (app parity)
     return headers
@@ -559,27 +571,24 @@ def _get_json(url: str, headers: dict) -> dict:
 class ZeekrIdaas:
     """IDaaS user-center client: checkUserV2 / captcha-email / loginByEmailEncrypt."""
 
-    def __init__(self, gateway: str = IDAAS_GATEWAY, path: str = IDAAS_PATH,
-                 country: str = "AU"):
-        self.base = f"{gateway.rstrip('/')}/{path}"
-        # The account's country. Threaded into every request's Country /
-        # RegistCountry headers below - it used to be accepted and dropped, so
-        # every call went out as "AU" regardless of who logged in. Only the
-        # SEA-region gateway/path (this default) is live-verified; a non-SEA
-        # region would also need its own gateway host and idaas path, which
-        # have not been captured, so those accounts stay best-effort.
-        self.country = country
+    def __init__(self, gateway: str | None = None, path: str | None = None,
+                 country: str = "AU", profile: ZeekrRegion | None = None):
+        self.country = country.strip().upper()
+        self.profile = profile
+        gateway = gateway or (profile.idaas_gateway if profile else IDAAS_GATEWAY)
+        self.path = (path or (profile.idaas_path if profile else IDAAS_PATH)).strip("/")
+        self.base = f"{gateway.rstrip('/')}/{self.path}"
 
     def _headers(self, method: str, path: str, body: bytes, query: str = "",
                  token: str | None = None) -> dict:
         """idaas_headers bound to this client's country (was always 'AU')."""
         return idaas_headers(method, path, body, query=query,
-                             country=self.country, token=token)
+                             country=self.country, token=token, profile=self.profile)
 
     def check_user(self, email: str) -> dict:
         body = {"email": email, "checkType": "1"}
         resp = _post_json(f"{self.base}/auth/checkUserV2", body,
-                          self._headers("POST", f"/{IDAAS_PATH}/auth/checkUserV2", json.dumps(body).encode()))
+                          self._headers("POST", f"/{self.path}/auth/checkUserV2", json.dumps(body).encode()))
         return _check_resp(resp).get("data") or {}
 
     def request_code(self, email: str, operation_type: str = "login") -> dict:
@@ -587,14 +596,14 @@ class ZeekrIdaas:
         body = {"email": email, "operationType": operation_type,
                 "humanMachineTicket": "", "language": "en"}
         resp = _post_json(f"{self.base}/captcha/email", body,
-                          self._headers("POST", f"/{IDAAS_PATH}/captcha/email", json.dumps(body).encode()))
+                          self._headers("POST", f"/{self.path}/captcha/email", json.dumps(body).encode()))
         return _check_resp(resp).get("data") or {}
 
     def login_by_email(self, email: str, code_id: str, code: str) -> str:
         """loginByEmailEncrypt -> tokenValue. password omitted for OTP-only accounts."""
         body = {"email": email, "codeId": code_id, "code": code}
         resp = _post_json(f"{self.base}/auth/loginByEmailEncrypt", body,
-                          self._headers("POST", f"/{IDAAS_PATH}/auth/loginByEmailEncrypt",
+                          self._headers("POST", f"/{self.path}/auth/loginByEmailEncrypt",
                                         json.dumps(body).encode()))
         data = _check_resp(resp).get("data") or {}
         token = data.get("tokenValue")
@@ -606,7 +615,7 @@ class ZeekrIdaas:
         """loginByEmailEncrypt{email, RSA(password)} -> tokenValue (post-switch)."""
         body = {"email": email, "password": _rsa_encrypt_password(password)}
         resp = _post_json(f"{self.base}/auth/loginByEmailEncrypt", body,
-                          self._headers("POST", f"/{IDAAS_PATH}/auth/loginByEmailEncrypt",
+                          self._headers("POST", f"/{self.path}/auth/loginByEmailEncrypt",
                                         json.dumps(body).encode()))
         data = _check_resp(resp).get("data") or {}
         token = data.get("tokenValue")
@@ -619,7 +628,7 @@ class ZeekrIdaas:
         body = {"email": email, "codeId": code_id, "code": code,
                 "password": _rsa_encrypt_password(password)}
         resp = _post_json(f"{self.base}/auth/editPasswordByEmailEncrypt", body,
-                          self._headers("POST", f"/{IDAAS_PATH}/auth/editPasswordByEmailEncrypt",
+                          self._headers("POST", f"/{self.path}/auth/editPasswordByEmailEncrypt",
                                         json.dumps(body).encode()))
         return _check_resp(resp).get("data") or {}
 
@@ -629,7 +638,7 @@ class ZeekrIdaas:
         body = {"account": account, "code": code, "codeId": code_id,
                 "operationType": operation_type}
         resp = _post_json(f"{self.base}/captcha/verify", body,
-                          self._headers("POST", f"/{IDAAS_PATH}/captcha/verify",
+                          self._headers("POST", f"/{self.path}/captcha/verify",
                                         json.dumps(body).encode()))
         data = _check_resp(resp).get("data")
         return data is True
@@ -642,7 +651,7 @@ class ZeekrIdaas:
                 "password": _rsa_encrypt_password(password),
                 "firstName": first_name, "lastName": last_name}
         resp = _post_json(f"{self.base}/auth/completeMigration", body,
-                          self._headers("POST", f"/{IDAAS_PATH}/auth/completeMigration",
+                          self._headers("POST", f"/{self.path}/auth/completeMigration",
                                         json.dumps(body).encode()))
         data = _check_resp(resp).get("data") or {}
         if not data.get("tokenValue"):
@@ -653,7 +662,7 @@ class ZeekrIdaas:
         """POST /user/info (empty body) with the login token: confirms identity."""
         resp = _post_raw_json(
             f"{self.base}/user/info", b"",
-            self._headers("POST", f"/{IDAAS_PATH}/user/info", b"",
+            self._headers("POST", f"/{self.path}/user/info", b"",
                           token=token_value))
         return _check_resp(resp).get("data") or {}
 
@@ -666,7 +675,7 @@ class ZeekrIdaas:
         query = f"tspClientId={client_id}"
         resp = _get_json(
             f"{self.base}/user/tspCode?{query}",
-            self._headers("GET", f"/{IDAAS_PATH}/user/tspCode", b"", query=query,
+            self._headers("GET", f"/{self.path}/user/tspCode", b"", query=query,
                           token=token_value))
         return _check_resp(resp).get("data") or {}
 
@@ -674,14 +683,15 @@ class ZeekrIdaas:
 class ZeekrClient:
     """Minimal new-platform client: login + vehicle status. Thread-safe per call."""
 
-    def __init__(self, email: str, password: str, gateway: str = GATEWAY,
+    def __init__(self, email: str, password: str, gateway: str | None = None,
                  access_token: str | None = None,
                  refresh_token: str | None = None,
                  user_id: str | None = None,
-                 vehicle_model: str = ""):
+                 vehicle_model: str = "", profile: ZeekrRegion | None = None):
+        self._region_profile = profile
         self.email = email
         self.password = password
-        self.gateway = gateway.rstrip("/")
+        self._gateway = gateway.rstrip("/") if gateway else None
         self.access_token = access_token
         self.refresh_token = refresh_token
         self.user_id = user_id
@@ -697,6 +707,27 @@ class ZeekrClient:
         # Opaque per-vehicle token the new gateway wants in `x-vin`; see
         # CONF_ZEEKR_ENC_VIN. Empty = new-platform vehicle calls unused.
         self.enc_vin: str = ""
+
+    @property
+    def profile(self) -> ZeekrRegion | None:
+        # Country was historically ignored for routing. Only a profile loaded
+        # for an explicitly selected EU server changes this client's backend.
+        return self._region_profile
+
+    @property
+    def gateway(self) -> str:
+        profile = self.profile
+        return self._gateway or (profile.tsp_gateway if profile else GATEWAY)
+
+    @gateway.setter
+    def gateway(self, value: str) -> None:
+        self._gateway = value.rstrip("/")
+
+    def _hf_request(self, method: str, path: str, **kwargs) -> dict:
+        profile = self.profile
+        if profile:
+            kwargs["gateway"] = profile.hf_gateway
+        return _hf_request(method, path, **kwargs)
 
     # ---- transport ----------------------------------------------------------
 
@@ -738,7 +769,7 @@ class ZeekrClient:
                 headers["x-vin"] = self.enc_vin
             headers.update({
                 "X-APP-ID": SNC_APP_ID,
-                "X-PROJECT-ID": SNC_PROJECT_ID,
+                "X-PROJECT-ID": self.profile.snc_project_id if self.profile else SNC_PROJECT_ID,
                 "AppId": "ONEX97FB91F061405",
                 "X-API-SIGNATURE-VERSION": "2.0",
                 "X-API-SIGNATURE-NONCE": nonce,
@@ -746,13 +777,14 @@ class ZeekrClient:
                 "X-DEVICE-ID": str(uuid.uuid4()),
                 "X-PLATFORM": "APP",
                 "X-APP-OS-VERSION": "17",
-                "ACCEPT-LANGUAGE": "en-AU",
+                "ACCEPT-LANGUAGE": f"en-{self.country_code.upper()}" if self.profile else "en-AU",
                 "Content-Type": "application/json; charset=UTF-8",
             })
             full_path = f"{path}?{query}" if query else path
             headers["X-SIGNATURE"] = snc_sign(
                 method=method, url=f"{self.gateway}{full_path}",
-                headers=headers, body=body)
+                headers=headers, body=body,
+                secret=self.profile.snc_secret if self.profile else SNC_SECRET)
         elif signed:
             headers["X-api-signature-version"] = SIG_VERSION
             headers["X-api-signature-nonce"] = nonce
@@ -825,7 +857,7 @@ class ZeekrClient:
         HF leg: the client-2 tspCode exchanged at the OLD platform
         (api.ecloudkr.com/auth/account/session/secure?identity_type=geelynos)
         -> old-platform JWT (self.hf_token). Vehicle data rides the HF JWT."""
-        idaas = ZeekrIdaas(country=self.country_code)
+        idaas = ZeekrIdaas(country=self.country_code, profile=self.profile)
         tsp = idaas.tsp_code(token_value)
         code = tsp.get("code")
         if not code:
@@ -836,14 +868,14 @@ class ZeekrClient:
     def login_hf(self, token_value: str) -> None:
         """HF leg only (the app's silent JWT renewal): client-2 tspCode ->
         old-platform session/secure -> self.hf_token (expiresIn ~2 days)."""
-        idaas = ZeekrIdaas(country=self.country_code)
+        idaas = ZeekrIdaas(country=self.country_code, profile=self.profile)
         tsp2 = idaas.tsp_code(token_value, client_id=HF_CLIENT2)
         code2 = tsp2.get("code")
         if not code2:
             raise ZeekrAuthError(f"tspCode(client2) returned no code: {str(redact(tsp2))[:200]}")
-        body = json.dumps({"area": "SEA", "authCode": code2},
+        body = json.dumps({"area": self.profile.area if self.profile else "SEA", "authCode": code2},
                           separators=(",", ":")).encode()
-        resp = _hf_request("POST", "/auth/account/session/secure",
+        resp = self._hf_request("POST", "/auth/account/session/secure",
                            query="identity_type=geelynos", body=body,
                            timezone=self.timezone,
                            device_identifier=self.hf_device_id)
@@ -862,7 +894,7 @@ class ZeekrClient:
     def get_vehicle_status(self, vin: str) -> dict:
         if not self.hf_token:
             raise ZeekrAuthError("not logged in (no HF session)")
-        resp = _hf_request(
+        resp = self._hf_request(
             "GET", f"/remote-control/vehicle/status/{vin}",
             query=f"userId={self.user_id or ''}",
             token=self.hf_token, vin=vin, vehicle_model=self.vehicle_model,
@@ -876,7 +908,7 @@ class ZeekrClient:
         coordinator parsing applies unchanged."""
         if not self.hf_token:
             raise ZeekrAuthError("not logged in (no HF session)")
-        return _hf_request(
+        return self._hf_request(
             "GET", f"/remote-control/vehicle/status/{vin}",
             query=f"userId={user_id or self.user_id or ''}",
             token=self.hf_token, vin=vin, vehicle_model=self.vehicle_model,
@@ -915,7 +947,7 @@ class ZeekrClient:
         """Full response for a telematics control call (HF JWT, ecloudkr)."""
         if not self.hf_token:
             raise ZeekrAuthError("not logged in (no HF session)")
-        return _hf_request(
+        return self._hf_request(
             "PUT", f"/remote-control/vehicle/telematics/{vin}",
             body=json.dumps(body).encode(),
             token=self.hf_token, vin=vin, vehicle_model=self.vehicle_model,
@@ -926,7 +958,7 @@ class ZeekrClient:
         query: pageSize=2000&pageIndex=1&vehicleType=0&sortField=)."""
         if not self.hf_token:
             raise ZeekrAuthError("not logged in (no HF session)")
-        resp = _hf_request(
+        resp = self._hf_request(
             "GET", f"/geelyTCAccess/tcservices/capability/{vin}",
             query="pageSize=2000&pageIndex=1&vehicleType=0&sortField=",
             token=self.hf_token, vin=vin, vehicle_model=self.vehicle_model,
@@ -988,10 +1020,15 @@ class ZeekrClient:
         if not self.access_token or not vin:
             return ""
         saved = self.enc_vin
+        profile = self.profile
+        materials = (
+            ((profile.vin_key, profile.vin_iv, "Geely Europe 1.1.1"),)
+            if profile else _X_VIN_MATERIAL
+        )
         outcomes: list[str] = []
         failures: list[Exception] = []
         try:
-            for key, iv, note in _X_VIN_MATERIAL:
+            for key, iv, note in materials:
                 candidate = derive_x_vin(vin, key, iv)
                 self.enc_vin = candidate
                 try:
@@ -1004,7 +1041,7 @@ class ZeekrClient:
                     outcome = f"{type(exc).__name__}: {str(exc)[:80]}"
                 _LOGGER.debug("x-vin probe: rejected (%s): %s", note, outcome)
                 outcomes.append(f"{note}: {outcome}")
-            if failures and len(failures) == len(_X_VIN_MATERIAL) \
+            if failures and len(failures) == len(materials) \
                     and all(_session_dead(e) for e in failures):
                 raise failures[-1]
             _LOGGER.warning(
@@ -1012,7 +1049,7 @@ class ZeekrClient:
                 "this vehicle (%s). Paste the token from your app under "
                 "Configure -> Vehicle token; the derivation is retried at every "
                 "start, so a release that adds your build fixes this by itself",
-                len(_X_VIN_MATERIAL), "; ".join(outcomes))
+                len(materials), "; ".join(outcomes))
             return ""
         finally:
             self.enc_vin = saved
@@ -1113,7 +1150,7 @@ class ZeekrClient:
         appModelCode, ...}). Returns a list of vehicle-record dicts."""
         if not self.hf_token:
             raise ZeekrAuthError("not logged in (no HF session)")
-        resp = _hf_request(
+        resp = self._hf_request(
             "GET", "/device-platform/api/v4.0/veh/vehicle-list",
             query="needSharedCar=true",
             token=self.hf_token, vehicle_model=self.vehicle_model,

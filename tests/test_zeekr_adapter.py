@@ -17,7 +17,7 @@ _ORIGINAL_IDAAS_CLASS = zc.ZeekrIdaas
 class _StubIdaas:
     """Stand-in for ZeekrIdaas: 'mock-tv' token, or an auth failure."""
 
-    def __init__(self, country: str = "AU"):
+    def __init__(self, country: str = "AU", profile=None):
         self.country = country
 
     def login_by_email_password(self, email: str, password: str) -> str:

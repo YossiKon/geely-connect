@@ -16,6 +16,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
+    ConfigEntryNotReady,
     HomeAssistantError,
     ServiceValidationError,
 )
@@ -34,7 +35,10 @@ from . import cards
 from . import propulsion
 from .api import GeelyApi, GeelyAuthError, GeelyControlError, GeelyTLSPinError, redact
 from .zeekr_adapter import ZeekrAdapter
+from .zeekr_regions import RegionKeysError, load_region_profile
 from .const import (
+    CONF_ZEEKR_REGION,
+    DEFAULT_ZEEKR_REGION,
     CLIENT_ID,
     VEHICLE_SERIES,
     CONF_COUNTRY_CODE,
@@ -516,7 +520,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # what Home Assistant now warns about.
         zeekr_password = await hass.async_add_executor_job(
             password_decrypt, hass, d.get(CONF_ZEEKR_PASSWORD) or "")
+        try:
+            profile = await hass.async_add_executor_job(
+                load_region_profile, hass.config.path(""),
+                d.get(CONF_ZEEKR_REGION, DEFAULT_ZEEKR_REGION))
+        except RegionKeysError as exc:
+            raise ConfigEntryNotReady(str(exc)) from None
         api = ZeekrAdapter(
+            profile=profile,
             email=d.get(CONF_EMAIL) or "",
             vin=d[CONF_VIN],
             user_id=d[CONF_USER_ID],

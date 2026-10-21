@@ -469,9 +469,9 @@ def test_login_tsp_and_login_hf_use_the_idaas_leg():
     _EXPECTED_SIGS.clear()
     srv, url, tmp = _start_mock()
 
-    def _factory(country: str = "AU") -> zc.ZeekrIdaas:
+    def _factory(country: str = "AU", profile=None) -> zc.ZeekrIdaas:
         return _ORIGINAL_IDAAS_CLASS(gateway=url, path="zeekr-cuc-idaas-sea",
-                                     country=country)
+                                     country=country, profile=profile)
 
     zc.ZeekrIdaas = _factory
     try:
@@ -840,9 +840,9 @@ def test_login_raises_on_empty_responses():
             pass
 
         # login_tsp / login_hf with an empty tspCode response.
-        def _empty_tsp_factory(country: str = "AU") -> zc.ZeekrIdaas:
+        def _empty_tsp_factory(country: str = "AU", profile=None) -> zc.ZeekrIdaas:
             i = _ORIGINAL_IDAAS_CLASS(gateway=url, path="zeekr-cuc-idaas-sea",
-                                      country=country)
+                                      country=country, profile=profile)
             i.tsp_code = lambda token_value, client_id=None: {}
             return i
 
@@ -863,9 +863,9 @@ def test_login_raises_on_empty_responses():
             zc.ZeekrIdaas = _ORIGINAL_IDAAS_CLASS
 
         # HF exchange returns no accessToken for the empty authCode.
-        def _hf_empty_factory(country: str = "AU") -> zc.ZeekrIdaas:
+        def _hf_empty_factory(country: str = "AU", profile=None) -> zc.ZeekrIdaas:
             i = _ORIGINAL_IDAAS_CLASS(gateway=url, path="zeekr-cuc-idaas-sea",
-                                      country=country)
+                                      country=country, profile=profile)
             i.tsp_code = lambda token_value, client_id=None: {"code": "empty"}
             return i
 

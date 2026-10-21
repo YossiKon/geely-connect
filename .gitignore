@@ -23,3 +23,6 @@ Thumbs.db
 
 # Serena local project config
 .serena/
+
+# Local European app identity.
+geely_eu_app_keys*.json

@@ -136,6 +136,9 @@ _SECRET_KEYS: set = {
     # successful login body into a log today, but masking it is a cheap hedge -
     # it is a bearer token like any other.
     "tokenvalue",
+    # Locally supplied app identities must never appear in diagnostics.
+    "hmacaccesskey", "hmacsecret", "sncsecret", "vinkey", "viniv",
+    "vinkeyhex", "vinivhex", "euappkeys",
 }
 
 # "key" is ambiguous: it holds PEM material in provisioning responses, but the

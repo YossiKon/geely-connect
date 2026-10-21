@@ -7,6 +7,9 @@ and the silent-renewal persistence in the update closure.
 
 import asyncio
 import types
+import json
+from pathlib import Path
+import tempfile
 
 from conftest import FAKE_VIN, have_homeassistant, load
 from run import skip
@@ -193,6 +196,47 @@ def test_zeekr_entry_builds_the_adapter_with_its_tokens():
     assert kw["vehicle_model"] == "E245-J1"
 
 
+def test_european_entry_restores_from_the_local_file_without_storing_app_keys():
+    from test_zeekr_europe import FAKE_KEYS, FAKE_PROFILE
+
+    m = _mod()
+    entry = _zeekr_entry()
+    entry.data.update({"country_code": "ES", "zeekr_region": "EU"})
+    hass = _Hass()
+    with tempfile.TemporaryDirectory() as root:
+        (Path(root) / "geely_eu_app_keys.json").write_text(json.dumps(FAKE_KEYS))
+        hass.config.path = lambda *p: str(Path(root).joinpath(*p))
+        ok, hass, entry, api = _setup_zeekr(m, hass=hass, entry=entry)
+    assert ok
+    assert api.kw["profile"] == FAKE_PROFILE
+    assert api.kw["country_code"] == "ES"
+    assert api.kw["access_token"] == "mock-at"
+    for value in FAKE_KEYS.values():
+        assert value not in repr(entry.data)
+        assert value not in repr(hass.config_entries.updates)
+
+
+def test_european_restore_waits_for_local_keys_before_constructing_the_adapter():
+    m = _mod()
+    for contents in (None, "not-json"):
+        entry = _zeekr_entry()
+        entry.data.update({"country_code": "ES", "zeekr_region": "EU"})
+        hass = _Hass()
+        with tempfile.TemporaryDirectory() as root:
+            if contents is not None:
+                (Path(root) / "geely_eu_app_keys.json").write_text(contents)
+            hass.config.path = lambda *p: str(Path(root).joinpath(*p))
+            try:
+                _setup_zeekr(m, hass=hass, entry=entry,
+                             api_tweak=lambda _: (_ for _ in ()).throw(
+                                 AssertionError("Adapter must not be constructed")))
+            except m.ConfigEntryNotReady as exc:
+                assert "geely_eu_app_keys.json" in str(exc)
+            else:
+                raise AssertionError("Entry must wait for valid local keys")
+        assert not hass.config_entries.updates
+
+
 def test_zeekr_hf_renewal_is_persisted_into_the_entry():
     m = _mod()
     ok, hass, entry, api = _setup_zeekr(m)
@@ -304,3 +348,23 @@ def test_a_dead_session_at_the_probe_is_not_reported_as_a_missing_key():
     ok, hass, entry, api = _setup_zeekr(m, api_tweak=_broken, ir=ir2)
     assert ok is True
     assert ir2.created == [] and ir2.deleted == []
+
+
+def test_old_new_app_entries_keep_sea_regardless_of_saved_country_or_local_file():
+    from unittest.mock import patch
+
+    m = _mod()
+    for country in (None, "GB", "FR", "HU", "MD", "DE", "NL", "ES", "BE", "LU", "AU"):
+        for explicit_sea in (False, True):
+            entry = _zeekr_entry()
+            if country is None:
+                entry.data.pop("country_code")
+            else:
+                entry.data["country_code"] = country
+            if explicit_sea:
+                entry.data["zeekr_region"] = "SEA"
+            with patch.object(Path, "open", side_effect=AssertionError("Must not read EU keys")):
+                ok, _, _, api = _setup_zeekr(m, entry=entry)
+            assert ok
+            assert api.kw["profile"] is None
+            assert api.kw["access_token"] == "mock-at"

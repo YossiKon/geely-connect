@@ -1048,8 +1048,16 @@ and steering-wheel heat, defrost, the GPS position wake, and - since v1.51.0 -
 owner had run the cycle on his own car, because a reversed mapping there opens
 a vehicle instead of securing it; two Australian EX2s now lock and unlock as
 mapped. A service the catalogue does not cover still answers with a clear "not
-mapped" error rather than sending a guessed body to a car. Non-AU regions are
-still unverified.
+mapped" error rather than sending a guessed body to a car.
+
+**European Geely app.** Accounts using `com.geely.global` need the European
+identity and vehicle gateways, plus app keys supplied by the installation
+owner in a local file. Choose **Europe (requires local app keys)** in the new-app
+login's **New-app server region** field; country alone does not change servers.
+Existing new-app entries and the default selection stay on SEA.
+See [European setup](docs/LOCAL-EU-KEYS.md). Discovery
+and status reads were verified on an E2 in Spain with Android app 1.1.1;
+other European markets and remote commands still need independent validation.
 
 **Migrated accounts.** When the official app moves an account onto the new
 platform, the old backend stops knowing the car - every read answers
@@ -1081,6 +1089,9 @@ If keeping your account password out of `.storage` matters to you, set the
 ---
 
 ## 🌍 Supported regions
+
+The following table describes the **legacy platform**. For the new Geely app,
+see [European setup](docs/LOCAL-EU-KEYS.md) and the platform section above.
 
 Geely runs a separate backend per area, each with its **own app credentials**:
 

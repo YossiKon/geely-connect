@@ -42,7 +42,8 @@
           "country_code": "Pays",
           "pressure_unit": "Unité de pression des pneus",
           "poll_mode": "Mode d'interrogation",
-          "store_password": "Mémoriser mon mot de passe pour que la session se renouvelle automatiquement"
+          "store_password": "Mémoriser mon mot de passe pour que la session se renouvelle automatiquement",
+          "zeekr_region": "New-app server region"
         }
       },
       "zeekr_pick": {
@@ -60,7 +61,8 @@
       "invalid_code": "Code refusé (code à usage unique).",
       "invalid_credentials": "Cet e-mail ou ce mot de passe n'a pas été accepté. Si votre compte est nouveau dans la nouvelle application Geely, ouvrez d'abord l'application sur votre téléphone et terminez-y la configuration (elle définit votre mot de passe et associe votre véhicule), puis réessayez.",
       "no_vehicles": "Connexion réussie mais aucun véhicule trouvé.",
-      "unknown": "Une erreur s'est produite. Consultez les journaux."
+      "unknown": "Une erreur s'est produite. Consultez les journaux.",
+      "eu_app_keys_required": "European app keys are missing or invalid. Put your own geely_eu_app_keys.json in the Home Assistant configuration directory, then try again. See docs/LOCAL-EU-KEYS.md."
     },
     "abort": {
       "already_configured": "Ce véhicule est déjà configuré.",

@@ -39,6 +39,10 @@ from .const import (
     CONF_ZEEKR_HF_TOKEN,
     CONF_ZEEKR_PASSWORD,
     CONF_ZEEKR_REFRESH_TOKEN,
+    CONF_ZEEKR_REGION,
+    DEFAULT_ZEEKR_REGION,
+    ZEEKR_REGION_EU,
+    ZEEKR_REGION_LABELS,
     CONF_STORE_PASSWORD,
     DEFAULT_COUNTRY_CODE,
     DEFAULT_PLATFORM,
@@ -73,6 +77,9 @@ from .const import (
     DOMAIN,
 )
 from .helpers import password_encrypt, vehicle_metadata
+from .zeekr_regions import (
+    RegionKeysError, ZeekrRegion, load_region_profile,
+)
 from .zeekr_client import (
     ZeekrApiError,
     ZeekrAuthError,
@@ -136,15 +143,16 @@ def _already_configured_vins(hass) -> set[str]:
     }
 
 
-def _zeekr_login_password(email: str, password: str, country: str) -> ZeekrClient:
+def _zeekr_login_password(email: str, password: str, country: str,
+                          profile: ZeekrRegion | None = None) -> ZeekrClient:
     """Post-switch login: IDaaS password login -> tspCode leg -> logged-in client.
 
     The new platform has NO OTP-only login (codes are operation-bound; the
     forced migration sets a password first). Users must complete the new
     app's setup on a real device before this flow can see their vehicle.
     """
-    token_value = ZeekrIdaas(country=country).login_by_email_password(email, password)
-    client = ZeekrClient(email="", password="")
+    token_value = ZeekrIdaas(country=country, profile=profile).login_by_email_password(email, password)
+    client = ZeekrClient(email="", password="", profile=profile)
     # Thread the picked country through the tspCode + HF legs too - login_tsp
     # builds its own ZeekrIdaas from client.country_code, which otherwise
     # defaults to AU and would run the second half of login as AU.
@@ -173,6 +181,7 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._platform_default: str | None = None
         self._zeekr_hf_token: str | None = None
         self._zeekr_password: str | None = None
+        self._zeekr_region: str = DEFAULT_ZEEKR_REGION
         # The logged-in client from the login step, reused in _finish_zeekr to
         # verify a derived x-vin against the gateway before storing it.
         self._zeekr_client: Any = None
@@ -569,15 +578,24 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_zeekr_login(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         errors: dict[str, str] = {}
+        if user_input is None and self._reauth_entry is not None:
+            self._zeekr_region = self._reauth_entry.data.get(
+                CONF_ZEEKR_REGION, DEFAULT_ZEEKR_REGION)
         if user_input is not None:
             email = user_input[CONF_EMAIL].strip().lower()
             self._email = email
+            self._zeekr_region = user_input.get(CONF_ZEEKR_REGION, self._zeekr_region)
             self._country_code = user_input[CONF_COUNTRY_CODE].strip().upper()
             self._pressure_unit = user_input.get(CONF_PRESSURE_UNIT, DEFAULT_PRESSURE_UNIT)
             self._poll_mode = user_input.get(CONF_POLL_MODE, DEFAULT_POLL_MODE)
             try:
+                login_args = (email, user_input["password"], self._country_code)
+                if self._zeekr_region == ZEEKR_REGION_EU:
+                    profile = await self.hass.async_add_executor_job(
+                        load_region_profile, self.hass.config.path(""), self._zeekr_region)
+                    login_args += (profile,)
                 client = await self.hass.async_add_executor_job(
-                    _zeekr_login_password, email, user_input["password"], self._country_code)
+                    _zeekr_login_password, *login_args)
                 self._zeekr_client = client
                 self._zeekr_tokens = (client.access_token or "", client.refresh_token or "")
                 self._zeekr_hf_token = client.hf_token
@@ -609,6 +627,8 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         return await self._finish_zeekr(self._vehicles[0])
                     else:
                         return await self.async_step_zeekr_pick()
+            except RegionKeysError:
+                errors["base"] = "eu_app_keys_required"
             except (ZeekrAuthError, ZeekrApiError) as e:
                 _LOGGER.warning("zeekr login rejected: %s", e)
                 errors["base"] = "invalid_credentials"
@@ -627,6 +647,8 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="zeekr_login",
             data_schema=vol.Schema({
+                vol.Required(CONF_ZEEKR_REGION, default=self._zeekr_region):
+                    vol.In(ZEEKR_REGION_LABELS),
                 vol.Required(CONF_EMAIL, default=defaults.get(CONF_EMAIL, "")): str,
                 vol.Required("password"): str,
                 vol.Optional(CONF_STORE_PASSWORD, default=True): bool,
@@ -679,9 +701,12 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # the material is public app package data, not an account credential.
         existing_x_vin = ""
         if self._reauth_entry is not None:
-            existing_x_vin = (
-                self._reauth_entry.options.get(CONF_ZEEKR_ENC_VIN)
-                or self._reauth_entry.data.get(CONF_ZEEKR_ENC_VIN) or "")
+            entry = self._reauth_entry
+            existing_x_vin = entry.options.get(CONF_ZEEKR_ENC_VIN) or ""
+            # A derived token belongs to its server region. Re-probe when the
+            # owner changes servers, while respecting a manual option override.
+            if entry.data.get(CONF_ZEEKR_REGION, DEFAULT_ZEEKR_REGION) == self._zeekr_region:
+                existing_x_vin = existing_x_vin or entry.data.get(CONF_ZEEKR_ENC_VIN) or ""
         enc_vin = existing_x_vin
         if not enc_vin and self._zeekr_client is not None:
             try:
@@ -705,6 +730,7 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return self.async_abort(reason="reauth_account_mismatch")
             new_data = dict(entry.data)
             new_data[CONF_PLATFORM] = PLATFORM_ZEEKR
+            new_data[CONF_ZEEKR_REGION] = self._zeekr_region
             new_data[CONF_ZEEKR_ACCESS_TOKEN] = tokens[0]
             new_data[CONF_ZEEKR_REFRESH_TOKEN] = tokens[1]
             new_data[CONF_ZEEKR_HF_TOKEN] = self._zeekr_hf_token or ""
@@ -718,6 +744,8 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             new_data.update(vehicle_metadata(vehicle))
             if enc_vin:
                 new_data[CONF_ZEEKR_ENC_VIN] = enc_vin
+            else:
+                new_data.pop(CONF_ZEEKR_ENC_VIN, None)
             # The legacy-only credentials are meaningless on the new platform
             # and their presence sent setup down the dead legacy path (a
             # hybrid entry: legacy keys + zeekr tokens + no platform marker).
@@ -748,6 +776,7 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             title=title,
             data={
                 CONF_PLATFORM:            PLATFORM_ZEEKR,
+                CONF_ZEEKR_REGION:        self._zeekr_region,
                 CONF_EMAIL:               self._email,
                 CONF_COUNTRY_CODE:        self._country_code,
                 CONF_VIN:                 vin,

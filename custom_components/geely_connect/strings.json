@@ -42,7 +42,8 @@
           "country_code": "Country",
           "pressure_unit": "Tire pressure unit",
           "poll_mode": "Polling mode",
-          "store_password": "Store my password so the session renews automatically"
+          "store_password": "Store my password so the session renews automatically",
+          "zeekr_region": "New-app server region"
         }
       },
       "zeekr_pick": {
@@ -60,7 +61,8 @@
       "invalid_code": "That code wasn't accepted. It may have expired (codes are single-use).",
       "invalid_credentials": "That email or password wasn't accepted. If your account is new to the new Geely app, open the app on your phone first and complete the setup there (it sets your password and links your vehicle), then try again.",
       "no_vehicles": "Login succeeded but no vehicles were found on this account. Open the new Geely app on your phone and make sure your vehicle is linked there, then try again.",
-      "unknown": "Something went wrong. Check the logs."
+      "unknown": "Something went wrong. Check the logs.",
+      "eu_app_keys_required": "European app keys are missing or invalid. Put your own geely_eu_app_keys.json in the Home Assistant configuration directory, then try again. See docs/LOCAL-EU-KEYS.md."
     },
     "abort": {
       "already_configured": "This Geely vehicle is already set up.",

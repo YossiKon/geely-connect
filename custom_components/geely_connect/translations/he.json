@@ -42,7 +42,8 @@
           "country_code": "מדינה",
           "pressure_unit": "יחידת לחץ צמיגים",
           "poll_mode": "מצב סקירה",
-          "store_password": "שמור את הסיסמה כדי שהסשן יתחדש אוטומטית"
+          "store_password": "שמור את הסיסמה כדי שהסשן יתחדש אוטומטית",
+          "zeekr_region": "New-app server region"
         }
       },
       "zeekr_pick": {
@@ -60,7 +61,8 @@
       "invalid_code": "הקוד לא התקבל. ייתכן שפג תוקפו (קוד חד-פעמי).",
       "invalid_credentials": "האימייל או הסיסמה לא התקבלו. אם החשבון שלך חדש באפליקציית Geely החדשה, פתח קודם את האפליקציה בטלפון והשלם בה את ההגדרה (היא קובעת את הסיסמה ומקשרת את הרכב), ואז נסה שוב.",
       "no_vehicles": "ההתחברות הצליחה אך לא נמצאו רכבים בחשבון.",
-      "unknown": "משהו השתבש. בדוק את הלוגים."
+      "unknown": "משהו השתבש. בדוק את הלוגים.",
+      "eu_app_keys_required": "European app keys are missing or invalid. Put your own geely_eu_app_keys.json in the Home Assistant configuration directory, then try again. See docs/LOCAL-EU-KEYS.md."
     },
     "abort": {
       "already_configured": "רכב Geely זה כבר מוגדר.",

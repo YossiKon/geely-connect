@@ -42,7 +42,8 @@
           "country_code": "Страна",
           "pressure_unit": "Единицы давления шин",
           "poll_mode": "Режим опроса",
-          "store_password": "Сохранить пароль, чтобы сеанс продлевался автоматически"
+          "store_password": "Сохранить пароль, чтобы сеанс продлевался автоматически",
+          "zeekr_region": "New-app server region"
         }
       },
       "zeekr_pick": {
@@ -60,7 +61,8 @@
       "invalid_code": "Код не принят (одноразовый код).",
       "invalid_credentials": "Этот адрес электронной почты или пароль не приняты. Если ваша учётная запись новая в новом приложении Geely, сначала откройте приложение на телефоне и завершите в нём настройку (оно задаст пароль и привяжет автомобиль), затем повторите попытку.",
       "no_vehicles": "Вход выполнен, но автомобили не найдены.",
-      "unknown": "Что-то пошло не так. Проверьте журналы."
+      "unknown": "Что-то пошло не так. Проверьте журналы.",
+      "eu_app_keys_required": "European app keys are missing or invalid. Put your own geely_eu_app_keys.json in the Home Assistant configuration directory, then try again. See docs/LOCAL-EU-KEYS.md."
     },
     "abort": {
       "already_configured": "Этот автомобиль уже настроен.",

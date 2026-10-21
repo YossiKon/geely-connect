@@ -42,7 +42,8 @@
           "country_code": "الدولة",
           "pressure_unit": "وحدة ضغط الإطارات",
           "poll_mode": "وضع الاستقصاء",
-          "store_password": "احفظ كلمة المرور لتتجدد الجلسة تلقائيًا"
+          "store_password": "احفظ كلمة المرور لتتجدد الجلسة تلقائيًا",
+          "zeekr_region": "New-app server region"
         }
       },
       "zeekr_pick": {
@@ -60,7 +61,8 @@
       "invalid_code": "لم يُقبل الرمز (رمز لمرة واحدة).",
       "invalid_credentials": "لم يتم قبول البريد الإلكتروني أو كلمة المرور. إذا كان حسابك جديدًا في تطبيق Geely الجديد، فافتح التطبيق على هاتفك أولًا وأكمل الإعداد فيه (يعيّن كلمة المرور ويربط سيارتك)، ثم حاول مرة أخرى.",
       "no_vehicles": "تم تسجيل الدخول لكن لم يتم العثور على مركبات.",
-      "unknown": "حدث خطأ ما. راجع السجلات."
+      "unknown": "حدث خطأ ما. راجع السجلات.",
+      "eu_app_keys_required": "European app keys are missing or invalid. Put your own geely_eu_app_keys.json in the Home Assistant configuration directory, then try again. See docs/LOCAL-EU-KEYS.md."
     },
     "abort": {
       "already_configured": "هذه المركبة مُعدّة بالفعل.",

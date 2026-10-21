@@ -100,6 +100,17 @@ CONF_ZEEKR_ENC_VIN      = "zeekr_enc_vin"
 CONF_ZEEKR_PASSWORD     = "zeekr_password"
 CONF_STORE_PASSWORD     = "store_password"
 
+# Explicit new-app server selection. Historic entries accepted a country but
+# always used SEA, including entries with the old default country GB.
+CONF_ZEEKR_REGION = "zeekr_region"
+ZEEKR_REGION_SEA = "SEA"
+ZEEKR_REGION_EU = "EU"
+DEFAULT_ZEEKR_REGION = ZEEKR_REGION_SEA
+ZEEKR_REGION_LABELS = {
+    ZEEKR_REGION_SEA: "Australia / SEA (existing new-app server)",
+    ZEEKR_REGION_EU: "Europe (requires local app keys)",
+}
+
 PLATFORM_LEGACY = "legacy"
 PLATFORM_ZEEKR  = "zeekr"
 DEFAULT_PLATFORM = PLATFORM_LEGACY
