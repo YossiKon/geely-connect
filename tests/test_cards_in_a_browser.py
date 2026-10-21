@@ -645,6 +645,79 @@ def test_a_tank_with_no_traction_battery_draws_the_fuel_bar_alone():
     assert got["bars"] == 1 and got["fuelBars"] == 1, got
 
 
+def _second_car_with_a_tank():
+    """A hybrid on the same Home Assistant, registered as its own device. Its
+    registry entries are listed first, as they would be for the car that was
+    added first."""
+    return """
+        const other = {
+          "sensor.other_battery": "58", "sensor.other_fuel_level": "40",
+          "sensor.other_fuel_level_pct": "80", "sensor.other_fuel_range": "610",
+          "sensor.other_combined_range": "905", "sensor.other_electric_range": "295",
+        };
+        const states = {}, ents = {};
+        for (const id in other) {
+          states[id] = { entity_id: id, state: other[id], attributes: { unit_of_measurement: "km" } };
+          ents[id] = { platform: "geely_connect", device_id: "d2" };
+        }
+        hass.states = { ...states, ...hass.states };
+        hass.entities = { ...ents, ...hass.entities };
+        hass.devices.d2 = { name: "Geely EX5 EM-i" };
+    """
+
+
+def test_a_second_cars_tank_does_not_leak_into_a_battery_only_card():
+    """Two cars, a hybrid added first and a battery-only E2 with `prefix:` set.
+    The E2 has no fuel or combined-range sensors, so their strict ids miss, and
+    the suffix map used to be built over every Geely entity in the registry -
+    which handed the E2's card the hybrid's fuel level, fuel range and combined
+    range (#102). The card then drew a fuel bar and led with a "combined range"
+    for a car without a tank. The map is scoped to the prefix's own device."""
+    for tag in BAR_TAGS:
+        script = f"""() => {{
+            const el = document.createElement({json.dumps(tag)});
+            document.body.appendChild(el);
+            el.setConfig({{ prefix: "car" }});
+            const hass = window.mkHass({{}});
+            {_second_car_with_a_tank()}
+            el.hass = hass;
+            const probe = {_energy_probe()};
+            probe.combined = el._eid("sensor", "combined_range");
+            probe.fuelLevel = el._eid("sensor", "fuel_level");
+            return probe;
+        }}"""
+        got = _evaluate(script)
+        assert got["combined"] == "sensor.car_combined_range", (tag, got)
+        assert got["fuelLevel"] == "sensor.car_fuel_level", (tag, got)
+        assert got["fuelBars"] == 0, (tag, got)
+        assert got["bars"] == 1, (tag, got)
+        assert "256" in got["headline"], (tag, got["headline"])
+        assert not any("fuel" in l.lower() for l in got["labels"]), (tag, got["labels"])
+
+
+def test_a_renamed_entity_on_the_same_car_still_resolves_beside_a_second_car():
+    """The scoping must not cost the rename fallback it sits inside: with the
+    hybrid present, an E2 whose speed sensor was renamed still finds it, because
+    the renamed entity stays on the E2's device."""
+    script = f"""() => {{
+        const el = document.createElement("geely-card");
+        document.body.appendChild(el);
+        el.setConfig({{ prefix: "car" }});
+        const hass = window.mkHass({{}});
+        {_second_car_with_a_tank()}
+        delete hass.states["sensor.car_speed"];
+        hass.states["sensor.my_e2_speed"] =
+          {{ entity_id: "sensor.my_e2_speed", state: "0", attributes: {{}} }};
+        hass.entities["sensor.my_e2_speed"] = {{ platform: "geely_connect", device_id: "d" }};
+        hass.states["sensor.other_speed"] =
+          {{ entity_id: "sensor.other_speed", state: "0", attributes: {{}} }};
+        hass.entities["sensor.other_speed"] = {{ platform: "geely_connect", device_id: "d2" }};
+        el.hass = hass;
+        return el._eid("sensor", "speed");
+    }}"""
+    assert _evaluate(script) == "sensor.my_e2_speed"
+
+
 def test_the_fuel_half_appears_without_any_other_state_changing():
     """The render is skipped when the watched signature is unchanged, so if the
     fuel entities are not in it a hybrid's bar and headline would freeze."""

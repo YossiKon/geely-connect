@@ -1497,16 +1497,36 @@
     /* Entity resolution: the fast path joins prefix + suffix; when a user has
      * hand-renamed an entity id, a lazily-built suffix map over the
      * integration's own entities takes over, so one rename never blanks the
-     * card. */
+     * card.
+     *
+     * The map is scoped to the one device behind the prefix. A missing entity
+     * is not always a rename: a battery-only car has no fuel or combined-range
+     * sensors at all, and a map over every Geely entity in the registry would
+     * hand its card the hybrid's next to it - a fuel bar and a "combined
+     * range" the car cannot have (#102). Only when no registered entity carries
+     * the prefix (every id renamed) is the whole platform consulted. */
     _eid(domain, suffix) {
       const strict = `${domain}.${this._prefix}_${suffix}`;
       if (this._hass.states[strict]) return strict;
-      if (this._mapFor !== this._hass.entities) {
+      if (this._mapFor !== this._hass.entities || this._mapPrefix !== this._prefix) {
         this._mapFor = this._hass.entities;
+        this._mapPrefix = this._prefix;
         this._map = {};
         const ents = this._hass.entities || {};
+        const head = `${this._prefix}_`;
+        let device = (ents[`sensor.${head}battery`] || {}).device_id;
+        if (!device) {
+          for (const id in ents) {
+            if (ents[id].platform !== "geely_connect") continue;
+            if ((id.split(".")[1] || "").startsWith(head) && ents[id].device_id) {
+              device = ents[id].device_id;
+              break;
+            }
+          }
+        }
         for (const id in ents) {
           if (ents[id].platform !== "geely_connect") continue;
+          if (device && ents[id].device_id !== device) continue;
           const [dom, object] = id.split(".");
           for (const s of SUFFIXES) {
             if (object === s || object.endsWith("_" + s)) {
