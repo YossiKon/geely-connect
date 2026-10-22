@@ -417,8 +417,8 @@ class _FakeApi:
             raise self.caps_error
         return []
 
-    def control(self, sid, params, cmd):
-        self.calls.append(("control", sid, params, cmd))
+    def control(self, sid, params, cmd, **shape):
+        self.calls.append(("control", sid, params, cmd, *sorted(shape)))
         return {"code": 1000}
 
     def rapid_climate(self, **kw):
@@ -923,6 +923,30 @@ def test_fire_control_sends_the_command_to_the_chosen_car():
     run()
     assert api.calls == [("control", "RCT",
                           [{"key": "temperature", "value": "22.5"}], "start")]
+
+
+def test_fire_control_passes_the_latest_shape_only_when_asked():
+    """The E2 app's frunk request carries `latest: true` and no scheduling
+    block (#72). The flag reaches the client only when set, so the default
+    call keeps the three-argument shape every fake and every car has seen."""
+    m = _mod()
+    api = _FakeApi()
+    _, run = _service(m, {"e1": {"vin": FAKE_VIN, "api": api}},
+                      {"service_id": "rlu", "command": "start",
+                       "params": [{"key": "operation", "value": "1"},
+                                  {"key": "rlu.target", "value": "1"}],
+                       "latest": True})
+    run()
+    assert api.calls == [("control", "rlu",
+                          [{"key": "operation", "value": "1"},
+                           {"key": "rlu.target", "value": "1"}],
+                          "start", "latest")]
+
+    api = _FakeApi()
+    _, run = _service(m, {"e1": {"vin": FAKE_VIN, "api": api}},
+                      {"service_id": "rlu", "latest": False})
+    run()
+    assert api.calls == [("control", "rlu", [], "start")]
 
 
 def test_a_named_vin_picks_that_car_and_not_the_first_one_loaded():

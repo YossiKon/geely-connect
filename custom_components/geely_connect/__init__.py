@@ -1033,6 +1033,7 @@ def _register_debug_service(hass: HomeAssistant) -> None:
             })],
         ),
         vol.Optional("vin"): cv.string,
+        vol.Optional("latest", default=False): cv.boolean,
     })
 
     def _target(target_vin: str | None) -> tuple[str, dict]:
@@ -1098,11 +1099,15 @@ def _register_debug_service(hass: HomeAssistant) -> None:
         cmd = call.data.get("command", "start")
         params = call.data.get("params") or []
         entry_id, bundle = _target(call.data.get("vin"))
+        # The app's second body shape (`latest: true`, no scheduling block),
+        # so far seen only on an E2's frunk request (#72). Passed only when
+        # asked for, so the default call keeps its three-argument shape.
+        shape = {"latest": True} if call.data.get("latest") else {}
         resp = await _send(entry_id, f"fire_control {sid}", functools.partial(
-            bundle["api"].control, sid, params, cmd))
+            bundle["api"].control, sid, params, cmd, **shape))
         _LOGGER.warning(
-            "fire_control %s %s params=%s → response=%s",
-            sid, cmd, redact(params), redact(resp),
+            "fire_control %s %s params=%s%s → response=%s",
+            sid, cmd, redact(params), " latest=true" if shape else "", redact(resp),
         )
         _read_back(bundle)
 

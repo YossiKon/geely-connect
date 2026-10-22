@@ -162,3 +162,13 @@ fire_control:
       example: L6T00000000000000
       selector:
         text:
+    latest:
+      name: App's "latest" body shape
+      description: >
+        Send the app's other request shape: "latest": true and no
+        operationScheduling block. Seen so far only on an E2's own frunk
+        request (rlu). Off by default.
+      required: false
+      default: false
+      selector:
+        boolean:

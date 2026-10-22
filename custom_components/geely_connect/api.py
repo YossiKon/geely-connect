@@ -1303,24 +1303,34 @@ class GeelyApi:
             trail.append(note)
 
     def control(self, service_id: str, parameters: list[dict] | None = None,
-                command: str = "start", duration: int = 0) -> dict:
+                command: str = "start", duration: int = 0, *,
+                latest: bool = False) -> dict:
         """Fire a control command via PUT /remote-control/vehicle/telematics/{VIN}.
 
         `duration` is the value put into operationScheduling.duration. The
         AVD-captured Geely app uses 90 for seat features, 180 for AC,
         6 for G-clean, and 0 for stop commands. Default 0 (legacy behaviour).
+
+        `latest` swaps the scheduling block for the app's other body shape:
+        `"latest": true` and no operationScheduling at all. That is the shape
+        request_position_refresh sends for PAI, and the one an E2 app was
+        captured sending for its frunk (`rlu`, #72) - the only command seen so
+        far that does not carry a scheduling block.
         """
         body_dict = {
             "command": command,
             "creator": "tc",
-            "operationScheduling": {
-                "duration": duration, "interval": 0, "occurs": 1, "recurrentOperation": False,
-            },
             "serviceId": service_id,
             "serviceParameters": parameters or [],
             "timestamp": str(int(time.time() * 1000)),
             "userId": self._jwt_uid or self.user_id,
         }
+        if latest:
+            body_dict["latest"] = True
+        else:
+            body_dict["operationScheduling"] = {
+                "duration": duration, "interval": 0, "occurs": 1, "recurrentOperation": False,
+            }
         body = json.dumps(body_dict, separators=(",", ":")).encode()
         path = f"/remote-control/vehicle/telematics/{self.vin}"
         return self._recorded(

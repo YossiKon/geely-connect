@@ -934,6 +934,9 @@ than daily use:
   get tested - though the steering wheel is also the cautionary tale: two
   rounds of guessed candidates were all accepted and did nothing, and the
   real command only surfaced when an owner captured the app itself (#4).
+  `latest: true` sends the app's other body shape (a `latest` flag instead of
+  the scheduling block), which an E2's app was captured using for its frunk
+  (#72).
 - **`geely_connect.fire_rapid`** - the compound rapid warm/cool body, with the
   seat positions, level and any extra field you choose.
 - **`geely_connect.set_scheduled_trip`** - the app's **Scheduled trip** toggle

@@ -476,6 +476,29 @@ def test_a_safe_command_is_translated_and_its_code_rewritten():
     assert resp["code"] == 1000 and "legacy" not in resp
 
 
+def test_the_latest_shape_rides_the_legacy_route_and_not_the_new_one():
+    """Without a vehicle token the adapter sends the legacy telematics body, so
+    `latest` swaps its scheduling block the way GeelyApi.control does (#72).
+    The new route has a body of its own, which the flag leaves alone."""
+    a, c = _make_adapter()
+    sent = []
+    c.control_resp = lambda vin, body: sent.append(body) or {"code": "1000"}
+    params = [{"key": "operation", "value": "1"}, {"key": "rlu.target", "value": "1"}]
+    a.control("rlu", params, latest=True)
+    a.control("rlu", params)
+    assert sent[0]["latest"] is True and "operationScheduling" not in sent[0]
+    assert sent[0]["serviceId"] == "rlu" and sent[0]["serviceParameters"] == params
+    assert "latest" not in sent[1] and sent[1]["operationScheduling"]["duration"] == 0
+
+    c.enc_vin = "opaque-token"
+    new = []
+    c.control_new_resp = lambda sid, cmd, params=None: (
+        new.append((sid, cmd, params)) or {"code": "000000"})
+    a.control("RHL", [{"key": "rhl", "value": "horn-light-flash"}], latest=True)
+    assert new == [("RHL", "start", [{"key": "rhl", "value": "horn-light-flash"}])]
+    assert len(sent) == 2, "a tokened car must not fall back to the legacy body"
+
+
 def test_control_refuses_an_unmapped_new_platform_service():
     """A service the translator does not know must fail loudly, never send a
     guessed body to the car."""

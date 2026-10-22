@@ -1207,6 +1207,28 @@ def test_control_prefers_the_uid_the_jwt_exchange_returned():
     assert body["operationScheduling"]["duration"] == 180
 
 
+def test_control_latest_sends_the_apps_other_body_shape():
+    """An E2 app was captured opening its frunk with `latest: true` and no
+    operationScheduling block (#72) - the shape request_position_refresh
+    already uses for PAI. With the flag the body is that shape exactly;
+    without it nothing changes."""
+    a = _client()
+    box = _capture_authed(a)
+    params = [{"key": "operation", "value": "1"}, {"key": "rlu.target", "value": "1"}]
+    a.control("rlu", params, latest=True)
+    body = json.loads(box["body"])
+    assert box["method"] == "PUT"
+    assert box["path"] == f"/remote-control/vehicle/telematics/{FAKE_VIN}"
+    assert body["latest"] is True
+    assert "operationScheduling" not in body
+    assert body["serviceId"] == "rlu" and body["serviceParameters"] == params
+    assert body["command"] == "start" and body["creator"] == "tc"
+
+    a.control("rlu", params)
+    body = json.loads(box["body"])
+    assert "latest" not in body and "operationScheduling" in body
+
+
 def test_rapid_climate_bundles_ac_and_seat_heat():
     a = _client()
     box = _capture_authed(a)

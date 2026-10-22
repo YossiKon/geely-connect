@@ -548,21 +548,27 @@ class ZeekrAdapter:
     # ---- platform surface --------------------------------------------------
 
     def control(self, service_id: str, parameters: list[dict] | None = None,
-                command: str = "start", duration: int = 0) -> dict:
+                command: str = "start", duration: int = 0, *,
+                latest: bool = False) -> dict:
         """PUT /remote-control/vehicle/telematics/{vin} with the same body
-        the legacy client sends (operationScheduling included)."""
+        the legacy client sends (operationScheduling included, or the
+        `latest: true` shape when asked for, as in GeelyApi.control). The new
+        route below has its own body, so the flag does not apply there."""
         body = {
             "command": command,
             "creator": "tc",
-            "operationScheduling": {
-                "duration": duration, "interval": 0, "occurs": 1,
-                "recurrentOperation": False,
-            },
             "serviceId": service_id,
             "serviceParameters": parameters or [],
             "timestamp": str(int(time.time() * 1000)),
             "userId": str(self.user_id),
         }
+        if latest:
+            body["latest"] = True
+        else:
+            body["operationScheduling"] = {
+                "duration": duration, "interval": 0, "occurs": 1,
+                "recurrentOperation": False,
+            }
         try:
             if self._client.enc_vin:
                 # New-platform vehicle: the old platform does not know this VIN
