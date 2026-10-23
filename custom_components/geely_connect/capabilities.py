@@ -88,6 +88,7 @@ def parse(items: list[dict]) -> dict[str, Any]:
       window_vent.enabled, window_vent.duration_s
       steering_wheel_heat.enabled
       tailgate.enabled, tailgate.rtu (bool - unlock the trunk with RTU, not RDU_2)
+      frunk.enabled  (bool - set only where the catalogue names a front trunk)
       lock.enabled, unlock.enabled, unlock.targets (list of accepted targets)
       sunroof.enabled, sunshade.enabled, windows.enabled
       windows.rws_1_0  (bool - windows and ventilation speak RWS with `rws`)
@@ -236,6 +237,16 @@ def parse(items: list[dict]) -> dict[str, Any]:
     # sends (#72); there, RDU_2 unlocks the whole car whatever the target.
     if not enabled("remote_control_unlock_2") and enabled("remote_trunk_unlock"):
         out["tailgate.rtu"] = True
+    # The front trunk. An E2's catalogue names it as a device of its 1.0 unlock
+    # row - `remote_lock_unlock`, valueEnum and control_devices `Front_trunk`
+    # (#72) - and no other catalogue seen so far declares one anywhere. Unlike
+    # the flags around it this one is read on presence only: no EX5 or Starray
+    # has a frunk, so a catalogue that does not name it, or no catalogue at all,
+    # gets no Unlock Frunk button rather than one that cannot work.
+    lu = by_id.get("remote_lock_unlock") or {}
+    devices = _targets(lu) | _split(_params_to_dict(lu).get("control_devices"))
+    if enabled("remote_lock_unlock") and "front_trunk" in {d.lower() for d in devices}:
+        out["frunk.enabled"] = True
     if enabled("remote_control_skylight_2"):
         out["sunroof.enabled"] = True
     if enabled("remote_control_curtain_2"):

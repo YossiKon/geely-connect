@@ -345,6 +345,34 @@ def test_an_e2_unlocks_its_trunk_with_rtu_and_an_ex5_keeps_rdu_2():
     assert "tailgate.rtu" not in cap.parse([_entry("remote_lock_unlock", True)])
 
 
+def test_the_frunk_is_read_only_where_a_catalogue_names_it():
+    """An E2's catalogue names the front trunk as a device of its 1.0 unlock
+    row (#72), in both valueEnum and control_devices, as below. That is the
+    only declaration of one seen anywhere, so the flag is presence-only: no
+    EX5, no Starray and no empty catalogue may get a frunk button."""
+    devices = [{"nameKey": "control_devices", "name": "控制设备", "config": "Front_trunk"}]
+    e2 = cap.parse([
+        _entry("remote_window_open", True, valueEnum="Front_trunk", paramsJson=devices),
+        _entry("remote_lock_unlock", True, valueEnum="Front_trunk", paramsJson=devices),
+        _entry("remote_trunk_unlock", True),
+    ])
+    assert e2["frunk.enabled"] is True
+    # Either spelling of the declaration is enough on its own.
+    assert cap.parse([_entry("remote_lock_unlock", True,
+                             valueEnum="Front_trunk")])["frunk.enabled"] is True
+    assert cap.parse([_entry("remote_lock_unlock", True,
+                             paramsJson=devices)])["frunk.enabled"] is True
+    # Never on absence, a disabled row, or the odd window row alone.
+    ex5 = cap.parse([_entry("remote_control_unlock_2", True, valueEnum="door,trunk"),
+                     _entry("remote_control_open_2", True, valueEnum="trunk")])
+    for out in (cap.parse([]), ex5,
+                cap.parse([_entry("remote_lock_unlock", True)]),
+                cap.parse([_entry("remote_lock_unlock", False, valueEnum="Front_trunk")]),
+                cap.parse([_entry("remote_window_open", True, valueEnum="Front_trunk",
+                                  paramsJson=devices)])):
+        assert "frunk.enabled" not in out, out
+
+
 def test_an_e2s_ac_row_gets_the_1_0_request_in_whole_degrees():
     """An E2 declares its AC only as `remote_air_condition_switch` (15.5|28.5)
     and its app sends RCE with whole degrees (#72). The 2.0 climate row keeps

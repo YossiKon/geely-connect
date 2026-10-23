@@ -432,6 +432,38 @@ def test_unlock_trunk_on_a_1_0_car_fires_what_its_app_sends():
     assert api.calls[-1][0] == "RHL"
 
 
+def test_unlock_frunk_exists_only_where_the_catalogue_names_one():
+    """The frunk row is presence-gated, the opposite of the list above it: a
+    bundle with no flag (every EX5 and Starray) gets no Unlock Frunk (#72)."""
+    _need_ha()
+    for caps in ({}, {"frunk.enabled": False}, {"tailgate.rtu": True}):
+        _, got = _setup_buttons(_bundle(caps=caps))
+        assert f"geely_{FAKE_VIN}_btn_unlock_frunk" not in {e._attr_unique_id for e in got}, caps
+    _, got = _setup_buttons(_bundle(caps={"frunk.enabled": True}))
+    assert {e._attr_unique_id for e in got} == {
+        f"geely_{FAKE_VIN}_btn_find_car",
+        f"geely_{FAKE_VIN}_btn_unlock_trunk",
+        f"geely_{FAKE_VIN}_btn_unlock_frunk",
+        f"geely_{FAKE_VIN}_btn_refresh",
+    }
+    assert _by_uid(got, "btn_unlock_frunk")._attr_name == "Unlock Frunk"
+
+
+def test_unlock_frunk_fires_the_e2_apps_rlu_in_the_ordinary_body():
+    """`rlu`, start, operation=1 and rlu.target=1 - the E2 app's request (#72),
+    sent the way fire_control sent it when it popped an EX2 Max's frunk."""
+    _need_ha()
+    api = RecorderApi()
+    _, got = _setup_buttons(_bundle(api=api, caps={"frunk.enabled": True,
+                                                   "tailgate.rtu": True}))
+    asyncio.run(_by_uid(got, "btn_unlock_frunk").async_press())
+    assert api.calls == [("rlu", [{"key": "operation", "value": "1"},
+                                  {"key": "rlu.target", "value": "1"}], "start", 0)]
+    # The boot keeps its own request beside it.
+    asyncio.run(_by_uid(got, "btn_unlock_trunk").async_press())
+    assert api.calls[-1] == ("RTU", [], "start", 0)
+
+
 def test_button_rejection_becomes_homeassistanterror():
     _need_ha()
     err = load("api").GeelyControlError("failure", "Operation failed")

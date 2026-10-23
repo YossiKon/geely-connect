@@ -11,6 +11,9 @@
       2026-05-01" used to appear here; it predates this repository's public
       history and nobody can produce the capture, so it is gone rather than left
       to lend false confidence.
+  Unlock Frunk    → rlu / [{operation: "1"}, {rlu.target: "1"}]
+      Only where the catalogue names a front trunk (an E2's does, #72). The
+      E2's app sends it; fired from Home Assistant it popped an EX2 Max's frunk.
 
 Rapid warming / cooling are exposed as climate.preset_modes - see
 climate.py - because they're a "set the climate to a mode" action, not
@@ -39,6 +42,8 @@ from .const import (
     DOMAIN,
     SERVICE_FIND_CAR,
     SERVICE_FIND_CAR_PARAMS,
+    SERVICE_FRUNK,
+    SERVICE_FRUNK_PARAMS,
     SERVICE_TAILGATE,
     SERVICE_TAILGATE_1_0,
     SERVICE_TAILGATE_1_0_PARAMS,
@@ -72,6 +77,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
         if key == "unlock_trunk" and caps.get("tailgate.rtu"):
             sid, params = SERVICE_TAILGATE_1_0, SERVICE_TAILGATE_1_0_PARAMS
         entities.append(GeelyTelematicsButton(hass, bundle, key, name, icon, sid, params))
+
+    # Unlock Frunk is built outside the list above on purpose: there a missing
+    # flag means "create", and every EX5 and Starray would get a frunk button.
+    # This one exists only where the catalogue names a front trunk (#72).
+    if caps.get("frunk.enabled"):
+        entities.append(GeelyTelematicsButton(
+            hass, bundle, "unlock_frunk", "Unlock Frunk", "mdi:car",
+            SERVICE_FRUNK, SERVICE_FRUNK_PARAMS))
 
     # Manual "Refresh now" - forces an immediate poll, bypassing the back-off.
     entities.append(GeelyRefreshButton(hass, bundle))

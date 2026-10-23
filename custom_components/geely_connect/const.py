@@ -407,6 +407,20 @@ SERVICE_TAILGATE_PARAMS  = [{"key": "target", "value": "trunk"}]
 SERVICE_TAILGATE_1_0        = "RTU"
 SERVICE_TAILGATE_1_0_PARAMS: list[dict] = []
 
+# --- Frunk UNLOCK (#72) ---
+# The same E2's app releases the front trunk with another service of its own,
+# captured on the owner's phone (2026-10-14): `rlu`, start, operation=1 and
+# rlu.target=1. RDU_2 does not reach it there: every target tried, nonsense
+# included, unlocked the doors and the boot and left the frunk shut.
+#
+# That capture carried `latest: true` where every other command carries the
+# scheduling block. The ordinary body - scheduling block, no `latest`, exactly
+# what fire_control sends by default - popped the frunk on a Brazilian EX2 Max
+# (2026-10-22), so that is what the button sends. One car so far.
+SERVICE_FRUNK        = "rlu"
+SERVICE_FRUNK_PARAMS = [{"key": "operation", "value": "1"},
+                        {"key": "rlu.target", "value": "1"}]
+
 # --- Climate (AVD-verified 2026-05-01) ---
 # Master serviceId for AC, defrost, seat heat, seat vent on the Android app.
 SERVICE_CLIMATE = "RCE_2"
