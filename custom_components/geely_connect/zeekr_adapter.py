@@ -18,7 +18,6 @@ secondary-endpoint failures as non-fatal and carries state forward:
   - charge_server_get      (legacy /charge-server/ecarx_charge_set GET)
   - scheduled_charging_set (charge-server write)
   - rapid_climate          (charge-server bizType=7 write)
-  - fetch_capabilities     (legacy /geelyTCAccess/tcservices/capability)
 
 Each gap maps to an endpoint family present in the new app's static
 analysis (iovif.java lists /remote-control/* and /charge-server/* routes)
@@ -525,16 +524,32 @@ class ZeekrAdapter:
         return resp
 
     def fetch_capabilities(self) -> list[dict]:
-        """The catalogue, translated into the shape capabilities.py parses.
+        """The catalogue, in the shape capabilities.py parses.
 
-        Only vehicles addressed by an x-vin token can be asked; everything
-        else keeps the previous behaviour of an empty catalogue, which
-        capabilities.py reads as the permissive all-features view. A failure
-        here is deliberately swallowed for the same reason: losing the
-        catalogue must cost a car its feature *filtering*, never its entities.
+        A vehicle addressed by an x-vin token is asked on the new gateway and
+        its rows are translated. A vehicle without one is read from the old
+        platform - the status read and the commands already go there - so its
+        catalogue is asked there too, on the route the app itself uses with
+        the HF JWT, and comes back in the old catalogue's own shape. Before,
+        such an entry got no catalogue at all, and every feature was created
+        whether the car has it or not (#63). A failure on either route is
+        deliberately swallowed: losing the catalogue must cost a car its
+        feature *filtering*, never its entities - an empty list is
+        capabilities.py's permissive all-features view.
         """
         if not self._client.enc_vin:
-            return []
+            try:
+                rows = self._authed(self._client.fetch_capabilities, self.vin)
+            except (ZeekrAuthError, ZeekrApiError, GeelyAuthError) as err:
+                # The old platform no longer knows a migrated car (8060 on its
+                # reads), so such a car keeps the empty catalogue it always had.
+                _LOGGER.debug("old-platform capability fetch failed: %s", err)
+                return []
+            # Rows that name no function would still count as a catalogue, one
+            # naming nothing - which hides every feature it gates, not none.
+            rows = [r for r in rows or [] if r.get("functionId")]
+            _LOGGER.debug("old-platform capabilities: %d row(s)", len(rows))
+            return rows
         try:
             rows = self._authed(self._client.capabilities_new)
         except (ZeekrAuthError, ZeekrApiError, GeelyAuthError) as err:

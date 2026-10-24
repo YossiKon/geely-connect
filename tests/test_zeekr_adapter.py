@@ -42,6 +42,9 @@ def _make_adapter(password: str = "", hf_token: str = "mock-hf",
             "powerLevel": 98}}}}
     c.control_resp = lambda vin, body: {
         "code": "1000", "data": {"result": {"code": 1000}}}
+    # The old platform's catalogue, in its own row shape.
+    c.fetch_capabilities = lambda vin: [
+        {"functionId": "remote_control_lock_2", "valueEnable": True}]
     # _renew_hf calls login_tsp, which re-mints BOTH sessions - the HF JWT and
     # the new-platform access token. Renewing only the HF side left
     # access_token frozen and stranded new-platform users on 079021 (the fix
@@ -83,7 +86,8 @@ def test_constructor_and_basic_surface():
     assert a.request_position_refresh() == {}
     ctl = a.control("AC", [{"key": "ac", "value": "1"}])
     assert ctl["data"]["result"]["code"] == 1000, ctl
-    assert a.fetch_capabilities() == []
+    assert a.fetch_capabilities() == [
+        {"functionId": "remote_control_lock_2", "valueEnable": True}]
 
 
 def test_unmapped_endpoints_raise_cleanly():
@@ -401,6 +405,69 @@ def test_a_catalogue_that_cannot_be_fetched_keeps_every_entity():
 
     c.capabilities_new = _boom
     assert a.fetch_capabilities() == []
+
+
+def test_an_entry_without_a_token_reads_the_old_platform_catalogue():
+    """Without an x-vin the car is read from the old platform, and its catalogue
+    now is too - in that platform's own row shape, which capabilities.py parses
+    as it stands. Before, this entry got no catalogue and every feature was
+    created whether the car has it or not (#63)."""
+    a, c = _make_adapter()
+    assert c.enc_vin == ""
+    asked = []
+    rows = [{"functionId": "remote_climate_control_2", "valueEnable": True,
+             "paramsJson": [{"nameKey": "dpt_vent_loc", "config": "front-left"}]},
+            {"functionId": "remote_control_skylight_2", "valueEnable": True},
+            {"valueEnable": True}]
+
+    def _old(vin):
+        asked.append(vin)
+        return rows
+
+    def _new():
+        raise AssertionError("the new gateway must not be asked without a token")
+
+    c.fetch_capabilities = _old
+    c.capabilities_new = _new
+    got = a.fetch_capabilities()
+    assert asked == [FAKE_VIN], asked
+    assert got == rows[:2], "the rows must pass untranslated, minus the unnamed one"
+
+
+def test_an_old_platform_catalogue_that_cannot_be_read_keeps_every_entity():
+    """A migrated car is unknown to the old platform; that error is not a
+    session problem and must not cost a renewal - just the empty catalogue such
+    an entry always had. An auth-looking failure rides the same renewal wrapper
+    as every other call."""
+    _patch_idaas()
+    try:
+        a, c = _make_adapter(password="hunter2")
+        renewals = []
+        c.login_tsp = lambda tv: renewals.append(tv)
+
+        def _unknown(vin):
+            raise zc.ZeekrApiError(
+                "code=8060 message=The vehicle corresponding to the VIN does not exist")
+
+        c.fetch_capabilities = _unknown
+        assert a.fetch_capabilities() == []
+        assert renewals == [], "a car the platform does not know is not a session problem"
+
+        answers = iter([zc.ZeekrApiError("HF HTTP 401: token expired"),
+                        [{"functionId": "remote_control_lock_2", "valueEnable": True}]])
+
+        def _expired_then_fine(vin):
+            nxt = next(answers)
+            if isinstance(nxt, Exception):
+                raise nxt
+            return nxt
+
+        c.fetch_capabilities = _expired_then_fine
+        assert a.fetch_capabilities() == [
+            {"functionId": "remote_control_lock_2", "valueEnable": True}]
+        assert renewals == ["mock-tv"], renewals
+    finally:
+        _restore_idaas()
 
 
 def test_position_refresh_sends_the_pai_wake_on_the_new_platform():

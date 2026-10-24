@@ -288,6 +288,12 @@ class _MockGW(BaseHTTPRequestHandler):
             elif self.headers.get("X-Vehicle-IDENTIFIER") == "EMPTYVIN":
                 payload = {"code": "1000", "success": True, "message": "ok",
                            "data": {"functionId": "AC"}}
+            elif self.headers.get("X-Vehicle-IDENTIFIER") == "PAGEDVIN":
+                # The old platform's own paging, as the legacy route reads it.
+                payload = {"code": "1000", "success": True, "message": "ok",
+                           "data": {"list": [{"functionId": "AC", "valueEnable": True},
+                                             "not-a-row"],
+                                    "total": 2}}
             else:
                 payload = {"code": "1000", "success": True, "message": "ok",
                            "data": [{"functionId": "AC", "supported": True}]}
@@ -686,6 +692,9 @@ def test_get_vehicle_status_and_no_session_guards():
 
         # fetch_capabilities with a non-list data payload -> [].
         assert c.fetch_capabilities("EMPTYVIN") == []
+        # ...and with the old platform's paged data.list -> its rows.
+        assert c.fetch_capabilities("PAGEDVIN") == [
+            {"functionId": "AC", "valueEnable": True}]
 
         # No HF session: the vehicle methods refuse with ZeekrAuthError.
         c2 = zc.ZeekrClient("user@example.com", "pw", gateway=url)

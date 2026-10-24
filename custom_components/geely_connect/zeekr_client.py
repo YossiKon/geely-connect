@@ -964,6 +964,10 @@ class ZeekrClient:
             token=self.hf_token, vin=vin, vehicle_model=self.vehicle_model,
             timezone=self.timezone, device_identifier=self.hf_device_id)
         data = resp.get("data")
+        # The old platform pages this as data.list - the shape api.py reads off
+        # the same endpoint on the legacy route; a bare list is taken as well.
+        if isinstance(data, dict):
+            data = data.get("list")
         if isinstance(data, list):
             return [v for v in data if isinstance(v, dict)]
         return []
