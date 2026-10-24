@@ -138,11 +138,17 @@ _X_VIN_MATERIAL: tuple[tuple[bytes, bytes, str], ...] = (
 # How the gateway answers a candidate x-vin it cannot decrypt (verified live):
 # HTTP 400 with this code. Any other failure is not a verdict on the key.
 _X_VIN_REJECTED_HINTS = ("079025", "decrypt x-vin")
-# ...and how a dead session answers everything, x-vin or not. `079021` is the
-# single-session eviction ("The account is currently logged in elsewhere"),
-# which the phone app triggers the moment it signs in.
+# ...and how a dead session answers. `079021` is the single-session eviction
+# ("The account is currently logged in elsewhere"), which the phone app
+# triggers the moment it signs in. It does not answer every candidate: one
+# probe in #63 drew 079025 for one key and 079021 for the other, so the
+# gateway looks to decrypt before it checks the session.
 _SESSION_DEAD_HINTS = ("079021", "logged in elsewhere", "401", "403", "token",
                        "unauthor", "expired", "not logged in")
+# `079001` ("[SDK]此接口未被授权") comes as HTTP 401 too, but it is not the
+# session's answer: the same token drew it on one start and 079021 on another
+# (#63), and #53 saw it on a live session. What exactly it refuses is not known.
+_NOT_SESSION_HINTS = ("079001",)
 
 
 def _x_vin_rejected(exc: Exception) -> bool:
@@ -154,7 +160,9 @@ def _session_dead(exc: Exception) -> bool:
     if isinstance(exc, ZeekrAuthError):
         return True
     low = str(exc).lower()
-    return not _x_vin_rejected(exc) and any(h in low for h in _SESSION_DEAD_HINTS)
+    if _x_vin_rejected(exc) or any(h in low for h in _NOT_SESSION_HINTS):
+        return False
+    return any(h in low for h in _SESSION_DEAD_HINTS)
 
 
 def derive_x_vin(vin: str, key: bytes, iv: bytes) -> str:
@@ -1016,10 +1024,10 @@ class ZeekrClient:
         (#84, iOS) otherwise saw nothing at all: the flow swallowed each
         rejection and stored an empty token in silence. Two failures are told
         apart: a `079025` is the gateway's verdict on the KEY, so the probe
-        answers "" and the caller can say so; a dead session answers every
-        candidate the same way whatever the key, so when that is all the
-        probe saw it raises instead, and the adapter's renewal gets its turn.
-        Neither log line carries the VIN or a candidate value.
+        answers "" and the caller can say so; a candidate that met a dead
+        session was never judged at all, so when any did the probe raises
+        instead, and the adapter's renewal gets its turn. Neither log line
+        carries the VIN or a candidate value.
         """
         if not self.access_token or not vin:
             return ""
@@ -1045,9 +1053,15 @@ class ZeekrClient:
                     outcome = f"{type(exc).__name__}: {str(exc)[:80]}"
                 _LOGGER.debug("x-vin probe: rejected (%s): %s", note, outcome)
                 outcomes.append(f"{note}: {outcome}")
-            if failures and len(failures) == len(materials) \
-                    and all(_session_dead(e) for e in failures):
-                raise failures[-1]
+            # Raise when any candidate met a dead session, not only when all
+            # did: a wrong key still draws 079025 on a dead session, so with
+            # two builds only one that decrypts could ever meet it, and "" then
+            # raised a Repairs issue for a key the gateway had not judged. At
+            # start the probe runs on the token stored in the entry, which the
+            # phone app's next sign-in leaves dead.
+            dead = [e for e in failures if _session_dead(e)]
+            if dead:
+                raise dead[-1]
             _LOGGER.warning(
                 "x-vin auto-derivation: none of the %d known app builds matched "
                 "this vehicle (%s). Paste the token from your app under "

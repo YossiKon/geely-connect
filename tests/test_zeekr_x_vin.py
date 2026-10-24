@@ -41,8 +41,10 @@ def test_derive_x_vin_is_a_reversible_aes_cbc_pkcs7():
 
 # The gateway's own answer to a candidate it cannot decrypt, verified live.
 _REJECTED = "HTTP 400: 079025 Decrypt X-VIN failed"
-# ...and its answer to everything once the phone app has taken the session.
+# ...its answer once the phone app has taken the session...
 _EVICTED = "code=079021 message=The account is currently logged in elsewhere"
+# ...and the 401 a decrypted token drew on a live session (#63, as logged).
+_REFUSED = "HTTP 401: {'code': '079001', 'msg': '[SDK]此接口未被授权，无法访问!'}"
 
 
 def _client_with(accepting_x_vin, reject_with=_REJECTED):
@@ -150,10 +152,10 @@ def test_an_accepted_candidate_is_logged_and_raises_no_warning():
 
 
 def test_a_dead_session_raises_instead_of_reading_as_no_build_matched():
-    """`079021` answers every candidate the same way whatever the key, so a probe
-    that saw only that has learned nothing about the key - and "" would have
-    raised a Repairs issue about a token on an entry whose real problem is the
-    session. The adapter's renewal wrapper is what the raise is for."""
+    """A probe that saw only `079021` has learned nothing about any key - and ""
+    would have raised a Repairs issue about a token on an entry whose real
+    problem is the session. The adapter's renewal wrapper is what the raise is
+    for."""
     client = _client_with("never", reject_with=_EVICTED)
     client.enc_vin = "keep-me"
     try:
@@ -177,17 +179,33 @@ def test_a_dead_session_raises_instead_of_reading_as_no_build_matched():
         raise AssertionError("an auth error read as 'no build matched'")
 
 
-def test_a_mixed_verdict_is_a_key_verdict():
-    """One candidate rejected with 079025 and one evicted: the 079025 is a real
-    verdict on that key, so the probe answers "" rather than raising."""
+def test_a_candidate_that_met_a_dead_session_was_never_judged():
+    """#63 logged 079025 for one build and 079021 for the other in one probe: a
+    wrong key looks to be refused before the session is checked, so the build
+    that met the eviction was never judged. "" there raised a Repairs issue
+    about a key nobody had tried; the probe raises instead, so the adapter
+    renews and asks again."""
     client = zc.ZeekrClient(email="a@b.c", password="")
     client.access_token = "tok"
+    client.enc_vin = "keep-me"
     answers = iter([_REJECTED, _EVICTED])
     def caps():
         raise zc.ZeekrApiError(next(answers))
     client.capabilities_new = caps
-    assert client.probe_x_vin(FAKE_VIN) == ""
-    # And an empty catalogue beside an eviction is not "every candidate evicted".
+    try:
+        client.probe_x_vin(FAKE_VIN)
+    except zc.ZeekrApiError as e:
+        assert "079021" in str(e), "the raise must carry the session's answer"
+    else:
+        raise AssertionError("a build that met a dead session read as rejected")
+    assert client.enc_vin == "keep-me"
+    # Both judged - one refused outright, one decrypted and then refused (#63
+    # on a live session) - is a real "no build matched": "" and the warning.
+    answers = iter([_REJECTED, _REFUSED])
+    got, records = _capture(lambda: client.probe_x_vin(FAKE_VIN))
+    assert got == ""
+    assert [r for r in records if r.levelno == logging.WARNING], records
+    # And an empty catalogue is a verdict as well.
     client.capabilities_new = lambda: []
     assert client.probe_x_vin(FAKE_VIN) == ""
 
@@ -198,3 +216,7 @@ def test_the_two_verdict_predicates():
     assert zc._session_dead(zc.ZeekrApiError(_EVICTED))
     assert zc._session_dead(zc.ZeekrAuthError("anything"))
     assert not zc._session_dead(zc.ZeekrApiError("HTTP 500: gateway hiccup"))
+    # A 401 is not always the session: 079001 comes as one on a live session.
+    assert not zc._session_dead(zc.ZeekrApiError(_REFUSED))
+    assert not zc._x_vin_rejected(zc.ZeekrApiError(_REFUSED))
+    assert zc._session_dead(zc.ZeekrApiError("HTTP 401: token expired"))

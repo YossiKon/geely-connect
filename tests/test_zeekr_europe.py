@@ -200,6 +200,23 @@ def test_europe_vin_probe_uses_only_the_european_material_and_restores_state():
     assert client.enc_vin == "previous"
 
 
+def test_europe_probe_takes_079001_as_a_verdict_not_a_dead_session():
+    """One key on this profile, so a 079001 was the probe's only failure, and the
+    bare "401" among the session hints made that "every candidate met a dead
+    session": a renewal at every start (signing the phone app out), then a skip
+    at debug with no warning and no Repairs issue. 079001 is not the session's
+    answer (#63, #53), so it is a plain "no match" now."""
+    client = zc.ZeekrClient("", "", access_token="fake-access", profile=FAKE_PROFILE)
+    client.country_code = "ES"
+
+    def refused():
+        raise zc.ZeekrApiError(
+            "HTTP 401: {'code': '079001', 'msg': '[SDK]此接口未被授权，无法访问!'}")
+
+    with patch.object(client, "capabilities_new", refused):
+        assert client.probe_x_vin(FAKE_VIN) == ""
+
+
 def test_explicit_profile_selects_servers_independently_of_country():
     eu = zc.ZeekrClient("", "", profile=FAKE_PROFILE)
     sea = zc.ZeekrClient("", "")

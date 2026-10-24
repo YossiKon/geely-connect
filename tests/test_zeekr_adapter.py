@@ -211,6 +211,53 @@ def test_probe_x_vin_renews_a_dead_session_and_retries():
         _restore_idaas()
 
 
+def test_a_stale_session_at_start_no_longer_hides_a_working_build():
+    """The real client probe this time. At start it runs on the token stored in
+    the entry; a wrong key still draws 079025 on a dead session, so only the
+    right build met the 079021 - and the probe answered "" without this wrapper
+    ever renewing (#63 logged exactly that pair). Now one renewal, a second
+    pass, and the build is found."""
+    _patch_idaas()
+    try:
+        key, iv, _note = zc._X_VIN_MATERIAL[-1]
+        right = zc.derive_x_vin(FAKE_VIN, key, iv)
+        refused = ("HTTP 401: {'code': '079001', "
+                   "'msg': '[SDK]此接口未被授权，无法访问!'}")
+
+        def _gateway(c, live_answer):
+            def caps():
+                if c.enc_vin != right:
+                    raise zc.ZeekrApiError("HTTP 400: 079025 Decrypt X-VIN failed")
+                if c.access_token == "mock-at":         # the stored, dead one
+                    raise zc.ZeekrApiError("HTTP 401: code=079021 message="
+                                           "The account is currently logged in elsewhere")
+                return live_answer()
+            return caps
+
+        a, c = _make_adapter(password="hunter2")
+        c.capabilities_new = _gateway(c, lambda: [{"functionCode": "C_RDL_2"}])
+        assert a.probe_x_vin(FAKE_VIN) == right
+        assert c.access_token == "mock-at-new"
+        assert c.enc_vin == "", "the probe only adopts through adopt_enc_vin"
+
+        # sabbrowne's car: once the session is live, the same token draws
+        # 079001. That is a verdict, not the session, so "" comes back after
+        # the one renewal - not a second one and a re-auth prompt.
+        a, c = _make_adapter(password="hunter2")
+
+        def _refuse():
+            raise zc.ZeekrApiError(refused)
+
+        c.capabilities_new = _gateway(c, _refuse)
+        renewals = []
+        login_tsp = c.login_tsp
+        c.login_tsp = lambda tv: (renewals.append(tv), login_tsp(tv))
+        assert a.probe_x_vin(FAKE_VIN) == ""
+        assert renewals == ["mock-tv"]
+    finally:
+        _restore_idaas()
+
+
 def test_silent_renewal_chain_and_token_take():
     _patch_idaas()
     try:

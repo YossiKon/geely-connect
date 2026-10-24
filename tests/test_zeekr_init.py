@@ -323,8 +323,8 @@ def test_an_entry_that_already_has_a_token_is_not_probed_and_the_issue_clears():
 
 
 def test_a_dead_session_at_the_probe_is_not_reported_as_a_missing_key():
-    """`079021` answers every candidate whatever the key, so the probe raises
-    and the adapter renews; when even that fails it surfaces as GeelyAuthError.
+    """A candidate that met `079021` was never judged, so the probe raises and
+    the adapter renews; when even that fails it surfaces as GeelyAuthError.
     That is a session problem for the first refresh and the re-auth prompt,
     not a key problem for Repairs - so neither branch of the issue fires."""
     m = _mod()
