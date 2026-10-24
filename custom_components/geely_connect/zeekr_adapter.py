@@ -312,7 +312,7 @@ class ZeekrAdapter:
         # new-gateway status path in vehicle_status() below.
         self._client.enc_vin = enc_vin or ""
         # Set when a silent HF renewal happened; the coordinator persists the
-        # new token + expiry into the config entry after the next poll.
+        # new tokens + expiry into the config entry after the next poll.
         self.hf_dirty = False
 
     @property
@@ -320,15 +320,20 @@ class ZeekrAdapter:
         """Absolute epoch the current HF JWT expires at (0 = unknown)."""
         return self._hf_expiry_ts
 
-    def take_renewed_hf_token(self) -> tuple[str, int] | None:
-        """Return (hf_token, expiry_ts) when a silent renewal happened since
-        the last poll (clearing the dirty flag), else None. The coordinator
-        persists the fresh session once per poll; HA drives polls
-        sequentially, so the plain flag needs no locking."""
+    def take_renewed_session(self) -> tuple[str, int, str, str] | None:
+        """Return (hf_token, expiry_ts, access_token, refresh_token) when a
+        silent renewal happened since the last poll (clearing the dirty flag),
+        else None. The renewal re-mints the new-platform pair along with the
+        HF JWT, so the entry should hold the tokens HA last minted, not the
+        ones from setup that it has since replaced. The coordinator persists
+        the fresh session once per poll; HA drives polls sequentially, so the
+        plain flag needs no locking."""
         if not self.hf_dirty:
             return None
         self.hf_dirty = False
-        return self._client.hf_token or "", self._hf_expiry_ts
+        c = self._client
+        return (c.hf_token or "", self._hf_expiry_ts,
+                c.access_token or "", c.refresh_token or "")
 
     # ---- helpers ----------------------------------------------------------
 

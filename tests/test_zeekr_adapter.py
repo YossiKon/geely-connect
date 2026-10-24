@@ -49,14 +49,15 @@ def _make_adapter(password: str = "", hf_token: str = "mock-hf",
     # the new-platform access token. Renewing only the HF side left
     # access_token frozen and stranded new-platform users on 079021 (the fix
     # that came with the new-gateway status read). The stub mirrors the real
-    # superset: it sets the HF token AND a fresh access token, so a test can
-    # assert the access token actually moved. login_hf stays stubbed too, since
-    # login_tsp calls it in production.
+    # superset: it sets the HF token AND a fresh access/refresh pair, so a test
+    # can assert the new-platform tokens actually moved. login_hf stays stubbed
+    # too, since login_tsp calls it in production.
     c.login_hf = lambda token_value: setattr(c, "hf_token", "mock-hf-new")
 
     def _login_tsp(token_value):
         c.hf_token = "mock-hf-new"
         c.access_token = "mock-at-new"
+        c.refresh_token = "mock-rt-new"
 
     c.login_tsp = _login_tsp
     return a, c
@@ -75,7 +76,7 @@ def test_constructor_and_basic_surface():
     assert a.vin == FAKE_VIN
     assert a.user_id == "mock-uid"
     assert a.hf_expiry == 10 ** 15
-    assert a.take_renewed_hf_token() is None, "no renewal yet"
+    assert a.take_renewed_session() is None, "no renewal yet"
     assert c.timezone == "UTC"
 
     st = a.vehicle_status()
@@ -266,10 +267,13 @@ def test_silent_renewal_chain_and_token_take():
         st = a.vehicle_status()
         assert st["data"]["vehicleStatus"]["basicVehicleStatus"]["powerLevel"] == 98, st
         assert c.hf_token == "mock-hf-new", "silent renewal did not run"
-        taken = a.take_renewed_hf_token()
+        taken = a.take_renewed_session()
         assert taken is not None and taken[0] == "mock-hf-new", taken
         assert taken[1] > 0, "renewal should stamp a fresh expiry"
-        assert a.take_renewed_hf_token() is None, "dirty flag cleared"
+        # The same login re-minted the new-platform pair; handing back the
+        # setup pair would leave the entry on tokens HA has replaced.
+        assert taken[2:] == ("mock-at-new", "mock-rt-new"), taken
+        assert a.take_renewed_session() is None, "dirty flag cleared"
     finally:
         _restore_idaas()
 

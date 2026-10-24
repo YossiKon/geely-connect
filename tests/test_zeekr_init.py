@@ -82,7 +82,7 @@ class _FakeZeekrApi:
 
     def __init__(self, **kw):
         self.kw = kw
-        self._hf_takes = [("mock-hf-new", 1750000001)]
+        self._hf_takes = [("mock-hf-new", 1750000001, "mock-at-new", "mock-rt-new")]
         # The x-vin surface the setup-time derivation uses (#84): what the
         # entry handed over, what a probe answers (or raises), what was adopted.
         self.enc_vin = kw.get("enc_vin") or ""
@@ -126,7 +126,7 @@ class _FakeZeekrApi:
     def fetch_capabilities(self):
         return []
 
-    def take_renewed_hf_token(self):
+    def take_renewed_session(self):
         return self._hf_takes.pop(0) if self._hf_takes else None
 
 
@@ -145,14 +145,14 @@ class _Patched:
             setattr(self.mod, k, v)
 
 
-def _setup_zeekr(m, hass=None, entry=None, api_tweak=None, ir=None):
+def _setup_zeekr(m, hass=None, entry=None, api_tweak=None, ir=None, factory=None):
     hass = hass or _Hass()
     entry = entry or _zeekr_entry()
     ir = ir if ir is not None else _ir_module()
     made = {}
 
     def _api_factory(**kw):
-        api = _FakeZeekrApi(**kw)
+        api = (factory or _FakeZeekrApi)(**kw)
         if api_tweak:
             api_tweak(api)
         made["api"] = api
@@ -246,19 +246,49 @@ def test_zeekr_hf_renewal_is_persisted_into_the_entry():
     last = hass.config_entries.updates[-1]["data"]
     assert last["zeekr_hf_token"] == "mock-hf-new", last
     assert last["zeekr_hf_expiry"] == 1750000001, last
+    assert last["zeekr_access_token"] == "mock-at-new", last
+    assert last["zeekr_refresh_token"] == "mock-rt-new", last
     # A renewal that fires once the bundle is in hass.data (the normal case,
     # after setup) flags its own writeback so the update listener skips the
     # reload it would otherwise do on any entry.data change.
     bundle = hass.data["geely_connect"]["e1"]
     assert isinstance(bundle, dict)
-    api._hf_takes = [("mock-hf-2", 1750000002)]
+    api._hf_takes = [("mock-hf-2", 1750000002, "mock-at-2", "")]
     asyncio.run(_FakeCoordinator.instance.refresh())
     assert bundle.get("_skip_reload_once") is True, \
         "the HF writeback must flag itself so the listener skips the reload"
+    last = hass.config_entries.updates[-1]["data"]
+    assert last["zeekr_access_token"] == "mock-at-2", last
+    assert last["zeekr_refresh_token"] == "mock-rt-new", \
+        "a login that returned no refresh token must not blank the stored one"
     # A second cycle with no renewal must not touch the entry again.
     n = len(hass.config_entries.updates)
     asyncio.run(_FakeCoordinator.instance.refresh())
     assert len(hass.config_entries.updates) == n, "spurious entry update"
+
+
+def test_a_renewal_puts_the_session_it_minted_into_the_entry():
+    """login_tsp re-mints the new-platform access and refresh tokens with the
+    HF JWT, and the entry took only the HF half - so a restart loaded the pair
+    from setup, which HA had itself replaced. Driven through the real adapter,
+    so the take and the write are checked together."""
+    from test_zeekr_adapter import _make_adapter, _patch_idaas, _restore_idaas
+
+    def _real(**kw):
+        a, c = _make_adapter(password="hunter2", hf_expiry=1)   # expired
+        c.probe_x_vin = lambda vin: ""
+        return a
+
+    m = _mod()
+    _patch_idaas()
+    try:
+        ok, hass, entry, api = _setup_zeekr(m, factory=_real)
+    finally:
+        _restore_idaas()
+    assert ok is True
+    assert entry.data["zeekr_hf_token"] == "mock-hf-new", entry.data
+    assert entry.data["zeekr_access_token"] == "mock-at-new", entry.data
+    assert entry.data["zeekr_refresh_token"] == "mock-rt-new", entry.data
 
 
 # ------------------------------------------ #84: the x-vin, derived at setup

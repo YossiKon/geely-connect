@@ -745,14 +745,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # The zeekr adapter renews the old-platform HF JWT silently from the
         # stored password; persist the refreshed token + expiry so the next
         # setup starts from the fresh session (and the 2-day cycle repeats
-        # without any user action).
-        renewed = getattr(api, "take_renewed_hf_token", None)
+        # without any user action). The same login re-mints the new-platform
+        # access and refresh tokens, and the entry kept the pair from setup:
+        # a restart loaded tokens HA had itself replaced.
+        renewed = getattr(api, "take_renewed_session", None)
         if renewed is not None:
-            hf_token, hf_expiry = renewed() or ("", 0)
+            hf_token, hf_expiry, access_token, refresh_token = (
+                renewed() or ("", 0, "", ""))
             if hf_token:
                 new_data = dict(entry.data)
                 new_data[CONF_ZEEKR_HF_TOKEN] = hf_token
                 new_data[CONF_ZEEKR_HF_EXPIRY] = hf_expiry
+                # A login that came back without one leaves the stored one be.
+                for key, value in ((CONF_ZEEKR_ACCESS_TOKEN, access_token),
+                                   (CONF_ZEEKR_REFRESH_TOKEN, refresh_token)):
+                    if value:
+                        new_data[key] = value
                 # This is an internal token refresh, not a reconfiguration.
                 # async_update_entry fires the update listener on ANY data
                 # change, and that listener reloads the whole integration - so
@@ -763,7 +771,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 if isinstance(bucket, dict):
                     bucket["_skip_reload_once"] = True
                 hass.config_entries.async_update_entry(entry, data=new_data)
-                _LOGGER.info("zeekr: HF JWT silently renewed; entry updated")
+                _LOGGER.info("zeekr: session silently renewed; entry updated")
 
         charging, driving = _poll_flags(data)
 
