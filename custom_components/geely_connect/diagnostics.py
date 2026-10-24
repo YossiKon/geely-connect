@@ -14,7 +14,13 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .api import redact
-from .const import DOMAIN
+from .const import (
+    CONF_PLATFORM,
+    CONF_ZEEKR_ENC_VIN,
+    DEFAULT_PLATFORM,
+    DOMAIN,
+    PLATFORM_ZEEKR,
+)
 
 # Home Assistant's async_redact_data matches key names exactly, so this list
 # holds the spellings that appear in the config entry and in GPS payloads.
@@ -100,6 +106,11 @@ async def async_get_config_entry_diagnostics(
     return {
         "entry_data": _clean(dict(entry.data)),
         "options": _clean(dict(entry.options)),
+        # Whether the new platform's vehicle token is set - never its value.
+        # Both passes mask the stored field whatever it holds, so a report could
+        # not tell a token from none (#63), and that decides the route every
+        # read, command and catalogue request takes.
+        "vehicle_token": _clean(_vehicle_token(entry, bundle.get("api"))),
         # Why the data in this report is as old as it is, and whether the
         # integration is talking to the car at all. A stale reading and a failing
         # fetch look identical in `status` alone, which is how #21 stayed open.
@@ -164,6 +175,23 @@ async def _charge_server(hass: HomeAssistant, api: Any,
             f"the sweep passed {_SWEEP_TIMEOUT_S}s and was cut short; "
             "the slots above are what came back in time")
     return out
+
+
+def _vehicle_token(entry: ConfigEntry, api: Any) -> dict[str, Any] | None:
+    """Where the new platform's vehicle token is set, as three booleans.
+
+    Not "pasted" or "derived": the options form pre-fills from the entry data,
+    so a token in the options may be a derived one saved back. `in_use` is
+    what the running client sends, None when setup never built one. A legacy
+    entry has no such token.
+    """
+    if entry.data.get(CONF_PLATFORM, DEFAULT_PLATFORM) != PLATFORM_ZEEKR:
+        return None
+    return {
+        "in_entry_data": bool(entry.data.get(CONF_ZEEKR_ENC_VIN)),
+        "in_options": bool(entry.options.get(CONF_ZEEKR_ENC_VIN)),
+        "in_use": bool(api.enc_vin) if hasattr(api, "enc_vin") else None,
+    }
 
 
 def _polling(bundle: dict, coordinator: Any, vin: str | None) -> dict[str, Any]:

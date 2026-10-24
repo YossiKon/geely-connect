@@ -168,9 +168,9 @@ def test_the_report_is_still_worth_reading():
     if not have_homeassistant():
         skip("homeassistant not installed")
     r = _report()
-    assert set(r) == {"entry_data", "options", "polling", "recent_commands",
-                      "logging", "capabilities", "capabilities_raw", "status",
-                      "charge_server", "cards"}
+    assert set(r) == {"entry_data", "options", "vehicle_token", "polling",
+                      "recent_commands", "logging", "capabilities",
+                      "capabilities_raw", "status", "charge_server", "cards"}
     assert r["options"]["pressure_unit"] == "psi"
     assert r["status"]["_state"]["parkComfortState"] == "1"
 
@@ -255,6 +255,52 @@ def test_a_report_can_be_produced_before_the_coordinator_exists():
 
     r = asyncio.run(diag.async_get_config_entry_diagnostics(Hass(), Entry()))
     assert r["status"] == {}
+
+
+def _token_report(data, options, api):
+    """A report from a Geely EM entry, with or without a running client."""
+    diag = load("diagnostics")
+
+    class Entry:
+        entry_id = "e1"
+
+    Entry.data = {"vin": FAKE_VIN, "platform": "zeekr", **data}
+    Entry.options = options
+
+    class Hass:
+        data = {"geely_connect": {"e1": {"api": api}}} if api else {}
+
+    return asyncio.run(diag.async_get_config_entry_diagnostics(Hass(), Entry()))
+
+
+def test_the_report_says_whether_the_vehicle_token_is_set_but_not_what_it_is():
+    """Both passes mask the stored token whatever it holds, so a report could
+    not tell a Geely EM entry with a token from one without (#63) - and that
+    decides which way every read and command went. Three booleans, never the
+    value; a legacy entry has no such token at all."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    assert _report()["vehicle_token"] is None
+    x_vin = "c2VjcmV0LXZlaGljbGUtdG9rZW4tdmFsdWU="
+
+    class Api:
+        command_trail: list = []
+        enc_vin = x_vin
+
+    r = _token_report({"zeekr_enc_vin": x_vin}, {}, Api())
+    assert r["vehicle_token"] == {
+        "in_entry_data": True, "in_options": False, "in_use": True}
+    assert x_vin not in json.dumps(r), "the token itself reached the report"
+    # Pasted under Configure, on an entry whose setup never built a client.
+    r = _token_report({}, {"zeekr_enc_vin": x_vin}, None)
+    assert r["vehicle_token"] == {
+        "in_entry_data": False, "in_options": True, "in_use": None}
+    assert x_vin not in json.dumps(r)
+    # #63: a running entry the derivation left without one.
+    Api.enc_vin = ""
+    r = _token_report({}, {}, Api())
+    assert r["vehicle_token"] == {
+        "in_entry_data": False, "in_options": False, "in_use": False}
 
 
 def _sweep_report(get):
