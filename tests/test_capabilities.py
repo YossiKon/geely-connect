@@ -57,7 +57,8 @@ def test_both_climate_entries_are_read_because_the_car_splits_them():
     """A real EX5 catalogue (#20) declares climate across two entries, and reading
     only the preferred one lost three flags on every car.
 
-    `remote_climate_control_2` is enabled on every car seen so far, so it was
+    `remote_climate_control_2` is enabled on every car seen so far except the
+    E2 and the EX2 Max, which declare the 1.0 scheme instead (#72), so it was
     always the chosen source - and `steel_wheel_heating`, `AC_step` and
     `window_ventilation_duration` all live in `combined_climate_control`. The
     consequence was that `steering_wheel_heat.enabled` could not be derived

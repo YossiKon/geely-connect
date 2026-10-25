@@ -126,12 +126,14 @@ def parse(items: list[dict]) -> dict[str, Any]:
         # These two entries split the climate declaration between them, and
         # reading only the chosen one silently dropped whatever lived in the
         # other. Verified on a real EX5 catalogue (#20): with
-        # remote_climate_control_2 enabled - true on every car seen so far - the
-        # combined_climate_control params were never read, so `steel_wheel_heating:
-        # "true"`, `AC_step: "0.5"` and `window_ventilation_duration: "60"` were
-        # all invisible, and `steering_wheel_heat.enabled` could not be derived on
-        # ANY car. The comment below this block always said combined_climate_control
-        # was where those live; the code only ever looked at one entry.
+        # remote_climate_control_2 enabled - true on every car seen so far but
+        # the E2 and the EX2 Max, which declare the 1.0 row below instead (#72) -
+        # the combined_climate_control params were never read, so
+        # `steel_wheel_heating: "true"`, `AC_step: "0.5"` and
+        # `window_ventilation_duration: "60"` were all invisible, and
+        # `steering_wheel_heat.enabled` could not be derived on ANY car. The
+        # comment below this block always said combined_climate_control was
+        # where those live; the code only ever looked at one entry.
         #
         # Deliberately NOT merging remote_centra_lockstatus, which carries a copy
         # of this same param list in that car's catalogue: it is a central-lock
@@ -239,10 +241,12 @@ def parse(items: list[dict]) -> dict[str, Any]:
         out["tailgate.rtu"] = True
     # The front trunk. An E2's catalogue names it as a device of its 1.0 unlock
     # row - `remote_lock_unlock`, valueEnum and control_devices `Front_trunk`
-    # (#72) - and no other catalogue seen so far declares one anywhere. Unlike
-    # the flags around it this one is read on presence only: no EX5 or Starray
-    # has a frunk, so a catalogue that does not name it, or no catalogue at all,
-    # gets no Unlock Frunk button rather than one that cannot work.
+    # (#72) - and an EX2 Max's names it the same way; the button has opened its
+    # frunk. The new platform lists one only as the unlock target `hood` (#88),
+    # which has no entity yet. Unlike the flags around it this one is read on
+    # presence only: no EX5 or Starray has a frunk, so a catalogue that does not
+    # name it, or no catalogue at all, gets no Unlock Frunk button rather than
+    # one that cannot work.
     lu = by_id.get("remote_lock_unlock") or {}
     devices = _targets(lu) | _split(_params_to_dict(lu).get("control_devices"))
     if enabled("remote_lock_unlock") and "front_trunk" in {d.lower() for d in devices}:
