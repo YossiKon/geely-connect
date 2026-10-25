@@ -507,6 +507,9 @@ and the driving banner print `mi` and `mph` when that is what the entity is in
 ### Body (open / closed)
 Driver door, Passenger door, Rear-Left door, Rear-Right door, Trunk, Hood.
 
+On an EX2 Max, **Hood** reads *Open* while the frunk is up
+([#72](https://github.com/YossiKon/geely-connect/issues/72)).
+
 **Driver seatbelt** reads *Safe* / *Unsafe*: the car's field is `true` while
 the belt is released, measured on a real car with the belt buckled and then
 not ([#72](https://github.com/YossiKon/geely-connect/issues/72)).
@@ -594,7 +597,7 @@ back off removes the generated entities again.
 |---|---|
 | **Lock** | Lock / unlock the doors |
 | **Trunk** | Asks the car to release the tailgate latch, which then re-locks itself after a short window if nobody lifts the gate - which is exactly what the official app's own tailgate button does. **Four owners** now report the app only ever unlocking, never opening, across the EX5 Inspire, the EX5 Tech and the P145 PHEV, with the powered open coming from the key fob or the car's own screen. So this button is not a poor imitation of the app; it is the same action. The latch is confirmed releasing on three of the four - the EX5 Tech, the EX5 Inspire standard range and the P145 PHEV. On the fourth the indicators flash and the latch does not move, which is a **different** question from the powered open and the one thing still unexplained here. Watch the **Trunk Lock** sensor to see which of the two your car does. On the powered open itself: the EX5 capability catalogue **declares** `remote_control_open_2` (target `trunk`), but that lead is now closed - an owner read the car's own `vehicleCtrl` firmware binary and found the open command (`RDO`) is **provisioned in config with no handler**: the module's real handlers are `RDU RDL RWS RHL RES RCC RFD RPP RSM RCE PAA PAE`, and `RDO` is not among them. So the powered open cannot be executed over any remote channel the app or this integration reaches - the fob and the dashboard drive the actuator directly. This button sends the unlatch, which is all the cloud exposes; see [#20](https://github.com/YossiKon/geely-connect/issues/20). On the E2 and the Colombian EX2 it sends `RTU`, the request the E2's own app sends, because the usual one unlocks every door on the E2. **Confirmed on an E2**: the boot unlocks and the other doors stay locked ([#72](https://github.com/YossiKon/geely-connect/issues/72)) |
-| **Frunk** | Releases the front trunk. It sends `rlu`, the request the E2's own app sends for it - on the E2 the usual door request unlocks every door and the boot but never the frunk. The same request, sent from Home Assistant, popped the frunk on an EX2 Max ([#72](https://github.com/YossiKon/geely-connect/issues/72)). The button appears only on a car whose capability catalogue names a front trunk, as the E2's does; every other car gets none |
+| **Frunk** | Releases the front trunk. It sends `rlu`, the request the E2's own app sends for it - on the E2 the usual door request unlocks every door and the boot but never the frunk. The same request, sent from Home Assistant, popped the frunk on an EX2 Max ([#72](https://github.com/YossiKon/geely-connect/issues/72)). The button appears only on a car whose capability catalogue names a front trunk, as the E2's and the EX2 Max's do; every other car gets none |
 | **Climate (remote pre-conditioning)** | Remote pre-heat/pre-cool: on/off, set temperature (15.5-28.5 °C), Rapid Warming, Rapid Cooling. The rapid presets drive the setpoint to the coldest or hottest the car allows and ask for both front seats at the highest level - heat when warming, ventilation when cooling - inside the same single request the car accepts, since a second command racing the first gets rejected while the car is still working. On a car with a heated steering wheel, rapid warming asks for the wheel too (`sw`, exactly as the captured app body does) - **confirmed on a real car to heat the wheel** ([#4](https://github.com/YossiKon/geely-connect/issues/4)). On some cars the cabin obeys and the seats do not; [Troubleshooting](#-troubleshooting--debugging) has the script that fixes that, and why fan speed cannot be asked for at all. Only reflects remote pre-climate cycles: the cloud does not report manual cabin HVAC. On the E2 and the Colombian EX2, on/off and the temperature send the request the E2's own app sends, in whole degrees from 16 to 28 °C ([#72](https://github.com/YossiKon/geely-connect/issues/72)); the rapid presets did nothing on the E2 |
 | **Seat heating** | Driver & passenger (rear if supported): Off/Low/Medium/High |
 | **Seat ventilation** | Driver & passenger (rear if supported) |
@@ -1177,8 +1180,8 @@ rather than built to read unknown - and with a vehicle token, so is *Parking
 Comfort*, whose command is not mapped on that route either.
 
 One button goes the other way. **Unlock Frunk** is created only on a car whose
-capability catalogue names a front trunk, which so far means the E2
-([#72](https://github.com/YossiKon/geely-connect/issues/72)); every other car,
+capability catalogue names a front trunk, which so far means the E2 and the
+EX2 Max ([#72](https://github.com/YossiKon/geely-connect/issues/72)); every other car,
 and any car whose catalogue could not be read, goes without it.
 
 The only thing not created is the raw full-exposure pass (see below), because
