@@ -6,6 +6,8 @@ login and drives the adapter's branches directly. Runs without Home
 Assistant (api.py is stdlib-only).
 """
 
+import json
+
 from conftest import FAKE_VIN, load
 
 zc = load("zeekr_client")
@@ -629,3 +631,127 @@ def test_control_refuses_an_unmapped_new_platform_service():
         assert "not mapped" in str(err)
     else:  # pragma: no cover - only reached on a regression
         raise AssertionError("expected GeelyControlError for an unmapped service")
+
+
+# ------------------------------------------------------ the command trail ---
+# What the diagnostics download reads as `recent_commands`. GeelyApi alone
+# kept one, so a Geely EM entry's came back empty whatever was pressed - on an
+# owner's car, after a climate press that did nothing and one that worked
+# (#104).
+
+def test_a_command_on_the_old_route_is_recorded_as_on_the_old_login():
+    a, c = _make_adapter()
+    sent = []
+    c.control_resp = lambda vin, body: sent.append(body) or {"code": "1000"}
+    a.control("RCE_2", [{"key": "rce.temp", "value": "22.0"}], "start", 180)
+    assert sent, "the command itself must still go out"
+    note, = a.command_trail
+    assert note["command"] == "RCE_2 start"
+    assert note["outcome"] == "accepted" and note["code"] == "1000"
+    assert note["detail"] == [{"key": "rce.temp", "value": "22.0"}]
+    assert isinstance(note["ms"], int) and note["at"].endswith("Z")
+
+
+def test_a_refusal_keeps_the_code_the_server_gave():
+    """A refusal used to become 8500 whatever the server said, which the trail
+    would have repeated: the code is the part worth reading."""
+    a, c = _make_adapter()
+
+    def busy(vin, body):
+        raise zc.ZeekrApiError(
+            "code=8070 message=The last request has not yet been executed")
+
+    c.control_resp = busy
+    try:
+        a.control("RCE_2", [], "start")
+    except ad.GeelyControlError as e:
+        assert e.code == "8070"
+        assert "has not yet been executed" in e.message
+    else:  # pragma: no cover - only reached on a regression
+        raise AssertionError("expected GeelyControlError")
+    note, = a.command_trail
+    assert note["outcome"] == "rejected" and note["code"] == "8070"
+    assert "has not yet been executed" in note["message"]
+
+    # An HTTP failure carries no code of its own: the old 8500 stands.
+    def bad_gateway(vin, body):
+        raise zc.ZeekrApiError("HF HTTP 502: <non-JSON body omitted>")
+
+    c.control_resp = bad_gateway
+    try:
+        a.control("RDL_2", [], "start")
+    except ad.GeelyControlError as e:
+        assert e.code == "8500"
+    assert a.command_trail[-1]["code"] == "8500"
+
+
+def test_a_dead_session_is_recorded_as_one():
+    a, c = _make_adapter()
+
+    def dead(vin, body):
+        raise ad.GeelyAuthError("reauth needed")
+
+    c.control_resp = dead
+    try:
+        a.control("RDL_2", [], "start")
+    except ad.GeelyAuthError:
+        pass
+    note, = a.command_trail
+    assert note["outcome"] == "session-expired"
+
+
+def test_the_new_route_and_rapid_climate_are_recorded_too():
+    a, c = _make_adapter()
+    c.enc_vin = "opaque-token"
+    c.control_new_resp = lambda sid, cmd, params=None: {"code": "000000"}
+    c.set_smart_temp_new = lambda setting, command="immediately": {"code": "000000"}
+    a.control("RDL_2", [], "start")
+    a.rapid_climate(ac=True, temp="28.5", heat_seats=["11"], sw=True)
+    try:
+        a.control("SOMETHING_NEW", [])
+    except ad.GeelyControlError:
+        pass
+    assert [(n["command"], n["outcome"], n["code"]) for n in a.command_trail] == [
+        ("RDL_2 start", "accepted", "1000"),
+        ("rapid_climate", "accepted", "1000"),
+        ("SOMETHING_NEW start", "rejected", "unsupported"),
+    ]
+    assert a.command_trail[1]["detail"] == {
+        "temp": "28.5", "ac": "true", "heat": [{"level": "3", "pos": "11"}],
+        "ventilation": None, "sw": "true"}
+
+
+def test_what_never_reaches_the_server_leaves_no_note():
+    """Rapid climate without a token is refused before anything is sent, and
+    the position wake is the poller's, not anyone's press - the same reason
+    the old login leaves it out of its trail."""
+    a, c = _make_adapter()
+    try:
+        a.rapid_climate(ac=True, temp="22.0")
+    except NotImplementedError:
+        pass
+    c.enc_vin = "opaque-token"
+    c.control_new_resp = lambda sid, cmd, params=None: {"code": "000000"}
+    a.request_position_refresh()
+    assert not getattr(a, "command_trail", None)
+
+
+def test_neither_the_vin_nor_the_vehicle_token_reaches_the_trail():
+    a, c = _make_adapter()
+    token = "c2VjcmV0LXZlaGljbGUtdG9rZW4tdmFsdWU="
+    c.enc_vin = token
+
+    def refused(sid, cmd, params=None):
+        raise zc.ZeekrApiError(f"code=079025 message=bad x-vin {token} for {FAKE_VIN}")
+
+    c.control_new_resp = refused
+    try:
+        a.control("RDL_2", [], "start")
+    except ad.GeelyControlError:
+        pass
+    blob = json.dumps(list(a.command_trail))
+    assert token not in blob and FAKE_VIN not in blob, blob
+    note, = a.command_trail
+    assert note["code"] == "079025"
+    assert "***redacted***" in note["message"]
+    assert f"...{FAKE_VIN[-4:]}" in note["message"], "the tail keeps it readable"

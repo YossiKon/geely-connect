@@ -711,9 +711,89 @@ def _raw_https(host: str, method: str, path: str, headers: dict, body: bytes,
     return body_part
 
 
+# ---------- Command trail (read by diagnostics) ----------
+
+class CommandTrail:
+    """The last few remote commands and how each went.
+
+    Shared by both logins' clients - GeelyApi below and the Geely EM adapter -
+    because the diagnostics download reads it off whichever one an entry
+    runs. Only GeelyApi kept one at first, so a Geely EM entry's
+    `recent_commands` came back empty after every press (#104).
+    """
+
+    COMMAND_TRAIL_SIZE = 25
+
+    def _note_text(self, text: Any) -> str:
+        """One line of error text, with this car's VIN taken out of it."""
+        out = str(text)
+        vin = getattr(self, "vin", "") or ""
+        if vin and vin in out:
+            out = out.replace(vin, f"...{vin[-4:]}")
+        return out[:160]
+
+    def _recorded(self, label: str, detail: Any, send):
+        """Run one remote command and keep a note of how it went.
+
+        The faults that cost this integration the most are invisible after the
+        fact: a command rejected with "the last request has not yet been
+        executed" is not queued, it is lost, and the only trace is a debug line
+        the reporter would have had to enable *before* it happened. Nobody does.
+        So the last few commands and their outcomes are kept here, and the
+        diagnostics download can answer "what did the car accept, in what order,
+        and how long apart" on its own.
+
+        Recorded: the label, the parameters, the outcome, the round trip. Not
+        the URL - every control path carries the VIN - and not the response
+        body, which is large and adds nothing a code does not.
+
+        Exception text is scrubbed rather than trusted. A transport error names
+        the URL it failed on ("Max retries exceeded with url:
+        /remote-control/vehicle/telematics/<VIN>"), and both redaction passes
+        match key names, so a VIN sitting inside a sentence would travel intact
+        into a shared diagnostics report.
+
+        Deliberately not applied to `request_position_refresh`: it is fired by
+        the poller rather than by anyone, and it would push every real command
+        out of a 25-entry trail within an hour.
+        """
+        trail = getattr(self, "command_trail", None)
+        if trail is None:
+            # Lazily built: instances are also created through __new__ (tests,
+            # and any future path that skips the constructor), and a missing
+            # attribute must not turn a working command into an exception.
+            trail = self.command_trail = collections.deque(
+                maxlen=self.COMMAND_TRAIL_SIZE)
+        note: dict[str, Any] = {
+            "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "command": label,
+            "detail": redact(detail),
+        }
+        started = time.monotonic()
+        try:
+            resp = send()
+        except GeelyControlError as e:
+            note.update(outcome="rejected", code=str(e.code),
+                        message=self._note_text(e.message))
+            raise
+        except GeelyAuthError as e:
+            note.update(outcome="session-expired", message=self._note_text(e))
+            raise
+        except Exception as e:
+            note.update(outcome="error",
+                        message=self._note_text(f"{type(e).__name__}: {e}"))
+            raise
+        else:
+            note.update(outcome="accepted", code=str(resp.get("code")))
+            return resp
+        finally:
+            note["ms"] = int((time.monotonic() - started) * 1000)
+            trail.append(note)
+
+
 # ---------- API client ----------
 
-class GeelyApi:
+class GeelyApi(CommandTrail):
     """Holds the long-lived cidpsso token + per-vehicle cert/key, plus a
     rotating JWT for apis.ecloudeu.com calls."""
 
@@ -1231,76 +1311,6 @@ class GeelyApi:
                 self._authed_apis_call("POST", path, body_bytes)))
 
     # ---- WRITE (control) ----
-
-    # ---- Command trail (read by diagnostics) ----
-
-    COMMAND_TRAIL_SIZE = 25
-
-    def _note_text(self, text: Any) -> str:
-        """One line of error text, with this car's VIN taken out of it."""
-        out = str(text)
-        vin = getattr(self, "vin", "") or ""
-        if vin and vin in out:
-            out = out.replace(vin, f"...{vin[-4:]}")
-        return out[:160]
-
-    def _recorded(self, label: str, detail: Any, send):
-        """Run one remote command and keep a note of how it went.
-
-        The faults that cost this integration the most are invisible after the
-        fact: a command rejected with "the last request has not yet been
-        executed" is not queued, it is lost, and the only trace is a debug line
-        the reporter would have had to enable *before* it happened. Nobody does.
-        So the last few commands and their outcomes are kept here, and the
-        diagnostics download can answer "what did the car accept, in what order,
-        and how long apart" on its own.
-
-        Recorded: the label, the parameters, the outcome, the round trip. Not
-        the URL - every control path carries the VIN - and not the response
-        body, which is large and adds nothing a code does not.
-
-        Exception text is scrubbed rather than trusted. A transport error names
-        the URL it failed on ("Max retries exceeded with url:
-        /remote-control/vehicle/telematics/<VIN>"), and both redaction passes
-        match key names, so a VIN sitting inside a sentence would travel intact
-        into a shared diagnostics report.
-
-        Deliberately not applied to `request_position_refresh`: it is fired by
-        the poller rather than by anyone, and it would push every real command
-        out of a 25-entry trail within an hour.
-        """
-        trail = getattr(self, "command_trail", None)
-        if trail is None:
-            # Lazily built: instances are also created through __new__ (tests,
-            # and any future path that skips the constructor), and a missing
-            # attribute must not turn a working command into an exception.
-            trail = self.command_trail = collections.deque(
-                maxlen=self.COMMAND_TRAIL_SIZE)
-        note: dict[str, Any] = {
-            "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "command": label,
-            "detail": redact(detail),
-        }
-        started = time.monotonic()
-        try:
-            resp = send()
-        except GeelyControlError as e:
-            note.update(outcome="rejected", code=str(e.code),
-                        message=self._note_text(e.message))
-            raise
-        except GeelyAuthError as e:
-            note.update(outcome="session-expired", message=self._note_text(e))
-            raise
-        except Exception as e:
-            note.update(outcome="error",
-                        message=self._note_text(f"{type(e).__name__}: {e}"))
-            raise
-        else:
-            note.update(outcome="accepted", code=str(resp.get("code")))
-            return resp
-        finally:
-            note["ms"] = int((time.monotonic() - started) * 1000)
-            trail.append(note)
 
     def control(self, service_id: str, parameters: list[dict] | None = None,
                 command: str = "start", duration: int = 0, *,
