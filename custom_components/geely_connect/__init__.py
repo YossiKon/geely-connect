@@ -579,6 +579,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             elif derived == "":
                 _x_vin_repair(hass, entry, missing=True)
     else:
+        # The x-vin Repairs issue is about the new platform, but it is keyed
+        # on the entry, and an entry reconfigured back to this backend keeps
+        # its id. Left alone, the issue raised while it was a Geely EM entry
+        # stays up and asks its owner to paste a token this backend never
+        # reads (#84).
+        _x_vin_repair(hass, entry, missing=False)
         # An entry that visited the new platform and came back has no legacy
         # credentials: going there drops them (they are dead on a migrated
         # account), and the return trip restored only the session token. The

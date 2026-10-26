@@ -497,9 +497,10 @@ def _entry(poll_mode="normal", **data_extra):
         add_update_listener=lambda fn: (lambda: None))
 
 
-def _setup(m, hass=None, entry=None, api_tweak=None, poll_mode="normal"):
+def _setup(m, hass=None, entry=None, api_tweak=None, poll_mode="normal", ir=None):
     hass = hass or _Hass()
     entry = entry or _entry(poll_mode=poll_mode)
+    ir = ir if ir is not None else _ir_module()
     made = {}
 
     def _api_factory(**kw):
@@ -517,7 +518,7 @@ def _setup(m, hass=None, entry=None, api_tweak=None, poll_mode="normal"):
     fast = types.SimpleNamespace(sleep=_instant_sleep,
                                  CancelledError=asyncio.CancelledError)
     with _Patched(m, GeelyApi=_api_factory, DataUpdateCoordinator=_FakeCoordinator,
-                  er=_er_module(_EntityRegistry([])),
+                  er=_er_module(_EntityRegistry([])), ir=ir,
                   dr=types.SimpleNamespace(
                       async_get=lambda h: types.SimpleNamespace(
                           async_get_device=lambda identifiers: None)),
@@ -678,6 +679,33 @@ def test_an_entry_back_from_the_new_platform_asks_for_reauth_not_a_keyerror():
                 f"a missing {missing} still raises KeyError from setup")
         else:
             raise AssertionError(f"a missing {missing} set up anyway")
+
+
+def test_a_legacy_entry_clears_the_new_platforms_token_issue():
+    """An entry reconfigured back from Geely EM keeps its entry id, and the
+    x-vin Repairs issue it raised there is keyed on that id. Setting up on
+    this backend clears it - also when the entry still has to re-authenticate
+    first - or its owner is told to paste a token the old login never reads
+    (#84)."""
+    m = _mod()
+    from homeassistant.exceptions import ConfigEntryAuthFailed
+
+    ir = _ir_module()
+    ok, *_ = _setup(m, ir=ir)
+    assert ok is True
+    assert ir.deleted == [("geely_connect", "x_vin_missing_e1")], ir.deleted
+    assert ir.created == [], ir.created
+
+    ir = _ir_module()
+    entry = _entry()
+    del entry.data["device_id"]
+    try:
+        _setup(m, entry=entry, ir=ir)
+    except ConfigEntryAuthFailed:
+        pass
+    else:
+        raise AssertionError("an entry without its device id set up anyway")
+    assert ir.deleted == [("geely_connect", "x_vin_missing_e1")], ir.deleted
 
 
 def test_an_expired_session_starts_reauth_not_a_retry_loop():
@@ -861,7 +889,7 @@ def test_a_coordinator_that_rejects_its_interval_does_not_kill_the_poll():
     fast = types.SimpleNamespace(sleep=_instant_sleep,
                                  CancelledError=asyncio.CancelledError)
     with _Patched(m, GeelyApi=_api_factory, DataUpdateCoordinator=_Touchy,
-                  er=_er_module(_EntityRegistry([])),
+                  er=_er_module(_EntityRegistry([])), ir=_ir_module(),
                   dr=types.SimpleNamespace(
                       async_get=lambda h: types.SimpleNamespace(
                           async_get_device=lambda identifiers: None)),
