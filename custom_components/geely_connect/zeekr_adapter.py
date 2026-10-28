@@ -449,13 +449,29 @@ class ZeekrAdapter:
              "setting": {"serviceParameters": [{"key": "pai", "value": "1"}]}}
 
         The gateway ACKs immediately; the fresh fix lands in the status payload
-        a few seconds later, which the next poll reads. On a vehicle without an
-        x-vin token this stays a no-op, exactly as before.
+        a few seconds later, which the next poll reads.
+
+        A car without an x-vin token is woken on the old route, with the body
+        the iOS app (ZUOverseaSEAApp 1.3.2) was captured sending for an
+        Australian EX5 whose account signs in on the new app but whose car the
+        new gateway does not list (2026-10-28, code 1000, operationResult 1):
+        `latest: false`, `pai=1` alone and no operationScheduling. That car
+        used to get no wake at all, so its map only moved when the phone app
+        happened to ask.
         """
         if self._client.enc_vin:
             return self._authed(self._client.control_new_resp, "PAI", "start",
                                 [{"key": "pai", "value": "1"}])
-        return {}
+        body = {
+            "command": "start",
+            "creator": "tc",
+            "latest": False,
+            "serviceId": "PAI",
+            "serviceParameters": [{"key": "pai", "value": "1"}],
+            "timestamp": str(int(time.time() * 1000)),
+            "userId": str(self.user_id),
+        }
+        return self._authed(self._client.control_resp, self.vin, body)
 
     # The two secondary endpoints below are not mapped on this platform, on
     # either route. Said here as well as by raising, so the platforms leave

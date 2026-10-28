@@ -81,10 +81,7 @@ def test_constructor_and_basic_surface():
 
     st = a.vehicle_status()
     assert st["data"]["vehicleStatus"]["basicVehicleStatus"]["powerLevel"] == 98, st
-    # Position wake is a no-op on the new platform until the PAI control write
-    # is live-verified - the coordinator fires it automatically, and an unproven
-    # auto-write to the car is deliberately withheld.
-    assert a.request_position_refresh() == {}
+    assert a.request_position_refresh()["code"] == "1000"
     ctl = a.control("AC", [{"key": "ac", "value": "1"}])
     assert ctl["data"]["result"]["code"] == 1000, ctl
     assert a.fetch_capabilities() == [
@@ -534,14 +531,26 @@ def test_position_refresh_sends_the_pai_wake_on_the_new_platform():
     assert sent == [("PAI", "start", [{"key": "pai", "value": "1"}])], sent
 
 
-def test_position_refresh_is_a_no_op_without_a_token():
-    """A vehicle with no x-vin token is on the old platform (or unconfigured);
-    the legacy client owns its PAI, so this side must not reach the car."""
+def test_position_refresh_without_a_token_sends_the_captured_old_route_wake():
+    """A car the new gateway does not list is read on the old route, and the
+    iOS app wakes it there: PUT telematics/<vin> with latest=false, pai=1 alone
+    and no operationScheduling (captured 2026-10-28). Nothing goes out on the
+    new route without a token."""
     a, c = _make_adapter()   # enc_vin defaults to ""
-    called = []
+    called, sent = [], []
     c.control_new_resp = lambda *a_, **k: called.append(1) or {}
-    assert a.request_position_refresh() == {}
+    c.control_resp = lambda vin, body: (
+        sent.append((vin, body)) or {"code": "1000", "data": {}})
+    assert a.request_position_refresh()["code"] == "1000"
     assert called == [], "must not send a new-platform command without a token"
+    assert len(sent) == 1, sent
+    vin, body = sent[0]
+    assert vin == FAKE_VIN
+    assert body["serviceId"] == "PAI" and body["command"] == "start"
+    assert body["creator"] == "tc" and body["latest"] is False
+    assert body["serviceParameters"] == [{"key": "pai", "value": "1"}]
+    assert body["userId"] == "mock-uid"
+    assert "operationScheduling" not in body
 
 
 def test_rapid_warm_and_cool_build_the_captured_setsmarttemp_body():
