@@ -308,6 +308,11 @@ def test_a_wrong_region_account_gets_the_explanation_not_a_dump():
                 _provision(api, info=info, file=file, tmpdir=d)
             except api.GeelyRegionError as e:
                 assert "regional backend" in str(e), stage
+                # The server that refused, not a list of other backends: APAC
+                # and NA are signed for now, and a UAE car was told it must be
+                # on one of them (#105).
+                assert "(api.ecloudeu.com)" in str(e), (stage, str(e))
+                assert "North America" not in str(e), (stage, str(e))
             else:
                 raise AssertionError(f"{stage}: region mismatch not raised")
 

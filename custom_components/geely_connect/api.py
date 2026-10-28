@@ -45,14 +45,14 @@ class GeelyAuthError(Exception):
 
 
 class GeelyRegionError(Exception):
-    """Raised when the account is not served by the EU/International cloud.
+    """Raised when a cert server refuses the account as another region's.
 
     Geely runs separate backends per region (EU, APAC, NA, SA), each with its
     own app credentials, and the region is a property of the account rather
     than of the country picked at setup. An account registered elsewhere gets
-    code 1501 'geelyos verify error' from the EU cert endpoint - the login and
-    the OTP succeed first, which is what makes it look like a bug rather than
-    an unsupported region."""
+    code 1501 'geelyos verify error' from the cert endpoint it was signed
+    against - the login and the OTP succeed first, which is what makes it look
+    like a bug rather than an unsupported region."""
 
 
 class GeelyCaptchaUnreachableError(Exception):
@@ -1465,6 +1465,22 @@ def _sign_request_for_api_ecloudeu(app_id: str, app_secret: str,
     }
 
 
+def _region_refusal(cert_host: str, j: dict) -> GeelyRegionError:
+    """A region-mismatch code, said in words. It names the server that refused
+    and no particular other backend: APAC and North America are signed for
+    now, so an account refused here is on one there are no credentials for,
+    or on one its vehicle record did not lead to (a UAE car's record names
+    only its market, AE, which no backend here matches, so it was signed
+    for EU, #105)."""
+    return GeelyRegionError(
+        f"Geely's cert server ({cert_host}) rejected this account "
+        f"(code {j.get('code')}: {j.get('hint') or j.get('message')}). "
+        "The car is registered with another regional backend: one this "
+        "integration has no app credentials for, or one the vehicle record "
+        "did not name."
+    )
+
+
 def provision_user_cert(*, app_id: str, app_secret: str, user_id: str,
                          cidpsso_token: str, cert_out_path: str,
                          key_out_path: str,
@@ -1506,13 +1522,7 @@ def provision_user_cert(*, app_id: str, app_secret: str, user_id: str,
     j = json.loads(resp_bytes)
     if j.get("code") != 1000:
         if str(j.get("code")) in _REGION_MISMATCH_CODES:
-            raise GeelyRegionError(
-                "Geely's EU cert server rejected this account "
-                f"(code {j.get('code')}: {j.get('hint') or j.get('message')}). "
-                "The account is registered with another regional backend "
-                "(APAC, North America or South America), which needs its own "
-                "app credentials this integration does not have."
-            )
+            raise _region_refusal(cert_host, j)
         raise RuntimeError(f"cert/info failed: {redact(j)}")
     check_code = j["data"]["checkCode"]
 
@@ -1570,13 +1580,7 @@ def provision_user_cert(*, app_id: str, app_secret: str, user_id: str,
         # token that belongs to another region's GeelyOS. Everything before this
         # point succeeds, so say what it means instead of dumping the response.
         if str(j.get("code")) in _REGION_MISMATCH_CODES:
-            raise GeelyRegionError(
-                "Geely's EU cert server rejected this account "
-                f"(code {j.get('code')}: {j.get('hint') or j.get('message')}). "
-                "The account is registered with another regional backend "
-                "(APAC, North America or South America), which needs its own "
-                "app credentials this integration does not have."
-            )
+            raise _region_refusal(cert_host, j)
         raise RuntimeError(f"cert/file failed: {redact(j)}")
     cert_pem = j["data"]["cert"]
 
