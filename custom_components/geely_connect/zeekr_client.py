@@ -147,8 +147,13 @@ _SESSION_DEAD_HINTS = ("079021", "logged in elsewhere", "401", "403", "token",
                        "unauthor", "expired", "not logged in")
 # `079001` ("[SDK]此接口未被授权") comes as HTTP 401 too, but it is not the
 # session's answer: the same token drew it on one start and 079021 on another
-# (#63), and #53 saw it on a live session. What exactly it refuses is not known.
-_NOT_SESSION_HINTS = ("079001",)
+# (#63), and #53 saw it on a live session. It reads as a refusal of the CAR,
+# not of the token: in one probe a wrong key drew 079025 and the other build
+# 079001, so that build's token got past the decrypt check (#63, #84). On the
+# cars seen so far the app itself addresses such a car by its plain VIN on the
+# old route (#106's capture), so there is no token to capture for it. A reading
+# from three cars, not a documented meaning.
+_CAR_REFUSED_HINTS = ("079001",)
 
 
 def _x_vin_rejected(exc: Exception) -> bool:
@@ -156,11 +161,15 @@ def _x_vin_rejected(exc: Exception) -> bool:
     return any(h in low for h in _X_VIN_REJECTED_HINTS)
 
 
+def _car_refused(exc: Exception) -> bool:
+    return any(h in str(exc) for h in _CAR_REFUSED_HINTS)
+
+
 def _session_dead(exc: Exception) -> bool:
     if isinstance(exc, ZeekrAuthError):
         return True
     low = str(exc).lower()
-    if _x_vin_rejected(exc) or any(h in low for h in _NOT_SESSION_HINTS):
+    if _x_vin_rejected(exc) or _car_refused(exc):
         return False
     return any(h in low for h in _SESSION_DEAD_HINTS)
 
@@ -715,6 +724,9 @@ class ZeekrClient:
         # Opaque per-vehicle token the new gateway wants in `x-vin`; see
         # CONF_ZEEKR_ENC_VIN. Empty = new-platform vehicle calls unused.
         self.enc_vin: str = ""
+        # The last probe's verdict when it found no token: True when the
+        # gateway turned the car away (079001) rather than the token.
+        self.car_refused: bool = False
 
     @property
     def profile(self) -> ZeekrRegion | None:
@@ -1020,15 +1032,19 @@ class ZeekrClient:
         disturbs a value already in use.
 
         Every candidate's outcome is logged at debug and, when none matches,
-        summarised at warning - an owner on an app build nobody has captured
-        (#84, iOS) otherwise saw nothing at all: the flow swallowed each
-        rejection and stored an empty token in silence. Two failures are told
-        apart: a `079025` is the gateway's verdict on the KEY, so the probe
-        answers "" and the caller can say so; a candidate that met a dead
-        session was never judged at all, so when any did the probe raises
-        instead, and the adapter's renewal gets its turn. Neither log line
+        summarised - an owner on an app build nobody has captured (#84, iOS)
+        otherwise saw nothing at all: the flow swallowed each rejection and
+        stored an empty token in silence. Three failures are told apart: a
+        `079025` is the gateway's verdict on the KEY, so the probe answers ""
+        and warns, and the caller can say so; a `079001` turns the CAR away
+        once a key got past the decrypt check, so it answers "" as well but
+        sets `car_refused` and says so at info, since on the cars seen so far
+        there is no token to paste for such a car (#106); and a candidate that
+        met a dead session was never judged at all, so when any did the probe
+        raises instead, and the adapter's renewal gets its turn. No log line
         carries the VIN or a candidate value.
         """
+        self.car_refused = False
         if not self.access_token or not vin:
             return ""
         saved = self.enc_vin
@@ -1062,6 +1078,20 @@ class ZeekrClient:
             dead = [e for e in failures if _session_dead(e)]
             if dead:
                 raise dead[-1]
+            if any(_car_refused(e) for e in failures):
+                # Nothing for the owner to do, so no warning: the entry already
+                # reads and commands the car the old way, as the app does.
+                self.car_refused = True
+                _LOGGER.info(
+                    "x-vin auto-derivation: the new gateway turned this vehicle "
+                    "away (%s). That reads as a refusal of the car (079001), not "
+                    "of the token (079025): on the cars seen so far the app "
+                    "itself reads and commands such a car without a token, the "
+                    "old way, as this entry does, so there is no token to paste. "
+                    "Rapid warming and cooling stay off; the derivation is "
+                    "retried at every start",
+                    "; ".join(outcomes))
+                return ""
             _LOGGER.warning(
                 "x-vin auto-derivation: none of the %d known app builds matched "
                 "this vehicle (%s). Paste the token from your app under "

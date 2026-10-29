@@ -242,6 +242,7 @@ def test_a_stale_session_at_start_no_longer_hides_a_working_build():
         assert a.probe_x_vin(FAKE_VIN) == right
         assert c.access_token == "mock-at-new"
         assert c.enc_vin == "", "the probe only adopts through adopt_enc_vin"
+        assert a.car_refused is False
 
         # sabbrowne's car: once the session is live, the same token draws
         # 079001. That is a verdict, not the session, so "" comes back after
@@ -257,6 +258,16 @@ def test_a_stale_session_at_start_no_longer_hides_a_working_build():
         c.login_tsp = lambda tv: (renewals.append(tv), login_tsp(tv))
         assert a.probe_x_vin(FAKE_VIN) == ""
         assert renewals == ["mock-tv"]
+        # The verdict reaches setup through the adapter, and rapid climate
+        # says why it cannot run instead of leaving its owner to look for a
+        # token: on the cars seen so far there is none for such a car (#106).
+        assert a.car_refused is True
+        try:
+            a.rapid_climate(ac=True, temp="22.0")
+        except NotImplementedError as e:
+            assert "079001" in str(e) and "not mapped" in str(e), e
+        else:
+            raise AssertionError("rapid climate ran without a token")
     finally:
         _restore_idaas()
 

@@ -577,7 +577,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                              "vehicle at setup; stored in the entry")
                 _x_vin_repair(hass, entry, missing=False)
             elif derived == "":
-                _x_vin_repair(hass, entry, missing=True)
+                # A car the new gateway turns away (079001) has, on the cars
+                # seen so far, no token to paste: the app reads it by its plain
+                # VIN (#106). The issue would ask for one, and an earlier
+                # release raised it for exactly these cars, so it comes down.
+                _x_vin_repair(hass, entry, missing=not api.car_refused)
     else:
         # The x-vin Repairs issue is about the new platform, but it is keyed
         # on the entry, and an entry reconfigured back to this backend keeps

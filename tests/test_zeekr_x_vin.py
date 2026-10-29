@@ -128,6 +128,7 @@ def test_probe_logs_each_candidate_and_warns_when_none_matches():
     client = _client_with("something-no-build-produces")
     got, records = _capture(lambda: client.probe_x_vin(FAKE_VIN))
     assert got == ""
+    assert client.car_refused is False, "every key refused is not the car refused"
     debug = [r.getMessage() for r in records if r.levelno == logging.DEBUG]
     assert len(debug) == len(zc._X_VIN_MATERIAL), debug
     for note_line, (_k, _iv, note) in zip(debug, zc._X_VIN_MATERIAL):
@@ -200,14 +201,52 @@ def test_a_candidate_that_met_a_dead_session_was_never_judged():
         raise AssertionError("a build that met a dead session read as rejected")
     assert client.enc_vin == "keep-me"
     # Both judged - one refused outright, one decrypted and then refused (#63
-    # on a live session) - is a real "no build matched": "" and the warning.
+    # on a live session) - is a verdict, not a raise: "" with the car marked
+    # as turned away (the next test has what that changes).
     answers = iter([_REJECTED, _REFUSED])
-    got, records = _capture(lambda: client.probe_x_vin(FAKE_VIN))
-    assert got == ""
-    assert [r for r in records if r.levelno == logging.WARNING], records
+    assert client.probe_x_vin(FAKE_VIN) == ""
+    assert client.car_refused is True
     # And an empty catalogue is a verdict as well.
     client.capabilities_new = lambda: []
     assert client.probe_x_vin(FAKE_VIN) == ""
+    assert client.car_refused is False
+
+
+def test_a_car_the_gateway_turns_away_is_told_no_token_to_paste():
+    """#63, #84 and #106: one build drew 079025, the other got past the decrypt
+    check and drew 079001 - the gateway turning the CAR away. On the cars seen
+    so far the app reads such a car by its plain VIN on the old route, so the
+    warning's "paste the token from your app" sent owners after something that
+    is not there. The probe says what happened at info instead, with no
+    warning, and marks the verdict, which keeps setup from raising Repairs."""
+    client = zc.ZeekrClient(email="a@b.c", password="")
+    client.access_token = "tok"
+    answers = iter([_REJECTED, _REFUSED])
+
+    def caps():
+        raise zc.ZeekrApiError(next(answers))
+
+    client.capabilities_new = caps
+    got, records = _capture(lambda: client.probe_x_vin(FAKE_VIN))
+    assert got == "" and client.car_refused is True
+    assert not [r for r in records if r.levelno >= logging.WARNING], records
+    info = [r.getMessage() for r in records if r.levelno == logging.INFO]
+    assert len(info) == 1, info
+    assert "079001" in info[0] and "retried" in info[0], info[0]
+    assert "Configure" not in info[0] and "Vehicle token" not in info[0], info[0]
+    assert FAKE_VIN not in info[0]
+    for key, iv, _n in zc._X_VIN_MATERIAL:
+        assert zc.derive_x_vin(FAKE_VIN, key, iv) not in info[0]
+    # The mark is the last probe's verdict, not a latch: one that met only
+    # wrong keys takes it off, and so does one with no session to ask on.
+    def wrong_key():
+        raise zc.ZeekrApiError(_REJECTED)
+
+    client.capabilities_new = wrong_key
+    assert client.probe_x_vin(FAKE_VIN) == "" and client.car_refused is False
+    client.car_refused = True
+    client.access_token = None
+    assert client.probe_x_vin(FAKE_VIN) == "" and client.car_refused is False
 
 
 def test_the_two_verdict_predicates():

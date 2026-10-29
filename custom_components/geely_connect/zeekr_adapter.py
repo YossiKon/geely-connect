@@ -425,6 +425,13 @@ class ZeekrAdapter(CommandTrail):
         """Take a token derived at setup into use for this session."""
         self._client.enc_vin = value or ""
 
+    @property
+    def car_refused(self) -> bool:
+        """Whether the last probe found the car turned away (079001) rather
+        than the token. On the cars seen so far there is no token to paste
+        for such a car: the app reads it by its plain VIN (#106)."""
+        return self._client.car_refused
+
     def probe_x_vin(self, vin: str) -> str:
         """Derive and gateway-verify the x-vin from the plain VIN, "" when no
         known app build matches. Runs through the renewal wrapper so a dead
@@ -529,6 +536,12 @@ class ZeekrAdapter(CommandTrail):
         cabin itself is driven by ac + temp either way.
         """
         if not self._client.enc_vin:
+            if self._client.car_refused:
+                # Said so, or its owner goes looking for a token to paste.
+                raise NotImplementedError(
+                    "rapid climate needs the new-platform x-vin, and the new "
+                    "gateway turns this car away (079001); the way the app "
+                    "sends it to such a car is not mapped yet")
             raise NotImplementedError(
                 "rapid climate needs the new-platform x-vin")
         setting = {

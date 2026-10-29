@@ -205,7 +205,7 @@ def test_europe_probe_takes_079001_as_a_verdict_not_a_dead_session():
     bare "401" among the session hints made that "every candidate met a dead
     session": a renewal at every start (signing the phone app out), then a skip
     at debug with no warning and no Repairs issue. 079001 is not the session's
-    answer (#63, #53), so it is a plain "no match" now."""
+    answer (#63, #53), so it is a verdict now: the car turned away (#106)."""
     client = zc.ZeekrClient("", "", access_token="fake-access", profile=FAKE_PROFILE)
     client.country_code = "ES"
 
@@ -215,6 +215,7 @@ def test_europe_probe_takes_079001_as_a_verdict_not_a_dead_session():
 
     with patch.object(client, "capabilities_new", refused):
         assert client.probe_x_vin(FAKE_VIN) == ""
+    assert client.car_refused is True
 
 
 def test_explicit_profile_selects_servers_independently_of_country():
