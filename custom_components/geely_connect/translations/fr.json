@@ -92,7 +92,7 @@
   "issues": {
     "x_vin_missing": {
       "title": "{name} : impossible de dériver le jeton du véhicule pour la nouvelle plateforme",
-      "description": "Cette entrée utilise la nouvelle plateforme Geely EM, et aucune version de l'application connue de cette intégration n'a produit de jeton du véhicule (le x-vin) que la passerelle accepte pour cette voiture. Tant qu'il n'en a pas, le chauffage et le refroidissement rapides et la lecture d'état par la nouvelle passerelle restent désactivés.\n\nOuvrez **Configurer** sur l'entrée Geely Connect et collez le jeton de votre téléphone dans **Jeton du véhicule pour la nouvelle plateforme (x-vin)**. La dérivation est retentée à chaque démarrage, donc une version qui ajoute votre version de l'application fera disparaître ce problème d'elle-même."
+      "description": "Cette entrée utilise la nouvelle plateforme Geely EM, et aucune version de l'application connue de cette intégration n'a produit de jeton du véhicule (le x-vin) que la passerelle accepte pour cette voiture. Tant qu'il n'en a pas, la lecture d'état par la nouvelle passerelle reste désactivée.\n\nOuvrez **Configurer** sur l'entrée Geely Connect et collez le jeton de votre téléphone dans **Jeton du véhicule pour la nouvelle plateforme (x-vin)**. La dérivation est retentée à chaque démarrage, donc une version qui ajoute votre version de l'application fera disparaître ce problème d'elle-même."
     }
   }
 }
