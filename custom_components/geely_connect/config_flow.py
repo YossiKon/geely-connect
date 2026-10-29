@@ -426,7 +426,8 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
             }),
         )
-        region = resolve_vehicle_region(vehicle) or DEFAULT_REGION
+        detected = resolve_vehicle_region(vehicle)
+        region = detected or DEFAULT_REGION
         if region in UNSUPPORTED_REGIONS:
             _LOGGER.error(
                 "vehicle %s is registered in the %s region (%s), for which no "
@@ -453,7 +454,15 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
             )
         except geely_api.GeelyRegionError as e:
-            _LOGGER.error("cert provisioning refused: %s", e)
+            # The abort says this line names the region that was detected; the
+            # error names only the server that refused, and a record that
+            # gives only its market (AE, #105) falls back to another region's
+            # backend. A record with no region at all is said as such, not
+            # as the default it fell back to.
+            _LOGGER.error(
+                "cert provisioning refused for a vehicle %s: %s",
+                f"detected as region {detected}" if detected
+                else f"whose record names no region (tried {region})", e)
             raise _LegacyProvisionError("wrong_region") from e
         except Exception as e:
             _LOGGER.exception("cert provisioning failed")
