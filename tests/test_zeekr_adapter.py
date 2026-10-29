@@ -452,6 +452,12 @@ def test_the_capability_catalogue_is_fetched_and_translated():
     params = {p["nameKey"]: p["config"] for p in climate[0]["paramsJson"]}
     assert params["dpt_heat_loc"] == "front-left"
     assert params["steel_wheel_heating"] == "true"
+    # The gateway's own rows are kept beside the translation, for the
+    # diagnostics download: the codes the translation drops are the ones a
+    # report about an unmapped feature has to show (#63).
+    assert [r["functionCode"] for r in a.new_catalogue_rows] == [
+        "remote_climate_control", "C_PAA_5_1", "C_PAA_6"]
+    assert a.new_catalogue_rows[0] is not c.capabilities_new()[0], "a copy, not the response"
 
 
 def test_a_catalogue_that_cannot_be_fetched_keeps_every_entity():
@@ -492,6 +498,7 @@ def test_an_entry_without_a_token_reads_the_old_platform_catalogue():
     got = a.fetch_capabilities()
     assert asked == [FAKE_VIN], asked
     assert got == rows[:2], "the rows must pass untranslated, minus the unnamed one"
+    assert a.new_catalogue_rows == [], "nothing came from the new gateway"
 
 
 def test_an_old_platform_catalogue_that_cannot_be_read_keeps_every_entity():

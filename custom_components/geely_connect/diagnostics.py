@@ -44,6 +44,10 @@ _REDACT = {
     # single point that has to be right. `zeekr_hf_expiry` is a timestamp and
     # stays visible on purpose.
     "zeekr_access_token", "zeekr_refresh_token", "zeekr_hf_token", "zeekr_password",
+    # The old platform's session exchange also returns a refresh token (#101).
+    # Nothing stores it yet; a build that does, under either spelling, must
+    # not find this list a step behind redact()'s normalised match.
+    "refresh_token", "refreshToken",
     # The new platform's per-vehicle x-vin token - a capability secret that
     # addresses and controls the car. redact() (the first pass) already masks
     # it by normalised name; this is the belt to that pass's braces.
@@ -133,6 +137,11 @@ async def async_get_config_entry_diagnostics(
         # positions by name?" - the questions that decide whether a missing
         # control is missing from the car or only from this integration.
         "capabilities_raw": _clean(bundle.get("capabilities_raw") or []),
+        # The new gateway's catalogue before translation, on a Geely EM entry
+        # read through its token; [] everywhere else. The translation keeps
+        # only the codes it has a rule for, and the question #63 asks is
+        # precisely which codes a car with vented seats or a sunroof carries.
+        "capabilities_new_raw": _clean(bundle.get("capabilities_new_raw") or []),
         "status": _clean((coordinator.data if coordinator else {}) or {}),
         # The charge-server schedule slots, which nothing polls - see
         # _CHARGE_SERVER_SLOTS for the two open questions this answers.

@@ -313,6 +313,12 @@ class ZeekrAdapter(CommandTrail):
                  profile: ZeekrRegion | None = None) -> None:
         self.vin = vin
         self.user_id = user_id
+        # The new gateway's catalogue rows as it sent them, from the last
+        # fetch on the token route (#63). The translated list that reaches
+        # the bundle drops every code this file has no rule for, which is
+        # exactly what a diagnostics report must show for a feature not yet
+        # mapped - the seat-vent, sunroof and sunshade codes among them.
+        self.new_catalogue_rows: list[dict] = []
         self._email = email
         self._password = password
         self._country_code = country_code
@@ -679,6 +685,7 @@ class ZeekrAdapter(CommandTrail):
         except (ZeekrAuthError, ZeekrApiError, GeelyAuthError) as err:
             _LOGGER.debug("new-platform capability fetch failed: %s", err)
             return []
+        self.new_catalogue_rows = [dict(r) for r in rows or []]
         entries = translate_capabilities(rows or [])
         _LOGGER.debug("new-platform capabilities: %d row(s) -> %d entry/entries",
                       len(rows or []), len(entries))

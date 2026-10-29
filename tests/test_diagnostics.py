@@ -68,6 +68,11 @@ def _report():
                 {"functionId": "remote_climate_control_2", "vin": FAKE_VIN,
                  "valueEnable": True, "valueRange": "15.5|28.5",
                  "paramsJson": '{"dpt_vent_loc":"front-left,front-right"}'},
+            ],
+            "capabilities_new_raw": [
+                {"functionCategory": "remote_control", "functionCode": "C_PAA_5_1",
+                 "functionName": "座椅加热-主驾", "paramValueUse": "Y",
+                 "vin": FAKE_VIN},
             ]}}}
 
     return asyncio.run(diag.async_get_config_entry_diagnostics(Hass(), Entry()))
@@ -170,7 +175,8 @@ def test_the_report_is_still_worth_reading():
     r = _report()
     assert set(r) == {"entry_data", "options", "vehicle_token", "polling",
                       "recent_commands", "logging", "capabilities",
-                      "capabilities_raw", "status", "charge_server", "cards"}
+                      "capabilities_raw", "capabilities_new_raw", "status",
+                      "charge_server", "cards"}
     assert r["options"]["pressure_unit"] == "psi"
     assert r["status"]["_state"]["parkComfortState"] == "1"
 
@@ -428,6 +434,32 @@ def test_a_hanging_endpoint_does_not_cost_the_whole_report():
         diag._SWEEP_TIMEOUT_S = original
     assert out["1"]["data"]["ok"] is True, "the slot read before the stall was lost"
     assert "cut short" in out["truncated"]
+
+
+def test_the_new_gateway_catalogue_reaches_the_report_untranslated():
+    """A token-served Geely EM car's `capabilities_raw` is the translated list,
+    which drops every code the translation has no rule for - and the codes a
+    car with vented seats or a sunroof carries are the ones #63 waits for. The
+    gateway's own rows go in beside it, through both redaction passes."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    rows = _report()["capabilities_new_raw"]
+    assert rows[0]["functionCode"] == "C_PAA_5_1"
+    assert rows[0]["functionName"] == "座椅加热-主驾"
+    assert rows[0]["vin"] != FAKE_VIN and FAKE_VIN not in str(rows)
+
+
+def test_the_old_platform_refresh_token_is_on_the_literal_list_too():
+    """The old platform's session exchange returns a refresh token (#101), and
+    a build that stores it may spell the key either way. redact() masks both by
+    normalised name; the literal list is the belt to those braces, and it had
+    only the new platform's spelling."""
+    import io, os
+    from conftest import PKG
+    src = io.open(os.path.join(PKG, "diagnostics.py"), encoding="utf-8").read()
+    diag = load("diagnostics")
+    assert {"refresh_token", "refreshToken", "zeekr_refresh_token"} <= diag._REDACT
+    assert '"refresh_token", "refreshToken",' in src
 
 
 def test_the_two_redaction_lists_have_not_drifted_apart():

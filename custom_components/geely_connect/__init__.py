@@ -1003,6 +1003,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # question about an unmapped feature can be answered from a file the
         # owner downloads, instead of asking them to capture app traffic.
         "capabilities_raw": raw_catalog,
+        # On a Geely EM entry with a token, `capabilities_raw` is already the
+        # translated list, so the codes the translation has no rule for are
+        # gone from it; the gateway's own rows go to diagnostics as well, or
+        # the first download from a car with vented seats or a sunroof on
+        # that route cannot name the codes #63 waits for.
+        "capabilities_new_raw": list(getattr(api, "new_catalogue_rows", None) or []),
         "propulsion":    verdict,
         # The platform series code (E245 = EX5, P145 = Starray / EX5 EM-i).
         # Nothing reads it today: it was added for a per-series temperature
