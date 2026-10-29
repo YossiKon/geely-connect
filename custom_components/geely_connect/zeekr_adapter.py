@@ -66,11 +66,12 @@ def _refusal_code(err: ZeekrApiError) -> str:
 
     The client words a refusal inside a 200 as `code=<code> message=<text>`,
     and the command trail records the code: a fixed 8500 would read the same
-    for every refusal. Anything else - an HTTP status, a dropped connection -
-    has no code of its own and keeps the 8500 this mapping has always given it.
+    for every refusal. Anything else - an HTTP status, a dropped connection,
+    a refusal that came with no code at all (worded `code=None`) - has no
+    code of its own and keeps the 8500 this mapping has always given it.
     """
     m = _CODE_IN_TEXT.match(str(err))
-    return m.group(1) if m else "8500"
+    return m.group(1) if m and m.group(1) != "None" else "8500"
 
 
 # Capability codes on the new platform, mapped to the old catalogue's
@@ -564,7 +565,13 @@ class ZeekrAdapter(CommandTrail):
             setting["ventilation"] = []
 
         def send() -> dict:
-            resp = self._authed(self._client.set_smart_temp_new, setting)
+            try:
+                resp = self._authed(self._client.set_smart_temp_new, setting)
+            except ZeekrApiError as e:
+                # A refusal, as on the control route: the trail keeps its
+                # code, and the climate entity shows it as one rather than
+                # logging a traceback for a car that was busy.
+                raise GeelyControlError(_refusal_code(e), str(e)) from e
             if isinstance(resp, dict) and str(resp.get("code")) in ("000000", "0"):
                 resp = {**resp, "code": 1000}
             return resp
