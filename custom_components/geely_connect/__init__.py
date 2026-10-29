@@ -577,22 +577,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                              "vehicle at setup; stored in the entry")
                 _x_vin_repair(hass, entry, missing=False)
             elif derived == "":
-                # No build matched - which is no missing key at all when the
-                # new gateway does not list the car: it is served by plain VIN
-                # on the old route, and a token pasted for it fails every read.
-                listed = True
-                try:
-                    listed = await hass.async_add_executor_job(
-                        api.new_gateway_lists_vehicle)
-                except Exception as e:  # noqa: BLE001 - keep the issue on doubt
-                    _LOGGER.debug("new-gateway vehicle list failed: %s", e)
-                if listed:
-                    _x_vin_repair(hass, entry, missing=True)
-                else:
-                    _LOGGER.debug("the new gateway does not list this vehicle; "
-                                  "it stays on the old route and needs no x-vin")
-                    _x_vin_repair(hass, entry, missing=False)
+                # A car the new gateway turns away (079001) has, on the cars
+                # seen so far, no token to paste: the app reads it by its plain
+                # VIN (#106). The issue would ask for one, and an earlier
+                # release raised it for exactly these cars, so it comes down.
+                # So it does for a car the new gateway's garage does not hold:
+                # no key can be missing for it either. A failed garage read
+                # keeps the issue.
+                missing = not api.car_refused
+                if missing:
+                    try:
+                        missing = await hass.async_add_executor_job(
+                            api.new_gateway_lists_vehicle)
+                    except Exception as e:  # noqa: BLE001 - keep it on doubt
+                        _LOGGER.debug("new-gateway vehicle list failed: %s", e)
+                    if not missing:
+                        _LOGGER.debug("the new gateway does not list this "
+                                      "vehicle; it stays on the old route and "
+                                      "needs no x-vin")
+                _x_vin_repair(hass, entry, missing=missing)
     else:
+        # The x-vin Repairs issue is about the new platform, but it is keyed
+        # on the entry, and an entry reconfigured back to this backend keeps
+        # its id. Left alone, the issue raised while it was a Geely EM entry
+        # stays up and asks its owner to paste a token this backend never
+        # reads (#84).
+        _x_vin_repair(hass, entry, missing=False)
         # An entry that visited the new platform and came back has no legacy
         # credentials: going there drops them (they are dead on a migrated
         # account), and the return trip restored only the session token. The

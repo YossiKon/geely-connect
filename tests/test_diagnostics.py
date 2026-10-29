@@ -303,6 +303,23 @@ def test_the_report_says_whether_the_vehicle_token_is_set_but_not_what_it_is():
         "in_entry_data": False, "in_options": False, "in_use": False}
 
 
+def test_a_geely_em_entrys_commands_reach_the_report():
+    """The trail was the old login's client's alone, so on a Geely EM entry
+    this section came back empty whatever had been pressed (#104)."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    ad = load("zeekr_adapter")
+    a = ad.ZeekrAdapter(email=EMAIL, vin=FAKE_VIN, user_id=USER_ID,
+                        access_token=TOKEN, refresh_token=TOKEN, hf_token=TOKEN,
+                        gateway="https://unused.invalid")
+    a._client.control_resp = lambda vin, body: {"code": "1000"}
+    a.control("RCE_2", [{"key": "rce.temp", "value": "22.0"}], "start", 180)
+    trail = _token_report({}, {}, a)["recent_commands"]
+    assert [(n["command"], n["outcome"], n["code"]) for n in trail] == [
+        ("RCE_2 start", "accepted", "1000")]
+    assert trail[0]["detail"] == [{"key": "rce.temp", "value": "22.0"}]
+
+
 def _sweep_report(get):
     """A report from an entry whose client can read charge-server slots."""
     diag = load("diagnostics")

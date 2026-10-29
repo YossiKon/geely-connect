@@ -30,10 +30,11 @@ explicitly unimplemented until the primary path is proven live.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Any
 
-from .api import GeelyAuthError, GeelyControlError
+from .api import CommandTrail, GeelyAuthError, GeelyControlError
 from .zeekr_client import (
     ZeekrApiError, ZeekrAuthError, ZeekrClient, ZeekrIdaas, vehicle_vin,
 )
@@ -56,6 +57,21 @@ _AUTH_HINTS = (
 def _looks_authy(text: str) -> bool:
     low = text.lower()
     return any(h in low for h in _AUTH_HINTS)
+
+
+_CODE_IN_TEXT = re.compile(r"code=(\S+)")
+
+
+def _refusal_code(err: ZeekrApiError) -> str:
+    """The code a refused command came back with.
+
+    The client words a refusal inside a 200 as `code=<code> message=<text>`,
+    and the command trail records the code: a fixed 8500 would read the same
+    for every refusal. Anything else - an HTTP status, a dropped connection -
+    has no code of its own and keeps the 8500 this mapping has always given it.
+    """
+    m = _CODE_IN_TEXT.match(str(err))
+    return m.group(1) if m else "8500"
 
 
 # Capability codes on the new platform, mapped to the old catalogue's
@@ -284,7 +300,7 @@ def _wrap_vehicle_status(data: Any) -> Any:
     return wrapped
 
 
-class ZeekrAdapter:
+class ZeekrAdapter(CommandTrail):
     """GeelyApi-shaped wrapper around ZeekrClient for the new platform."""
 
     def __init__(self, *, email: str, vin: str, user_id: str,
@@ -389,6 +405,16 @@ class ZeekrAdapter:
                     raise
                 raise GeelyAuthError(str(exc2)) from exc2
 
+    def _note_text(self, text: Any) -> str:
+        """The trail's own scrub, after taking the vehicle token out as well:
+        it addresses and controls the car, and the new route sends it on every
+        command."""
+        out = str(text)
+        token = self._client.enc_vin
+        if token and token in out:
+            out = out.replace(token, "***redacted***")
+        return super()._note_text(out)
+
     # ---- x-vin -------------------------------------------------------------
 
     @property
@@ -399,6 +425,13 @@ class ZeekrAdapter:
     def adopt_enc_vin(self, value: str) -> None:
         """Take a token derived at setup into use for this session."""
         self._client.enc_vin = value or ""
+
+    @property
+    def car_refused(self) -> bool:
+        """Whether the last probe found the car turned away (079001) rather
+        than the token. On the cars seen so far there is no token to paste
+        for such a car: the app reads it by its plain VIN (#106)."""
+        return self._client.car_refused
 
     def probe_x_vin(self, vin: str) -> str:
         """Derive and gateway-verify the x-vin from the plain VIN, "" when no
@@ -556,7 +589,12 @@ class ZeekrAdapter:
                 "command": "immediately",
                 "heat": [{"pos": p, "level": level} for p in heat_seats or []],
             }
-            return self._authed(self._client.charge_server_post, self.vin, body)
+            return self._recorded(
+                "rapid_climate",
+                {"temp": temp, "ac": body["ac"], "heat": body["heat"],
+                 "ventilation": body["ventilation"], "sw": body["sw"]},
+                lambda: self._authed(self._client.charge_server_post,
+                                     self.vin, body))
         setting = {
             "ac": "true" if ac else "false",
             "duration": str(duration),
@@ -575,10 +613,18 @@ class ZeekrAdapter:
             # comes from ac + temp. A car with ventilated seats can populate
             # this once captured.
             setting["ventilation"] = []
-        resp = self._authed(self._client.set_smart_temp_new, setting)
-        if isinstance(resp, dict) and str(resp.get("code")) in ("000000", "0"):
-            resp = {**resp, "code": 1000}
-        return resp
+
+        def send() -> dict:
+            resp = self._authed(self._client.set_smart_temp_new, setting)
+            if isinstance(resp, dict) and str(resp.get("code")) in ("000000", "0"):
+                resp = {**resp, "code": 1000}
+            return resp
+
+        return self._recorded(
+            "rapid_climate",
+            {"temp": temp, "ac": setting["ac"], "heat": setting.get("heat"),
+             "ventilation": setting.get("ventilation"), "sw": setting["sw"]},
+            send)
 
     def fetch_capabilities(self) -> list[dict]:
         """The catalogue, in the shape capabilities.py parses.
@@ -625,7 +671,18 @@ class ZeekrAdapter:
         """PUT /remote-control/vehicle/telematics/{vin} with the same body
         the legacy client sends (operationScheduling included, or the
         `latest: true` shape when asked for, as in GeelyApi.control). The new
-        route below has its own body, so the flag does not apply there."""
+        route below has its own body, so the flag does not apply there.
+
+        Each command goes into the command trail, as on GeelyApi: the record
+        of what Geely's server answered, which is all there is to go on when
+        a press it accepted does nothing in the car (#104)."""
+        return self._recorded(
+            f"{service_id} {command}", parameters or [],
+            lambda: self._send_control(service_id, parameters, command,
+                                       duration, latest))
+
+    def _send_control(self, service_id: str, parameters: list[dict] | None,
+                      command: str, duration: int, latest: bool) -> dict:
         body = {
             "command": command,
             "creator": "tc",
@@ -672,4 +729,4 @@ class ZeekrAdapter:
         except GeelyAuthError:
             raise
         except ZeekrApiError as e:
-            raise GeelyControlError("8500", str(e)) from e
+            raise GeelyControlError(_refusal_code(e), str(e)) from e

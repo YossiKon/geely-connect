@@ -92,6 +92,7 @@ class _FakeZeekrApi:
         self.adopted = []
         self.listed = True
         self.listed_exc = None
+        self.car_refused = False
 
     def probe_x_vin(self, vin):
         self.probes.append(vin)
@@ -357,6 +358,26 @@ def test_a_car_the_new_gateway_does_not_list_raises_no_repairs_issue():
     ok, hass, entry, api = _setup_zeekr(m, api_tweak=_unlisted, ir=ir)
     assert ok is True
     assert api.probes == [FAKE_VIN]
+    assert ir.created == [], ir.created
+    assert ir.deleted == [("geely_connect", "x_vin_missing_e1")], ir.deleted
+
+
+def test_a_car_the_new_gateway_turns_away_gets_no_repairs_issue():
+    """079001: the gateway turned the car away, not the token. On the cars seen
+    so far the app reads such a car by its plain VIN, the old way (#106), so
+    the issue's "paste the token from your phone" sends its owner after
+    something that is not there. v1.56.0 raised it for exactly these cars
+    (#63, #84), so the upgrade has to take it down, not only stop raising it."""
+    m = _mod()
+    ir = _ir_module()
+
+    def _refused(api):
+        api.car_refused = True
+
+    ok, hass, entry, api = _setup_zeekr(m, api_tweak=_refused, ir=ir)
+    assert ok is True
+    assert api.probes == [FAKE_VIN], "the derivation still runs at every start"
+    assert api.adopted == []
     assert ir.created == [], ir.created
     assert ir.deleted == [("geely_connect", "x_vin_missing_e1")], ir.deleted
 
