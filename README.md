@@ -1078,8 +1078,9 @@ redacted from logs and from the diagnostics report like every other credential.
 
 **A car the new gateway does not hold.** An account can sign in on the new app
 while the new gateway lists no car for it, or turns its car away (`079001`).
-The app then reads and commands that car by its plain VIN on the old route, and
-so does this integration, with no token to paste and no Repairs issue asking
+On the cars seen so far the app then reads and commands that car by its plain
+VIN on the old route, and so does this integration: there is no token to
+paste, and once the new gateway's garage has been read, no Repairs issue asks
 for one. The GPS position wake and rapid heat / cool go out in the bodies the
 iOS app was captured sending to such a car, an Australian EX5: there the wake
 brought a fresh fix within 10 seconds of a 38-minute sleep, and rapid climate

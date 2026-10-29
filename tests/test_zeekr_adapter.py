@@ -681,15 +681,18 @@ def test_control_refuses_an_unmapped_new_platform_service():
 
 def test_new_gateway_lists_vehicle_reads_the_garage_for_this_vin():
     """An empty garage, or one holding only other cars, means this car is not
-    on the new gateway; records with no recognisable VIN cannot rule it out."""
+    on the new gateway; records with no recognisable VIN cannot rule it out,
+    and neither can an answer the client could not read (None), which is not
+    an empty garage - a False takes the x-vin Repairs issue down."""
     a, c = _make_adapter()
     for records, expected in (
             ([], False),
             ([{"vin": "L6T11111111111111"}], False),
             ([{"vin": FAKE_VIN}], True),
             ([{"vehicleInfo": {"vin": FAKE_VIN}}], True),
-            ([{"nickname": "no vin here"}], True)):
-        c.list_vehicles_bff = lambda r=records: r
+            ([{"nickname": "no vin here"}], True),
+            (None, True)):
+        c.vehicle_list_bff = lambda r=records: r
         assert a.new_gateway_lists_vehicle() is expected, records
 
 

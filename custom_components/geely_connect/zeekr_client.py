@@ -1012,8 +1012,16 @@ class ZeekrClient:
         old-platform garage while the car is plainly visible in the new app -
         for those, the new gateway carries an `ms-app-bff` mirror of the same
         route. Response shape matches the old one (data list of vehicle
-        records), so the caller is unchanged.
+        records), so the caller is unchanged. An answer in no shape this
+        reads counts as no vehicles here; vehicle_list_bff tells the two apart.
         """
+        return self.vehicle_list_bff() or []
+
+    def vehicle_list_bff(self) -> list[dict] | None:
+        """The new gateway's garage as it answered: the records, [] when it
+        holds none, None when the answer is in no shape this reads - so a
+        caller deciding that a car is NOT on the new gateway can tell an empty
+        garage from one it could not read (#106)."""
         if not self.access_token:
             raise ZeekrAuthError("not logged in (no new-platform session)")
         resp = self._request(
@@ -1027,7 +1035,7 @@ class ZeekrClient:
                 val = data.get(key)
                 if isinstance(val, list):
                     return [v for v in val if isinstance(v, dict)]
-        return []
+        return None
 
     def probe_x_vin(self, vin: str) -> str:
         """Derive the x-vin from the plain VIN and return the value the new

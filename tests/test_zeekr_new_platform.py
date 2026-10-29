@@ -269,9 +269,13 @@ def test_bff_garage_guards_and_shapes():
     # Dict-wrapped: records under a key.
     c._request = lambda *a, **k: {"data": {"list": [{"vin": FAKE_VIN}, "junk"]}}
     assert c.list_vehicles_bff() == [{"vin": FAKE_VIN}], "dict-wrapped list not unwrapped"
-    # A dict with no recognised key -> empty, not an error.
+    # A dict with no recognised key -> empty for the flow, not an error; the
+    # shape-aware read says None, so setup can tell it from an empty garage.
     c._request = lambda *a, **k: {"data": {"nothing": "useful"}}
     assert c.list_vehicles_bff() == []
+    assert c.vehicle_list_bff() is None
+    c._request = lambda *a, **k: {"data": []}
+    assert c.vehicle_list_bff() == []
 
 
 def test_status_read_refuses_without_a_session():

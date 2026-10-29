@@ -451,9 +451,14 @@ class ZeekrAdapter(CommandTrail):
         no endpoint that serves it - a pasted token turns every read into
         `079001`. No key can be missing for such a car. A list whose records
         carry no recognisable VIN cannot rule this car out, so it counts as
-        listing it.
+        listing it - and so does an answer in no shape the client reads,
+        which is not an empty garage: the caller takes the x-vin Repairs
+        issue down on a False, and a car that has since moved to the new
+        gateway must keep the one hint that says where its token goes.
         """
-        records = self._authed(self._client.list_vehicles_bff) or []
+        records = self._authed(self._client.vehicle_list_bff)
+        if records is None:
+            return True
         vins = [vehicle_vin(r) for r in records]
         return self.vin in vins or (bool(records) and not any(vins))
 
@@ -573,7 +578,8 @@ class ZeekrAdapter(CommandTrail):
         for an Australian EX5 the new gateway does not list (2026-10-29, both
         answered code 1000 with a `ctrl.paa.exec` echo): the same keys for
         warming and cooling, the unused seat list sent empty, duration 180 and
-        no window-vent keys.
+        no window-vent keys. `duration`, `vlt` and the probe service's `extra`
+        are not applied on that route: the body stays the captured one.
         """
         if not self._client.enc_vin:
             body = {
