@@ -619,6 +619,31 @@ def test_a_press_that_waits_wakes_the_car_once_not_on_every_poll():
     assert "force_secondary" not in poll and "force_woke" not in poll, poll
 
 
+def test_a_press_after_a_good_read_still_waits_for_a_read_of_its_own():
+    """The last block is carried into a poll's data before the fetch, so once
+    the car had answered once, a press whose own fetch failed was spent on the
+    old block - the swallowed press the wait is there to prevent. Whether the
+    fetch raised or the server answered with an error, the press waits."""
+    m = _mod()
+    ok, hass, _, api, coord, _ = _setup(m)          # setup read the block
+    poll = hass.data["geely_connect"]["e1"]["poll_state"]
+    wakes = api.calls.count("position")
+    api.state_error = ValueError("gateway said no")
+    poll["force_secondary"] = True
+    asyncio.run(coord.refresh())
+    assert poll.get("force_secondary") is True, "spent on the carried-forward block"
+    assert coord.data["_state"] == {"sentry": "1"}, "the last block is still shown"
+    api.state_error = None
+    plain = api.vehicle_status_state
+    api.vehicle_status_state = lambda: {"code": 5000, "msg": "busy"}
+    asyncio.run(coord.refresh())
+    assert poll.get("force_secondary") is True, "spent by an error answer"
+    api.vehicle_status_state = plain
+    asyncio.run(coord.refresh())
+    assert "force_secondary" not in poll and "force_woke" not in poll, poll
+    assert api.calls.count("position") == wakes + 1, "one press, one wake"
+
+
 def test_a_switch_press_reads_the_state_block_without_waking_the_car():
     """A Parking Comfort press sets state_until (switch.py), because the block
     its state lives in is read only every few polls. Every poll before that

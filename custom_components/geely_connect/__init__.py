@@ -820,6 +820,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # An api that cannot serve an endpoint is not asked for it (#88): the
         # new platform raised on both, on every charging poll.
         serves_state = api_serves(api, "state")
+        # This poll's own read of the block - what spends a Refresh press below.
+        state_read = False
         # A press on a switch whose state lives in this block asks for it on
         # every poll until the refresh just after its hold (switch.py). Read
         # only every few polls otherwise, the block would hand the switch back
@@ -832,6 +834,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     state_resp = await _call_with_retry(api.vehicle_status_state)
                     if state_resp.get("code") in _SUCCESS_CODES and isinstance(state_resp.get("data"), dict):
                         data["_state"] = state_resp["data"]
+                        state_read = True
                 except GeelyAuthError as e:
                     raise ConfigEntryAuthFailed(str(e)) from e
                 except GeelyTLSPinError as e:
@@ -870,14 +873,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     _LOGGER.error("scheduled-trip fetch: TLS pin check failed: %s", e)
                 except Exception as e:  # noqa: BLE001
                     _LOGGER.debug("scheduled-trip fetch non-fatal failure: %s", e)
-            # Cleared only once the fetch it asked for has actually been
-            # attempted to completion. Clearing it before, as this did for a
-            # day, meant one failed vehicle-state call silently swallowed the
-            # user's Refresh Data press and the next press was needed to try
-            # again.
+            # Cleared only by a poll whose own state read worked. Clearing it
+            # before the fetch, as this did for a day, meant one failed
+            # vehicle-state call silently swallowed the user's Refresh Data
+            # press and the next press was needed to try again. Waiting for
+            # `_state` to be in `data` did not end that: the last block is
+            # carried into `data` before the fetch, so once a car had answered
+            # once, a press whose own fetch failed was spent on the old block.
             #
             # Where there is no state block to wait for, the press has had all
-            # it can get. Waiting for `_state` there held the flag up for good
+            # it can get. Waiting for a read there held the flag up for good
             # after one press, and the flag also wakes the car for a position
             # fix - so every poll from then on woke it (#88).
             #
@@ -885,7 +890,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             # it came, here for the cycle counter, a charge or a switch's
             # state_until, read `forced` as False and gave the press neither
             # its position fix nor its slot-4 read.
-            if forced and ("_state" in data or not serves_state):
+            if forced and (state_read or not serves_state):
                 poll_state.pop("force_secondary", None)
                 poll_state.pop("force_woke", None)
 
