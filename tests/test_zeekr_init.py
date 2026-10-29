@@ -90,12 +90,19 @@ class _FakeZeekrApi:
         self.probe_exc = None
         self.probes = []
         self.adopted = []
+        self.listed = True
+        self.listed_exc = None
 
     def probe_x_vin(self, vin):
         self.probes.append(vin)
         if self.probe_exc is not None:
             raise self.probe_exc
         return self.probe_result
+
+    def new_gateway_lists_vehicle(self):
+        if self.listed_exc is not None:
+            raise self.listed_exc
+        return self.listed
 
     def adopt_enc_vin(self, value):
         self.adopted.append(value)
@@ -334,6 +341,37 @@ def test_a_probe_that_matches_no_build_raises_the_repairs_issue():
     assert kw["is_fixable"] is False and kw["severity"] == "warning"
     assert kw["translation_placeholders"] == {"name": "My EX5 (0000)"}, kw
     assert ir.deleted == [], "nothing to clear on a failed probe"
+
+
+def test_a_car_the_new_gateway_does_not_list_raises_no_repairs_issue():
+    """An account on the new app whose car the new gateway does not list is
+    served by plain VIN on the old route: no build can match, and no token is
+    missing - a pasted one fails every read with 079001. The issue would send
+    its owner to break a working entry, so it is cleared instead."""
+    m = _mod()
+    ir = _ir_module()
+
+    def _unlisted(api):
+        api.listed = False
+
+    ok, hass, entry, api = _setup_zeekr(m, api_tweak=_unlisted, ir=ir)
+    assert ok is True
+    assert api.probes == [FAKE_VIN]
+    assert ir.created == [], ir.created
+    assert ir.deleted == [("geely_connect", "x_vin_missing_e1")], ir.deleted
+
+
+def test_a_failed_vehicle_list_keeps_the_repairs_issue():
+    m = _mod()
+    ir = _ir_module()
+
+    def _list_fails(api):
+        api.listed_exc = RuntimeError("gateway down")
+
+    ok, hass, entry, api = _setup_zeekr(m, api_tweak=_list_fails, ir=ir)
+    assert ok is True
+    assert len(ir.created) == 1, ir.created
+    assert ir.created[0][1] == "x_vin_missing_e1"
 
 
 def test_an_entry_that_already_has_a_token_is_not_probed_and_the_issue_clears():

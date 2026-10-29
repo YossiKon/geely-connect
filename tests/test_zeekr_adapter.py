@@ -663,3 +663,17 @@ def test_control_refuses_an_unmapped_new_platform_service():
         assert "not mapped" in str(err)
     else:  # pragma: no cover - only reached on a regression
         raise AssertionError("expected GeelyControlError for an unmapped service")
+
+
+def test_new_gateway_lists_vehicle_reads_the_garage_for_this_vin():
+    """An empty garage, or one holding only other cars, means this car is not
+    on the new gateway; records with no recognisable VIN cannot rule it out."""
+    a, c = _make_adapter()
+    for records, expected in (
+            ([], False),
+            ([{"vin": "L6T11111111111111"}], False),
+            ([{"vin": FAKE_VIN}], True),
+            ([{"vehicleInfo": {"vin": FAKE_VIN}}], True),
+            ([{"nickname": "no vin here"}], True)):
+        c.list_vehicles_bff = lambda r=records: r
+        assert a.new_gateway_lists_vehicle() is expected, records

@@ -577,7 +577,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                              "vehicle at setup; stored in the entry")
                 _x_vin_repair(hass, entry, missing=False)
             elif derived == "":
-                _x_vin_repair(hass, entry, missing=True)
+                # No build matched - which is no missing key at all when the
+                # new gateway does not list the car: it is served by plain VIN
+                # on the old route, and a token pasted for it fails every read.
+                listed = True
+                try:
+                    listed = await hass.async_add_executor_job(
+                        api.new_gateway_lists_vehicle)
+                except Exception as e:  # noqa: BLE001 - keep the issue on doubt
+                    _LOGGER.debug("new-gateway vehicle list failed: %s", e)
+                if listed:
+                    _x_vin_repair(hass, entry, missing=True)
+                else:
+                    _LOGGER.debug("the new gateway does not list this vehicle; "
+                                  "it stays on the old route and needs no x-vin")
+                    _x_vin_repair(hass, entry, missing=False)
     else:
         # An entry that visited the new platform and came back has no legacy
         # credentials: going there drops them (they are dead on a migrated

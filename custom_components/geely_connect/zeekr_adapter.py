@@ -35,7 +35,7 @@ from typing import Any
 
 from .api import GeelyAuthError, GeelyControlError
 from .zeekr_client import (
-    ZeekrApiError, ZeekrAuthError, ZeekrClient, ZeekrIdaas,
+    ZeekrApiError, ZeekrAuthError, ZeekrClient, ZeekrIdaas, vehicle_vin,
 )
 
 from .zeekr_regions import ZeekrRegion
@@ -407,6 +407,21 @@ class ZeekrAdapter:
         matched" - the probe raises in that case precisely so this can happen.
         """
         return self._authed(self._client.probe_x_vin, vin) or ""
+
+    def new_gateway_lists_vehicle(self) -> bool:
+        """Whether the new gateway's garage has this car at all.
+
+        An account on the new app can have a car the new gateway does not
+        list: its vehicle list answers ok with no vehicles, the car is read and
+        commanded by plain VIN on the old route, and the app sends an x-vin to
+        no endpoint that serves it - a pasted token turns every read into
+        `079001`. No key can be missing for such a car. A list whose records
+        carry no recognisable VIN cannot rule this car out, so it counts as
+        listing it.
+        """
+        records = self._authed(self._client.list_vehicles_bff) or []
+        vins = [vehicle_vin(r) for r in records]
+        return self.vin in vins or (bool(records) and not any(vins))
 
     # ---- coordinator surface ----------------------------------------------
 
