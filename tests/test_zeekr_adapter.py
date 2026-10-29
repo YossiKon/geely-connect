@@ -83,10 +83,7 @@ def test_constructor_and_basic_surface():
 
     st = a.vehicle_status()
     assert st["data"]["vehicleStatus"]["basicVehicleStatus"]["powerLevel"] == 98, st
-    # Position wake is a no-op on the new platform until the PAI control write
-    # is live-verified - the coordinator fires it automatically, and an unproven
-    # auto-write to the car is deliberately withheld.
-    assert a.request_position_refresh() == {}
+    assert a.request_position_refresh()["code"] == "1000"
     ctl = a.control("AC", [{"key": "ac", "value": "1"}])
     assert ctl["data"]["result"]["code"] == 1000, ctl
     assert a.fetch_capabilities() == [
@@ -259,15 +256,14 @@ def test_a_stale_session_at_start_no_longer_hides_a_working_build():
         assert a.probe_x_vin(FAKE_VIN) == ""
         assert renewals == ["mock-tv"]
         # The verdict reaches setup through the adapter, and rapid climate
-        # says why it cannot run instead of leaving its owner to look for a
-        # token: on the cars seen so far there is none for such a car (#106).
+        # goes the way the app sends it to such a car: the charge-server
+        # write on the old route, with no token at all (#106).
         assert a.car_refused is True
-        try:
-            a.rapid_climate(ac=True, temp="22.0")
-        except NotImplementedError as e:
-            assert "079001" in str(e) and "not mapped" in str(e), e
-        else:
-            raise AssertionError("rapid climate ran without a token")
+        sent = []
+        c.charge_server_post = lambda vin, body: (
+            sent.append(body["bizType"]) or {"code": "1000"})
+        assert a.rapid_climate(ac=True, temp="22.0")["code"] == "1000"
+        assert sent == [7], sent
     finally:
         _restore_idaas()
 
@@ -547,14 +543,26 @@ def test_position_refresh_sends_the_pai_wake_on_the_new_platform():
     assert sent == [("PAI", "start", [{"key": "pai", "value": "1"}])], sent
 
 
-def test_position_refresh_is_a_no_op_without_a_token():
-    """A vehicle with no x-vin token is on the old platform (or unconfigured);
-    the legacy client owns its PAI, so this side must not reach the car."""
+def test_position_refresh_without_a_token_sends_the_captured_old_route_wake():
+    """A car the new gateway does not list is read on the old route, and the
+    iOS app wakes it there: PUT telematics/<vin> with latest=false, pai=1 alone
+    and no operationScheduling (captured 2026-10-28). Nothing goes out on the
+    new route without a token."""
     a, c = _make_adapter()   # enc_vin defaults to ""
-    called = []
+    called, sent = [], []
     c.control_new_resp = lambda *a_, **k: called.append(1) or {}
-    assert a.request_position_refresh() == {}
+    c.control_resp = lambda vin, body: (
+        sent.append((vin, body)) or {"code": "1000", "data": {}})
+    assert a.request_position_refresh()["code"] == "1000"
     assert called == [], "must not send a new-platform command without a token"
+    assert len(sent) == 1, sent
+    vin, body = sent[0]
+    assert vin == FAKE_VIN
+    assert body["serviceId"] == "PAI" and body["command"] == "start"
+    assert body["creator"] == "tc" and body["latest"] is False
+    assert body["serviceParameters"] == [{"key": "pai", "value": "1"}]
+    assert body["userId"] == "mock-uid"
+    assert "operationScheduling" not in body
 
 
 def test_rapid_warm_and_cool_build_the_captured_setsmarttemp_body():
@@ -583,14 +591,41 @@ def test_rapid_warm_and_cool_build_the_captured_setsmarttemp_body():
     assert cool["ventilation"] == [] and "heat" not in cool
 
 
-def test_rapid_climate_is_a_no_op_without_a_token():
-    a, _ = _make_adapter()   # enc_vin defaults to ""
-    try:
-        a.rapid_climate(ac=True, temp="22.0")
-    except NotImplementedError:
-        pass
-    else:  # pragma: no cover - only reached on a regression
-        raise AssertionError("expected NotImplementedError without a token")
+def test_rapid_climate_without_a_token_sends_the_captured_charge_server_body():
+    """A car the new gateway does not list takes rapid climate on the old
+    route: POST charge-server bizType 7, in the bodies the iOS app was
+    captured sending (2026-10-29). Nothing goes to setSmartTemp."""
+    a, c = _make_adapter()   # enc_vin defaults to ""
+    sent, new_route = [], []
+    c.set_smart_temp_new = lambda *a_, **k: new_route.append(1) or {}
+    c.charge_server_post = lambda vin, body: (
+        sent.append((vin, body)) or {"code": "1000", "success": True})
+
+    resp = a.rapid_climate(ac=True, temp="28.5", heat_seats=["11", "19"],
+                           vent_seats=None, vlt=False, sw=True)
+    assert resp["code"] == "1000"
+    vin, warm = sent[-1]
+    assert vin == FAKE_VIN
+    assert {k: v for k, v in warm.items() if k != "timestamp"} == {
+        "sw": "true", "ac": "true", "ventilation": [], "scheduleList": [],
+        "temp": "28.5", "bizType": 7, "paa": "0", "duration": "180",
+        "command": "immediately",
+        "heat": [{"pos": "11", "level": "3"}, {"pos": "19", "level": "3"}],
+    }
+
+    a.rapid_climate(ac=True, temp="15.5", heat_seats=None,
+                    vent_seats=["11", "19"], vlt=True, sw=None)
+    _, cool = sent[-1]
+    assert {k: v for k, v in cool.items() if k != "timestamp"} == {
+        "sw": "false", "ac": "true",
+        "ventilation": [{"pos": "11", "level": "3"}, {"pos": "19", "level": "3"}],
+        "scheduleList": [], "temp": "15.5", "bizType": 7, "paa": "0",
+        "duration": "180", "command": "immediately", "heat": [],
+    }
+    assert "vlt" not in cool, "the app sends no window-vent keys"
+    assert new_route == [], "must not use setSmartTemp without a token"
+    assert [(n["command"], n["outcome"]) for n in a.command_trail] == [
+        ("rapid_climate", "accepted"), ("rapid_climate", "accepted")]
 
 
 def test_a_safe_command_is_translated_and_its_code_rewritten():
@@ -642,6 +677,20 @@ def test_control_refuses_an_unmapped_new_platform_service():
         assert "not mapped" in str(err)
     else:  # pragma: no cover - only reached on a regression
         raise AssertionError("expected GeelyControlError for an unmapped service")
+
+
+def test_new_gateway_lists_vehicle_reads_the_garage_for_this_vin():
+    """An empty garage, or one holding only other cars, means this car is not
+    on the new gateway; records with no recognisable VIN cannot rule it out."""
+    a, c = _make_adapter()
+    for records, expected in (
+            ([], False),
+            ([{"vin": "L6T11111111111111"}], False),
+            ([{"vin": FAKE_VIN}], True),
+            ([{"vehicleInfo": {"vin": FAKE_VIN}}], True),
+            ([{"nickname": "no vin here"}], True)):
+        c.list_vehicles_bff = lambda r=records: r
+        assert a.new_gateway_lists_vehicle() is expected, records
 
 
 # ------------------------------------------------------ the command trail ---
@@ -784,14 +833,10 @@ def test_the_new_route_and_rapid_climate_are_recorded_too():
 
 
 def test_what_never_reaches_the_server_leaves_no_note():
-    """Rapid climate without a token is refused before anything is sent, and
-    the position wake is the poller's, not anyone's press - the same reason
-    the old login leaves it out of its trail."""
+    """The position wake is the poller's, not anyone's press - the same reason
+    the old login leaves it out of its trail - on either route."""
     a, c = _make_adapter()
-    try:
-        a.rapid_climate(ac=True, temp="22.0")
-    except NotImplementedError:
-        pass
+    a.request_position_refresh()
     c.enc_vin = "opaque-token"
     c.control_new_resp = lambda sid, cmd, params=None: {"code": "000000"}
     a.request_position_refresh()
@@ -817,3 +862,25 @@ def test_neither_the_vin_nor_the_vehicle_token_reaches_the_trail():
     assert note["code"] == "079025"
     assert "***redacted***" in note["message"]
     assert f"...{FAKE_VIN[-4:]}" in note["message"], "the tail keeps it readable"
+
+
+def test_a_refused_rapid_climate_without_a_token_keeps_its_code():
+    """The charge-server write a tokenless car's rapid climate goes out on
+    answers a busy car the same way, and is a refusal like the token route's."""
+    a, c = _make_adapter()   # enc_vin defaults to ""
+
+    def busy(vin, body):
+        raise zc.ZeekrApiError(
+            "code=8070 message=The last request has not yet been executed")
+
+    c.charge_server_post = busy
+    try:
+        a.rapid_climate(ac=True, temp="28.5", heat_seats=["11"], sw=True)
+    except ad.GeelyControlError as e:
+        assert e.code == "8070"
+        assert "has not yet been executed" in e.message
+    else:  # pragma: no cover - only reached on a regression
+        raise AssertionError("expected GeelyControlError")
+    note, = a.command_trail
+    assert note["command"] == "rapid_climate"
+    assert note["outcome"] == "rejected" and note["code"] == "8070"

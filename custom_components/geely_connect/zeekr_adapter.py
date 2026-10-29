@@ -17,7 +17,8 @@ secondary-endpoint failures as non-fatal and carries state forward:
   - vehicle_status_state   (legacy /remote-control/vehicle/status/state/{vin})
   - charge_server_get      (legacy /charge-server/ecarx_charge_set GET)
   - scheduled_charging_set (charge-server write)
-  - rapid_climate          (charge-server bizType=7 write)
+  - rapid_climate on a car with an x-vin is the new gateway's setSmartTemp;
+    without one it is the charge-server bizType=7 write the iOS app sends
 
 Each gap maps to an endpoint family present in the new app's static
 analysis (iovif.java lists /remote-control/* and /charge-server/* routes)
@@ -35,7 +36,7 @@ from typing import Any
 
 from .api import CommandTrail, GeelyAuthError, GeelyControlError
 from .zeekr_client import (
-    ZeekrApiError, ZeekrAuthError, ZeekrClient, ZeekrIdaas,
+    ZeekrApiError, ZeekrAuthError, ZeekrClient, ZeekrIdaas, vehicle_vin,
 )
 
 from .zeekr_regions import ZeekrRegion
@@ -441,6 +442,21 @@ class ZeekrAdapter(CommandTrail):
         """
         return self._authed(self._client.probe_x_vin, vin) or ""
 
+    def new_gateway_lists_vehicle(self) -> bool:
+        """Whether the new gateway's garage has this car at all.
+
+        An account on the new app can have a car the new gateway does not
+        list: its vehicle list answers ok with no vehicles, the car is read and
+        commanded by plain VIN on the old route, and the app sends an x-vin to
+        no endpoint that serves it - a pasted token turns every read into
+        `079001`. No key can be missing for such a car. A list whose records
+        carry no recognisable VIN cannot rule this car out, so it counts as
+        listing it.
+        """
+        records = self._authed(self._client.list_vehicles_bff) or []
+        vins = [vehicle_vin(r) for r in records]
+        return self.vin in vins or (bool(records) and not any(vins))
+
     # ---- coordinator surface ----------------------------------------------
 
     def vehicle_status(self) -> dict:
@@ -483,13 +499,29 @@ class ZeekrAdapter(CommandTrail):
              "setting": {"serviceParameters": [{"key": "pai", "value": "1"}]}}
 
         The gateway ACKs immediately; the fresh fix lands in the status payload
-        a few seconds later, which the next poll reads. On a vehicle without an
-        x-vin token this stays a no-op, exactly as before.
+        a few seconds later, which the next poll reads.
+
+        A car without an x-vin token is woken on the old route, with the body
+        the iOS app (ZUOverseaSEAApp 1.3.2) was captured sending for an
+        Australian EX5 whose account signs in on the new app but whose car the
+        new gateway does not list (2026-10-28, code 1000, operationResult 1):
+        `latest: false`, `pai=1` alone and no operationScheduling. That car
+        used to get no wake at all, so its map only moved when the phone app
+        happened to ask.
         """
         if self._client.enc_vin:
             return self._authed(self._client.control_new_resp, "PAI", "start",
                                 [{"key": "pai", "value": "1"}])
-        return {}
+        body = {
+            "command": "start",
+            "creator": "tc",
+            "latest": False,
+            "serviceId": "PAI",
+            "serviceParameters": [{"key": "pai", "value": "1"}],
+            "timestamp": str(int(time.time() * 1000)),
+            "userId": str(self.user_id),
+        }
+        return self._authed(self._client.control_resp, self.vin, body)
 
     # The two secondary endpoints below are not mapped on this platform, on
     # either route. Said here as well as by raising, so the platforms leave
@@ -535,16 +567,43 @@ class ZeekrAdapter(CommandTrail):
         with an object body. Warming carries the seat-heat block and sw;
         cooling carries an (empty, on this trim) ventilation list. The
         cabin itself is driven by ac + temp either way.
+
+        A car without an x-vin gets the charge-server bizType 7 write instead,
+        in the shape the iOS app (ZUOverseaSEAApp 1.3.2) was captured sending
+        for an Australian EX5 the new gateway does not list (2026-10-29, both
+        answered code 1000 with a `ctrl.paa.exec` echo): the same keys for
+        warming and cooling, the unused seat list sent empty, duration 180 and
+        no window-vent keys.
         """
         if not self._client.enc_vin:
-            if self._client.car_refused:
-                # Said so, or its owner goes looking for a token to paste.
-                raise NotImplementedError(
-                    "rapid climate needs the new-platform x-vin, and the new "
-                    "gateway turns this car away (079001); the way the app "
-                    "sends it to such a car is not mapped yet")
-            raise NotImplementedError(
-                "rapid climate needs the new-platform x-vin")
+            body = {
+                "sw": "true" if sw else "false",
+                "ac": "true" if ac else "false",
+                "ventilation": [{"pos": p, "level": level}
+                                for p in vent_seats or []],
+                "scheduleList": [],
+                "temp": temp,
+                "bizType": 7,
+                "paa": "0",
+                "duration": "180",
+                "timestamp": str(int(time.time() * 1000)),
+                "command": "immediately",
+                "heat": [{"pos": p, "level": level} for p in heat_seats or []],
+            }
+
+            def send_old() -> dict:
+                try:
+                    return self._authed(self._client.charge_server_post,
+                                        self.vin, body)
+                except ZeekrApiError as e:
+                    # A refusal, as on the token route below.
+                    raise GeelyControlError(_refusal_code(e), str(e)) from e
+
+            return self._recorded(
+                "rapid_climate",
+                {"temp": temp, "ac": body["ac"], "heat": body["heat"],
+                 "ventilation": body["ventilation"], "sw": body["sw"]},
+                send_old)
         setting = {
             "ac": "true" if ac else "false",
             "duration": str(duration),

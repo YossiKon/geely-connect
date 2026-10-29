@@ -316,6 +316,14 @@ class _MockGW(BaseHTTPRequestHandler):
             else:
                 payload = {"code": "1000", "success": True, "message": "ok",
                            "data": {"result": {"code": 1000}}}
+        elif pth.startswith("/charge-server/ecarx_charge_set/"):
+            if self.command != "POST" or self.headers.get("Authorization") != "mock-hf":
+                payload = {"code": "8500", "success": False, "message": "bad token"}
+                ok = False
+                _EXPECTED_SIGS.append(False)
+            else:
+                payload = {"code": "1000", "success": True, "message": "ok",
+                           "data": {"bizType": json.loads(body).get("bizType")}}
         else:
             payload = {"code": "404", "success": False, "message": "no route"}
         data = json.dumps(payload).encode()
@@ -438,6 +446,9 @@ def test_mock_gateway_roundtrip():
             f"hf status: {st3}"
         caps = c.fetch_capabilities(FAKE_VIN)
         assert caps and caps[0]["functionId"] == "AC", f"caps: {caps}"
+        # The charge-server write a tokenless car's rapid climate goes out on.
+        cs = c.charge_server_post(FAKE_VIN, {"bizType": 7})
+        assert cs["code"] == "1000" and cs["data"] == {"bizType": 7}, cs
 
         assert c.refresh_session(), "refresh failed"
         assert c.access_token == "mock-at2", f"refresh token: {c.access_token}"
@@ -701,7 +712,8 @@ def test_get_vehicle_status_and_no_session_guards():
         for call in (lambda: c2.get_vehicle_status(FAKE_VIN),
                      lambda: c2.fetch_capabilities(FAKE_VIN),
                      lambda: c2.list_vehicles("mock-uid"),
-                     lambda: c2.control(FAKE_VIN, {"command": "start"})):
+                     lambda: c2.control(FAKE_VIN, {"command": "start"}),
+                     lambda: c2.charge_server_post(FAKE_VIN, {"bizType": 7})):
             try:
                 call()
                 assert False, "expected ZeekrAuthError without an HF session"

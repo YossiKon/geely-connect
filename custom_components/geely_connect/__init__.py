@@ -582,7 +582,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 # seen so far, no token to paste: the app reads it by its plain
                 # VIN (#106). The issue would ask for one, and an earlier
                 # release raised it for exactly these cars, so it comes down.
-                _x_vin_repair(hass, entry, missing=not api.car_refused)
+                # So it does for a car the new gateway's garage does not hold:
+                # no key can be missing for it either. A failed garage read
+                # keeps the issue.
+                missing = not api.car_refused
+                if missing:
+                    try:
+                        missing = await hass.async_add_executor_job(
+                            api.new_gateway_lists_vehicle)
+                    except Exception as e:  # noqa: BLE001 - keep it on doubt
+                        _LOGGER.debug("new-gateway vehicle list failed: %s", e)
+                    if not missing:
+                        _LOGGER.debug("the new gateway does not list this "
+                                      "vehicle; it stays on the old route and "
+                                      "needs no x-vin")
+                _x_vin_repair(hass, entry, missing=missing)
     else:
         # The x-vin Repairs issue is about the new platform, but it is keyed
         # on the entry, and an entry reconfigured back to this backend keeps
