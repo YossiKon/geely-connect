@@ -862,3 +862,25 @@ def test_neither_the_vin_nor_the_vehicle_token_reaches_the_trail():
     assert note["code"] == "079025"
     assert "***redacted***" in note["message"]
     assert f"...{FAKE_VIN[-4:]}" in note["message"], "the tail keeps it readable"
+
+
+def test_a_refused_rapid_climate_without_a_token_keeps_its_code():
+    """The charge-server write a tokenless car's rapid climate goes out on
+    answers a busy car the same way, and is a refusal like the token route's."""
+    a, c = _make_adapter()   # enc_vin defaults to ""
+
+    def busy(vin, body):
+        raise zc.ZeekrApiError(
+            "code=8070 message=The last request has not yet been executed")
+
+    c.charge_server_post = busy
+    try:
+        a.rapid_climate(ac=True, temp="28.5", heat_seats=["11"], sw=True)
+    except ad.GeelyControlError as e:
+        assert e.code == "8070"
+        assert "has not yet been executed" in e.message
+    else:  # pragma: no cover - only reached on a regression
+        raise AssertionError("expected GeelyControlError")
+    note, = a.command_trail
+    assert note["command"] == "rapid_climate"
+    assert note["outcome"] == "rejected" and note["code"] == "8070"

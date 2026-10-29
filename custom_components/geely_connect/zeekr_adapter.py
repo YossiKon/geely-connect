@@ -590,12 +590,20 @@ class ZeekrAdapter(CommandTrail):
                 "command": "immediately",
                 "heat": [{"pos": p, "level": level} for p in heat_seats or []],
             }
+
+            def send_old() -> dict:
+                try:
+                    return self._authed(self._client.charge_server_post,
+                                        self.vin, body)
+                except ZeekrApiError as e:
+                    # A refusal, as on the token route below.
+                    raise GeelyControlError(_refusal_code(e), str(e)) from e
+
             return self._recorded(
                 "rapid_climate",
                 {"temp": temp, "ac": body["ac"], "heat": body["heat"],
                  "ventilation": body["ventilation"], "sw": body["sw"]},
-                lambda: self._authed(self._client.charge_server_post,
-                                     self.vin, body))
+                send_old)
         setting = {
             "ac": "true" if ac else "false",
             "duration": str(duration),
