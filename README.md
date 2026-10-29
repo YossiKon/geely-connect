@@ -47,7 +47,8 @@ polished setup on top.
   changeable at any time.
 - 🌍 **EU, North-American and APAC** backends, detected from the vehicle.
 - 🗣️ **Translated setup** - the configuration dialogs are in English, Hebrew,
-  Arabic, Russian, French, Thai and Bulgarian, and the dashboard cards follow
+  Arabic, Russian, French, Thai, Bulgarian and Brazilian Portuguese, and the
+  dashboard cards follow
   Home Assistant's UI language. Entity names follow Home Assistant's own
   language.
 - 🖥️ **Five built-in dashboard cards** - a full cockpit with a complete climate panel, a top-down status view, a compact tile, a mini square and a one-row strip - registered automatically, plus ready-made automations and Blueprints
@@ -603,10 +604,10 @@ back off removes the generated entities again.
 | **Seat ventilation** | Driver & passenger (rear if supported) |
 | **Defrost** | Windscreen defrost on/off |
 | **Steering Wheel Heat** | On/off, on cars that show evidence of the feature, and on the built-in cards next to Fresh air. The command comes from a capture of the official app's own button ([#4](https://github.com/YossiKon/geely-connect/issues/4)) - `rce.heat: steering_wheel`, an underscore where every seat name uses hyphens, and no level, because the car cannot report one. **Confirmed on a real car** - both rapid warming and this standalone toggle turn the wheel on. The car's status field is slow to catch up, so the button holds its requested state for a moment and re-checks the car twice |
-| **Windows** | Open / close / ventilate. On the E2, the Colombian EX2 and the EX2 Max, the request the E2's own app sends. **Confirmed on an E2** in both directions, for the windows and the ventilation, though there the cover and the switch don't show the windows open yet ([#72](https://github.com/YossiKon/geely-connect/issues/72)) |
+| **Windows** | Open / close / ventilate. On the E2, the Colombian EX2 and the EX2 Max, the request the E2's own app sends. **Confirmed on an E2** in both directions, for the windows and the ventilation; there the cover shows the windows open 10-15 s after a press ([#72](https://github.com/YossiKon/geely-connect/issues/72)) |
 | **Sunroof / Sunshade** | Open / close |
 | **Charging** | Start / stop, plus scheduled charging (start & end time). Stopping a charge does not release the cable: the charge-port latch follows the doors, so to let someone unplug remotely, stop the charge **and** unlock the car - it re-locks itself afterwards if no door is opened. A car whose capability catalogue offers only a charge start *time* and no start/stop switch - the South African E2 and the Colombian EX2 ([#72](https://github.com/YossiKon/geely-connect/issues/72)) - gets no Charging switch: its own app has no start/stop either, and the command did nothing there. An EX2 Max's catalogue reads the same, so it gets none either. Its scheduled charging is the E2 app's own, written with the body that app sends, built from that app's captures and the car's read-back. Tried on one E2: after a start from here, plugged in with the window away from the current time, the car did not start charging, and its own settings and the app showed the schedule on. A time change goes out at once here, where the app sends one only with the toggle, and with no window on the car yet, set the start and end once in the app first |
-| **Parking Comfort** | On/off. The switch shows on while the car reports `parkComfortState` 2 and off at any other value, which is how the official app reads it ([#45](https://github.com/YossiKon/geely-connect/issues/45)): on an EX5 the field moved from 1 to 2 when Camping mode was switched on in the car, and back to 1 when it was switched off. On that EX5 a remote stop, and a start in the app's own shape, were accepted and changed nothing in the car. Not created on the E2 and the Colombian EX2, whose catalogue and app have no such option ([#72](https://github.com/YossiKon/geely-connect/issues/72)), nor on the EX2 Max, whose catalogue has none either |
+| **Parking Comfort** | Shows the car's own Parking Comfort (Camping mode) state; the remote on/off has not yet been seen to change a car. The switch reads on while the car reports `parkComfortState` 2 and off at any other value, which is how the official app reads it ([#45](https://github.com/YossiKon/geely-connect/issues/45)): on an EX5 the field moved from 1 to 2 when Camping mode was switched on in the car, and back to 1 when it was switched off. On that EX5 a remote stop, and a start in the app's own shape, were accepted by the server and changed nothing in the car, so a press here shows the requested state for 45 s and then follows the car again. Not created on the E2 and the Colombian EX2, whose catalogue and app have no such option ([#72](https://github.com/YossiKon/geely-connect/issues/72)), nor on the EX2 Max, whose catalogue has none either |
 | **Cabin purge (G-Clean)** | On/off |
 | **Find Car** | Horn + lights |
 
@@ -614,8 +615,11 @@ back off removes the generated entities again.
 
 ## ⚡ Efficient, adaptive polling
 
-Geely's backend allows **one active session per account**, so every poll briefly
-logs the phone app out. Polling is therefore kept as light as possible: few
+Geely's backend allows **one active session per account**: a sign-in from one
+client invalidates the other's access token, which is the `1402` both sides then
+see and renew from (measured on the EU backend,
+[#101](https://github.com/YossiKon/geely-connect/issues/101)). Polling itself
+does not sign in, and is kept as light as possible: few
 calls per cycle, GPS wake-ups and secondary data fetched sparingly, and long
 intervals whenever nothing changes (with an overnight quiet period). You pick a
 profile at setup:
@@ -894,6 +898,7 @@ you have installed, this integration's manifest, and how long setup took - so
 | `logging` | Whether debug logging is actually on, so "I enabled it and got nothing" has an answer |
 | `capabilities` | The feature flags this trim advertises, as the integration derived them |
 | `capabilities_raw` | The capability catalog exactly as the server sent it. This is what answers "does this car support X at all, or is it only missing from the integration?" |
+| `capabilities_new_raw` | On a Geely EM entry read through its vehicle token: the new gateway's catalogue rows before translation, codes and labels included - the translated list above keeps only the codes the integration already knows ([#63](https://github.com/YossiKon/geely-connect/issues/63)). Empty on every other entry |
 | `status` | The full vehicle payload behind every sensor |
 | `charge_server` | The car's schedule slots, read live when you press the button. Three of them are known - the Scheduled trip (4), Scheduled Charging (6, or 2 on an E2) - and the rest of the range is read because a feature nobody has located may be sitting in one. A slot that does not exist answers with an error, and that is recorded rather than hidden |
 | `cards` | Whether the dashboard cards are being served, and from where |
@@ -1307,7 +1312,7 @@ payload rather than freezing on its own.
 ```
 custom_components/geely_connect/   the integration itself (what HACS installs)
 ├── brand/                         icon.png / logo.png shown in the HA UI
-├── translations/                  UI translations (en, he, ar, fr, ru, th, bg)
+├── translations/                  UI translations (en, he, ar, fr, ru, th, bg, pt-BR)
 ├── geely-card.js                  the five built-in dashboard cards
 ├── manifest.json                  integration metadata
 └── *.py                           platforms, API client, config flow, …
@@ -1346,7 +1351,7 @@ Everything built on top of it is original work under MIT (see `LICENSE`):
 - **Computed sensors** - efficiency, trip distance, charge-completion time and
   range-at-full-charge, none of which the car reports directly
 - **Setup and upkeep** - options flow, config-entry migrations, diagnostics,
-  tyre-pressure unit choice, and six translations
+  tyre-pressure unit choice, and seven translations
 - **Ready-made dashboards** - cards, views, blueprints, automations and
   home-screen widgets
 

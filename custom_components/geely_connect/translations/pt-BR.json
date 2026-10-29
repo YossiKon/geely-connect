@@ -92,7 +92,7 @@
   "issues": {
     "x_vin_missing": {
       "title": "{name}: não foi possível derivar o token do veículo da nova plataforma",
-      "description": "Esta entrada utiliza a nova plataforma Geely EM e nenhuma versão (build) do aplicativo conhecida por esta integração produziu um token de veículo (x-vin) aceito pelo gateway para este carro. Até que se tenha um, o aquecimento e resfriamento rápidos, bem como a leitura de status do novo gateway, ficarão inativos.\n\nAbra **Configurar** na entrada do Geely Connect e cole o token do seu celular em **Token do veículo para a nova plataforma (x-vin)**. A derivação é tentada a cada inicialização, então uma atualização que adicione a versão do seu aplicativo resolverá isso automaticamente."
+      "description": "Esta entrada utiliza a nova plataforma Geely EM e nenhuma versão (build) do aplicativo conhecida por esta integração produziu um token de veículo (x-vin) aceito pelo gateway para este carro. Até que se tenha um, a leitura de status do novo gateway ficará inativa.\n\nAbra **Configurar** na entrada do Geely Connect e cole o token do seu celular em **Token do veículo para a nova plataforma (x-vin)**. A derivação é tentada a cada inicialização, então uma atualização que adicione a versão do seu aplicativo resolverá isso automaticamente."
     }
   }
 }
