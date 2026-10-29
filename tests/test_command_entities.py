@@ -12,6 +12,7 @@ sleeps: `schedule_refresh` is replaced with a recorder and the platforms'
 """
 import asyncio
 import logging
+import time
 from contextlib import contextmanager
 from datetime import time as dtime
 
@@ -27,12 +28,16 @@ _PIN = 1_700_000_000.0
 # ---------------------------------------------------------------- harness ---
 
 class _Clock:
-    """Stands in for the `time` module inside a platform (only .time())."""
+    """Stands in for the `time` module inside a platform (.time() and
+    .monotonic(), which a switch reading the state block calls on a press)."""
 
     def __init__(self, now: float = _PIN):
         self.now = now
 
     def time(self):
+        return self.now
+
+    def monotonic(self):
         return self.now
 
 
@@ -209,6 +214,40 @@ def test_parking_comfort_switch_fires_rsm_with_no_params():
                          ("control", "RSM", [], "stop", 0)], api.calls
 
 
+def test_a_parking_comfort_press_reads_the_state_block_after_its_hold():
+    """Its state is in the vehicle-state block, which the poller reads only
+    every few polls, and nothing redraws a switch when its 45 s hold lapses.
+    So a press asks the polls up to a refresh just after the hold for the
+    block - one refresh, as before, not an extra one. Charging reads the main
+    status block, and a Geely EM entry reads no state block: both keep the
+    plain refresh at 8 s."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    sw = load("switch")
+
+    class _NoStateApi(_Api):
+        serves_state = False        # a Geely EM entry reads no state block
+
+    hass, b = _bundle(_status(state={"parkComfortState": "1"}))
+    b["poll_state"] = {}
+    rec = _RefreshRec()
+    parking = sw.GeelySwitch(hass, b, *_switch_def(sw, "parking_comfort")[:-1])
+    with _patched(sw, schedule_refresh=rec):
+        asyncio.run(parking.async_turn_on())
+    assert b["poll_state"]["state_until"] > time.monotonic() + 85, b["poll_state"]
+    assert rec.calls == [(48,)], rec.calls
+
+    for key, api in (("charging", _Api()), ("parking_comfort", _NoStateApi())):
+        b["poll_state"].clear()
+        rec.calls.clear()
+        b["api"] = api
+        ent = sw.GeelySwitch(hass, b, *_switch_def(sw, key)[:-1])
+        with _patched(sw, schedule_refresh=rec):
+            asyncio.run(ent.async_turn_on())
+        assert b["poll_state"] == {} and rec.calls == [(8,)], (
+            key, b["poll_state"], rec.calls)
+
+
 def test_generic_switch_state_comes_from_its_declared_path():
     if not have_homeassistant():
         skip("homeassistant not installed")
@@ -231,32 +270,35 @@ def test_generic_switch_state_comes_from_its_declared_path():
     assert parking.is_on is None, "a switch with no composite still reads unknown"
 
 
-def test_parking_comfort_reports_unknown_rather_than_trusting_parkcomfortstate():
-    """parkComfortState is not the on/off state: a car with parking comfort
-    off still reports 1, so reading it pinned the switch to `on` forever. No
-    replacement field is known, so the switch must stay `unknown` even when
-    parkComfortState is present and set."""
+def test_parking_comfort_is_on_only_while_parkcomfortstate_reads_2():
+    """The app's own decode (#45): 2 is on and every other value off. An EX5
+    read 1 with the feature off and 2 with Camping mode switched on; a P145-J1
+    read 1 with it off, beside five other `*State` fields at 1 (#13), which is
+    why reading the field as truthy pinned the switch to `on`."""
     if not have_homeassistant():
         skip("homeassistant not installed")
     sw = load("switch")
-    hass, b = _bundle(_status(state={"parkComfortState": "1"}))
-    ent = sw.GeelySwitch(hass, b, *_switch_def(sw, "parking_comfort")[:-1])
-    assert ent.is_on is None
 
+    def is_on(state):
+        hass, b = _bundle(_status(state=state))
+        return sw.GeelySwitch(
+            hass, b, *_switch_def(sw, "parking_comfort")[:-1]).is_on
 
-def test_a_trim_that_does_report_parkcomfortactive_gets_a_real_state():
-    """The switch now watches the *Active family. No known car sends it yet,
-    but if one ever does, the state should follow it rather than stay
-    unknown - that is the whole point of pointing at the right field."""
-    if not have_homeassistant():
-        skip("homeassistant not installed")
-    sw = load("switch")
-    hass, b = _bundle(_status(state={"parkComfortActive": "1"}))
-    ent = sw.GeelySwitch(hass, b, *_switch_def(sw, "parking_comfort")[:-1])
-    assert ent.is_on is True
-    hass2, b2 = _bundle(_status(state={"parkComfortActive": "0"}))
-    ent2 = sw.GeelySwitch(hass2, b2, *_switch_def(sw, "parking_comfort")[:-1])
-    assert ent2.is_on is False
+    for raw, expected in (("2", True), (2, True), ("1", False), (1, False),
+                          ("0", False)):
+        assert is_on({"parkComfortState": raw}) is expected, raw
+    p145 = {k: "1" for k in ("parkComfortState", "activateState",
+                             "inhibitionState", "liveDetectionState",
+                             "positionUploadState", "svtState")}
+    assert is_on(p145) is False
+    # A state block without the field is no reading at all, not an off -
+    # and nor is a payload with no state block, which is all a Geely EM
+    # entry polls.
+    assert is_on({"svtState": "1"}) is None
+    no_block = {k: v for k, v in _status().items() if k != "_state"}
+    hass, b = _bundle(no_block)
+    assert sw.GeelySwitch(
+        hass, b, *_switch_def(sw, "parking_comfort")[:-1]).is_on is None
 
 
 def test_a_rejected_generic_switch_command_raises_homeassistanterror():

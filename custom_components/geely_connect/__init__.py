@@ -7,6 +7,7 @@ import logging
 import os
 import shutil
 import socket
+import time
 from datetime import timedelta
 from typing import Any
 
@@ -819,7 +820,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # An api that cannot serve an endpoint is not asked for it (#88): the
         # new platform raised on both, on every charging poll.
         serves_state = api_serves(api, "state")
-        if forced or charging or was_charging or ((cyc - 1) % _SECONDARY_EVERY == 0):
+        # A press on a switch whose state lives in this block asks for it on
+        # every poll until the refresh just after its hold (switch.py). Read
+        # only every few polls otherwise, the block would hand the switch back
+        # the reading from before the press. A read, never a wake.
+        state_wanted = time.monotonic() < poll_state.get("state_until", 0.0)
+        if (forced or charging or was_charging or state_wanted
+                or (cyc - 1) % _SECONDARY_EVERY == 0):
             if serves_state:
                 try:
                     state_resp = await _call_with_retry(api.vehicle_status_state)
@@ -873,7 +880,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             # it can get. Waiting for `_state` there held the flag up for good
             # after one press, and the flag also wakes the car for a position
             # fix - so every poll from then on woke it (#88).
-            if "_state" in data or not serves_state:
+            #
+            # And only by a poll that saw the press: one already running when
+            # it came, here for the cycle counter, a charge or a switch's
+            # state_until, read `forced` as False and gave the press neither
+            # its position fix nor its slot-4 read.
+            if forced and ("_state" in data or not serves_state):
                 poll_state.pop("force_secondary", None)
                 poll_state.pop("force_woke", None)
 
@@ -983,7 +995,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "series":        series_code,
         # The Refresh Data button sets poll_state["force_secondary"] here so
         # one press fetches the secondary endpoints too, whatever the cycle
-        # counter says.
+        # counter says; a switch whose state is in the vehicle-state block
+        # sets poll_state["state_until"] so the polls after its press read it.
         "poll_state":    poll_state,
     }
     _purge_unserved_entities(hass, entry, api, capabilities)
@@ -1134,7 +1147,7 @@ def _register_debug_service(hass: HomeAssistant) -> None:
     # charge-server POST - which is why the seat encoding in #19 has stayed a
     # guess: the request that carries it was never variable. bizType is pinned
     # to the rapid body on purpose, because 4 and 6 on the same endpoint write
-    # the parking-comfort and scheduled-charging windows and a malformed probe
+    # the scheduled-trip and scheduled-charging windows and a malformed probe
     # there would clobber a schedule the owner set.
     rapid_schema = vol.Schema({
         vol.Required("temp"): cv.string,

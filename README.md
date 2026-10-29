@@ -357,9 +357,9 @@ The full and top-view cards carry a complete **Climate** section:
 - **Fresh air** (G-Clean), **Parking comfort**, **Wheel heat** (on cars that
   have a heated steering wheel), and **Open / Close** for the windows, the
   sunroof and the sunshade - each pair lights while that opening is open.
-  Parking comfort never lights up, deliberately: the car does not
-  report whether it is on - the field that looks like its flag reads 1 with the
-  feature off - so the button toggles it without claiming a state.
+  Parking comfort lights while the car reports it on (`parkComfortState` 2,
+  [#45](https://github.com/YossiKon/geely-connect/issues/45)); a car whose
+  payload has no such field leaves it unlit.
 - Every block hides itself on a trim that lacks the entity - and there is no
   fan-speed control because the car's cloud API simply has none.
 
@@ -606,7 +606,7 @@ back off removes the generated entities again.
 | **Windows** | Open / close / ventilate. On the E2, the Colombian EX2 and the EX2 Max, the request the E2's own app sends. **Confirmed on an E2** in both directions, for the windows and the ventilation, though there the cover and the switch don't show the windows open yet ([#72](https://github.com/YossiKon/geely-connect/issues/72)) |
 | **Sunroof / Sunshade** | Open / close |
 | **Charging** | Start / stop, plus scheduled charging (start & end time). Stopping a charge does not release the cable: the charge-port latch follows the doors, so to let someone unplug remotely, stop the charge **and** unlock the car - it re-locks itself afterwards if no door is opened. A car whose capability catalogue offers only a charge start *time* and no start/stop switch - the South African E2 and the Colombian EX2 ([#72](https://github.com/YossiKon/geely-connect/issues/72)) - gets no Charging switch: its own app has no start/stop either, and the command did nothing there. An EX2 Max's catalogue reads the same, so it gets none either. Its scheduled charging is the E2 app's own, written with the body that app sends, built from that app's captures and the car's read-back. Tried on one E2: after a start from here, plugged in with the window away from the current time, the car did not start charging, and its own settings and the app showed the schedule on. A time change goes out at once here, where the app sends one only with the toggle, and with no window on the car yet, set the start and end once in the app first |
-| **Parking Comfort** | On/off. The switch reports *unknown* rather than a state: the field that looked like its on/off flag reads 1 on a car with the feature off, and no field in this API reports it truthfully. Not created on the E2 and the Colombian EX2, whose catalogue and app have no such option ([#72](https://github.com/YossiKon/geely-connect/issues/72)), nor on the EX2 Max, whose catalogue has none either |
+| **Parking Comfort** | On/off. The switch shows on while the car reports `parkComfortState` 2 and off at any other value, which is how the official app reads it ([#45](https://github.com/YossiKon/geely-connect/issues/45)): on an EX5 the field moved from 1 to 2 when Camping mode was switched on in the car. On that EX5 a remote stop, and a start in the app's own shape, were accepted and changed nothing in the car. Not created on the E2 and the Colombian EX2, whose catalogue and app have no such option ([#72](https://github.com/YossiKon/geely-connect/issues/72)), nor on the EX2 Max, whose catalogue has none either |
 | **Cabin purge (G-Clean)** | On/off |
 | **Find Car** | Horn + lights |
 
@@ -1178,7 +1178,9 @@ secondary-status endpoints are not mapped yet, so *Scheduled Charging* (the
 switch and its two times), *Battery Temperature Maintenance* and the two
 *Scheduled Trip* sensors are left out
 rather than built to read unknown - and with a vehicle token, so is *Parking
-Comfort*, whose command is not mapped on that route either.
+Comfort*, whose command is not mapped on that route either. Without a token
+its switch is there, because the command goes out the old way, but it reads
+unknown: the state it shows lives in the secondary status.
 
 One button goes the other way. **Unlock Frunk** is created only on a car whose
 capability catalogue names a front trunk, which so far means the E2 and the

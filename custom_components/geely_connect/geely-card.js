@@ -139,12 +139,11 @@
   /* Own keys only: `buttons: [constructor]` must not find Object's. */
   const IS_NAV = (k) => Object.prototype.hasOwnProperty.call(NAV_APPS, k);
 
-  /* The car does not report this feature's state - the field that looks like its
-   * flag reads 1 with the feature off (#13) - so the switch reads unknown and the
-   * button cannot honestly light up. Say that on the control. */
+  /* The button lights with the switch, which reads the car's own state since
+   * #45. A car whose payload lacks the field - a Geely EM entry reads no state
+   * block - leaves the switch unknown and the button unlit. */
   const PCOMFORT_HINT = "Parking Comfort: keeps the cabin comfortable while the "
-    + "car is parked. Your car does not report whether it is on, so this button "
-    + "toggles it without showing a state.";
+    + "car is parked.";
 
   /* These two buttons fire the car's own Rapid Warming / Rapid Cooling presets,
    * not a plain "start heating". Labelled Heat and Cool they read as the latter -
@@ -277,7 +276,7 @@
       "tooltip.lifetime_avg": "Average since the car was new. Your car's screen usually shows the current trip instead, which reads lower - that is the Trip Consumption entity, not this one.",
       "tooltip.navigate_with": "Navigate to the car with {app}",
       "tooltip.open_the_full_card": "Open the full card",
-      "tooltip.parking_comfort": "Parking Comfort: keeps the cabin comfortable while the car is parked. Your car does not report whether it is on, so this button toggles it without showing a state.",
+      "tooltip.parking_comfort": "Parking Comfort: keeps the cabin comfortable while the car is parked.",
       "tooltip.rapid_cool": "Rapid cooling: the car's own preset - drives the setpoint to its minimum, ventilates both front seats and cracks the windows",
       "tooltip.rapid_heat": "Rapid warming: the car's own preset - drives the setpoint to its maximum and heats both front seats, plus the steering wheel where fitted",
       "tooltip.schedule_toggle": "Scheduled charging on / off",
@@ -386,7 +385,7 @@
       "tooltip.lifetime_avg": "ค่าเฉลี่ยตั้งแต่รถยังใหม่ หน้าจอในรถมักแสดงค่าทริปปัจจุบันแทน ซึ่งจะน้อยกว่านี้ - นั่นคือเอนทิตี Trip Consumption ไม่ใช่ตัวนี้",
       "tooltip.navigate_with": "นำทางไปยังรถด้วย {app}",
       "tooltip.open_the_full_card": "เปิดการ์ดแบบเต็ม",
-      "tooltip.parking_comfort": "โหมดจอดสบาย: รักษาความสบายในห้องโดยสารขณะจอดรถ รถของคุณไม่รายงานว่าเปิดอยู่หรือไม่ ปุ่มนี้จึงสลับสถานะโดยไม่แสดงสถานะปัจจุบัน",
+      "tooltip.parking_comfort": "โหมดจอดสบาย: รักษาความสบายในห้องโดยสารขณะจอดรถ",
       "tooltip.rapid_cool": "เย็นเร็ว: โหมดสำเร็จรูปของรถ ปรับอุณหภูมิไปที่ค่าต่ำสุด ระบายความร้อนเบาะคู่หน้าทั้งสองฝั่ง และเปิดกระจกเล็กน้อย",
       "tooltip.rapid_heat": "อุ่นเร็ว: โหมดสำเร็จรูปของรถ ปรับอุณหภูมิไปที่ค่าสูงสุดและอุ่นเบาะคู่หน้าทั้งสองฝั่ง รวมถึงพวงมาลัยในรุ่นที่มี",
       "tooltip.schedule_toggle": "ตั้งเวลาชาร์จ เปิด / ปิด",
@@ -495,7 +494,7 @@
       "tooltip.lifetime_avg": "Media dall'acquisto dell'auto. Lo schermo dell'auto di solito mostra il viaggio corrente, che risulta più basso - quella è l'entità Consumo Viaggio, non questa.",
       "tooltip.navigate_with": "Naviga verso l'auto con {app}",
       "tooltip.open_the_full_card": "Apri la scheda completa",
-      "tooltip.parking_comfort": "Comfort parcheggio: mantiene confortevole l'abitacolo mentre l'auto è parcheggiata. La tua auto non segnala se è attivo, quindi questo pulsante lo commuta senza mostrare uno stato.",
+      "tooltip.parking_comfort": "Comfort parcheggio: mantiene confortevole l'abitacolo mentre l'auto è parcheggiata.",
       "tooltip.rapid_cool": "Raffreddamento rapido: il preset dell'auto - porta il setpoint al minimo, ventila entrambi i sedili anteriori e abbassa leggermente i finestrini",
       "tooltip.rapid_heat": "Riscaldamento rapido: il preset dell'auto - porta il setpoint al massimo e riscalda entrambi i sedili anteriori, oltre al volante dove presente",
       "tooltip.schedule_toggle": "Ricarica programmata on / off",
@@ -604,7 +603,7 @@
       "tooltip.lifetime_avg": "Среден разход откакто колата е нова. Екранът в колата обикновено показва текущото пътуване, което е по-ниско - това е обектът Trip Consumption, а не този.",
       "tooltip.navigate_with": "Навигация до колата с {app}",
       "tooltip.open_the_full_card": "Отвори пълната карта",
-      "tooltip.parking_comfort": "Комфорт при паркиране: поддържа приятна температура в купето, докато колата е паркирана. Колата не съобщава дали функцията е включена, затова бутонът я превключва, без да показва състояние.",
+      "tooltip.parking_comfort": "Комфорт при паркиране: поддържа приятна температура в купето, докато колата е паркирана.",
       "tooltip.rapid_cool": "Бързо охлаждане: вграден режим на колата - задава минимална температура, вентилира двете предни седалки и открехва прозорците",
       "tooltip.rapid_heat": "Бързо затопляне: вграден режим на колата - задава максимална температура и затопля двете предни седалки, както и волана, ако има отопление",
       "tooltip.schedule_toggle": "Зареждане по график вкл. / изкл.",
@@ -626,10 +625,11 @@
     "sensor.speed", "sensor.engine_state",
     // _isDriving's exception for remote climate on the park brake (#72).
     "binary_sensor.park_brake_engaged", "climate.climate",
+    // The Parking Comfort button lights with its switch (#45).
+    "switch.parking_comfort",
     // The propulsion split: _carState() reads these for every card, so a
     // card that did not watch them would freeze a hybrid's fuel bar and
     // headline exactly the way the door count froze once.
-    "switch.parking_comfort",
     "sensor.fuel_level", "sensor.fuel_level_pct", "sensor.fuel_range",
     "sensor.combined_range",
   ];
@@ -2063,12 +2063,10 @@
       /* Parking Comfort keeps the cabin liveable while the car sits, so it belongs
        * beside the cabin-air controls rather than among the one-shot actions.
        *
-       * It is wired to the state like every other button here, and in practice it
-       * cannot light up: this car does not report the feature's state - the field
-       * that looks like its flag reads 1 on a car with it switched off (#13) - so
-       * the switch reports unknown and the class never applies. Left as a normal
-       * comparison rather than hard-coded off, so a car that does report it would
-       * light up correctly; the tooltip covers the ones that do not. */
+       * It is wired to the state like every other button here. It used to be
+       * unable to light up, while the switch read unknown on every car; it was
+       * left as a normal comparison rather than hard-coded off, so now that the
+       * switch reads parkComfortState 2 as on (#45), it lights with the car. */
       const sunroofWord = this._t("label.sunroof", "Sunroof");
       const shadeWord = this._t("label.shade", "Shade");
       const windowsWord = this._t("label.windows", "Windows");

@@ -456,14 +456,18 @@ SERVICE_GCLEAN_DURATION = 6
 
 # --- Engine pre-conditioning (verified earlier; not used by Android app) ---
 
-# --- Parking Comfort (UNVERIFIED on this trim) ---
+# --- Parking Comfort ---
+# The serviceId is the app's own: its Parking Comfort builds RSM (#45). What
+# the write does is UNVERIFIED: on an EX5, start and stop with the app's
+# `rsm=4`, and a stop with no parameters, were accepted with 1000 and changed
+# nothing in the car. This switch's own start, with no parameters, is untried.
 SERVICE_PARKING_COMFORT = "RSM"
 
 # --- charge-server family (AVD-verified) ---
 # All these go to POST /charge-server/ecarx_charge_set/{VIN}.
 # bizType picks the feature; the body shape varies per bizType.
 CHARGE_SERVER_PATH = "/charge-server/ecarx_charge_set"
-BIZ_TYPE_PARKING_COMFORT  = "4"   # GET to read schedule, POST to set
+BIZ_TYPE_SCHEDULED_TRIP   = "4"   # the app's Scheduled trip (#4), not Parking Comfort (#45)
 BIZ_TYPE_SCHED_CHARGING   = "6"   # rbc fields (rbcStartTime, rbcEndTime, rbcTarget, rbc, rbcModel, pin)
 BIZ_TYPE_RAPID            = "7"   # ac+heat[]/ventilation[]+temp+vlt
 RAPID_DEFAULT_DURATION    = "180"

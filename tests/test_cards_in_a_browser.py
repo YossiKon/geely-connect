@@ -1791,12 +1791,15 @@ def test_parking_comfort_appears_on_the_big_cards_when_the_car_has_it():
                      lit: b.classList.contains("on") } : null;
     })()"""
     for tag in ("geely-card", "geely-card-top"):
-        got = _mount(tag, probe, parkingComfort="unknown")
-        assert got is not None, f"{tag} has no parking comfort button"
-        assert "Parking comfort" in got["text"], (tag, got)
-        # The car does not report the state, so the control must not invent one.
-        assert got["lit"] is False, (tag, got)
-        assert "does not report" in got["title"], (tag, got["title"])
+        for state in ("on", "off", "unknown"):
+            got = _mount(tag, probe, parkingComfort=state)
+            assert got is not None, f"{tag} has no parking comfort button"
+            assert "Parking comfort" in got["text"], (tag, got)
+            # Lit with the switch, which reads the car's state since #45; an
+            # unknown one must not light it either.
+            assert got["lit"] is (state == "on"), (tag, state, got)
+            assert "keeps the cabin comfortable" in got["title"], (tag, got["title"])
+            assert "does not report" not in got["title"], (tag, got["title"])
 
 
 def test_no_parking_comfort_button_on_a_car_without_the_feature():

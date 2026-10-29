@@ -10,6 +10,7 @@ import importlib.util
 import os
 import sys
 import tempfile
+import time
 import types
 
 from conftest import FAKE_VIN, PKG, have_homeassistant, load
@@ -615,6 +616,53 @@ def test_a_press_that_waits_wakes_the_car_once_not_on_every_poll():
     assert api.calls.count("position") == before[0] + 2, api.calls
     api.state_error = None                     # the block arrives: press spent
     asyncio.run(coord.refresh())
+    assert "force_secondary" not in poll and "force_woke" not in poll, poll
+
+
+def test_a_switch_press_reads_the_state_block_without_waking_the_car():
+    """A Parking Comfort press sets state_until (switch.py), because the block
+    its state lives in is read only every few polls. Every poll before that
+    time reads it, whatever the cycle counter says - a read, never a position
+    wake - and once it has passed, the counter decides again."""
+    m = _mod()
+    ok, hass, _, api, coord, _ = _setup(m)          # cycle 1 read the block
+    poll = hass.data["geely_connect"]["e1"]["poll_state"]
+    state, wakes, trips = (api.calls.count("state"), api.calls.count("position"),
+                           api.calls.count("charge4"))
+    poll["state_until"] = time.monotonic() - 1      # an earlier press, spent
+    asyncio.run(coord.refresh())                    # cycle 2 of 4
+    assert api.calls.count("state") == state, "the counter decides again"
+    poll["state_until"] = time.monotonic() + 60     # a press just now
+    asyncio.run(coord.refresh())                    # cycle 3
+    asyncio.run(coord.refresh())                    # cycle 4
+    assert api.calls.count("state") == state + 2, api.calls
+    assert api.calls.count("position") == wakes, "a read must not wake the car"
+    assert api.calls.count("charge4") == trips, "the block, not the slot-4 trip"
+
+
+def test_a_refresh_press_during_a_poll_waits_for_one_that_saw_it():
+    """A poll already running when Refresh Data is pressed read `forced` as
+    False, so it must not spend the press: that press would get neither its
+    position fix nor its slot-4 read. A switch's state_until makes such polls
+    run the secondary block far more often than the cycle counter alone."""
+    m = _mod()
+    ok, hass, _, api, coord, _ = _setup(m)          # cycle 1
+    poll = hass.data["geely_connect"]["e1"]["poll_state"]
+    poll["state_until"] = time.monotonic() + 60     # a switch press just now
+    plain = api.vehicle_status_state
+
+    def pressed_meanwhile():
+        poll["force_secondary"] = True              # Refresh, mid-poll
+        return plain()
+
+    api.vehicle_status_state = pressed_meanwhile
+    asyncio.run(coord.refresh())                    # cycle 2, already running
+    assert poll.get("force_secondary") is True, "spent by a poll that never saw it"
+    api.vehicle_status_state = plain
+    wakes, trips = api.calls.count("position"), api.calls.count("charge4")
+    asyncio.run(coord.refresh())                    # cycle 3 sees the press
+    assert api.calls.count("position") == wakes + 1, api.calls
+    assert api.calls.count("charge4") == trips + 1, api.calls
     assert "force_secondary" not in poll and "force_woke" not in poll, poll
 
 

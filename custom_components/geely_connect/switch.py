@@ -141,31 +141,32 @@ class _OptimisticHold:
 
 # (key, name, icon, service_id, on_params, off_params, command_on, command_off, state_path, on_when_in, capability_flag)
 SWITCH_DEFS: list[tuple] = [
-    # Parking Comfort - the path below is absent on purpose, so is_on returns
-    # None and the switch reports `unknown`.
+    # Parking Comfort - on only while parkComfortState reads 2. That is the
+    # app's own decode, which takes every other value as off (#45), and it
+    # was measured on an EX5: the field read 1 with the feature off and moved
+    # to 2 when Camping mode was switched on in the car, campingModeActive
+    # following about 30 s later. Not seen yet: the field going back to 1
+    # when the mode is switched off again.
     #
-    # parkComfortState is not the on/off flag it looks like. On a P145-J1 with
-    # parking comfort *off* in the car it still reads 1, alongside
-    # activateState, inhibitionState, liveDetectionState, positionUploadState
-    # and svtState - six `*State` fields at 1 at once, which no car can be
-    # doing simultaneously. Reading it as on/off pinned the switch to `on`
-    # forever, contradicting the car. Every other switch keys off an `*Active`
-    # field; this was the only `*State` one.
+    # It is not a plain flag. On a P145-J1 with parking comfort *off* it read
+    # 1 too, alongside activateState, inhibitionState, liveDetectionState,
+    # positionUploadState and svtState - six `*State` fields at 1 at once -
+    # and reading it as truthy pinned the switch to `on` forever,
+    # contradicting the car (#13). Until the app's decode turned up, the
+    # switch watched parkComfortActive, which no payload here has carried,
+    # and stayed `unknown`.
     #
-    # No replacement field is known, and there may not be one: no
-    # parkComfort*Active appears in that car's 35-key payload, and the
-    # charge-server slot once taken for its endpoint, 4, turned out to be the
-    # app's Scheduled trip (#4) - the empty schedule it answered on that car
-    # was the generic envelope, not a Parking Comfort state. That fits a
-    # feature activated from inside the car, where the cloud offers no
-    # toggle. RSM is marked UNVERIFIED on this trim in const.py, so whether
-    # the write path does anything is untested either.
+    # The command is RSM start/stop with no parameters. The app builds RSM
+    # with `rsm=4`; on that EX5, start and stop with it, and a stop without
+    # it, were accepted with 1000 and changed nothing in the car. Whether a
+    # remote write does anything waits for a capture of the app's own button
+    # (#45).
     (
         "parking_comfort", "Parking Comfort", "mdi:sleep",
         SERVICE_PARKING_COMFORT, [], [],
         "start", "stop",
-        (*_STATE_PATH, "parkComfortActive"),
-        (1, "1"),
+        (*_STATE_PATH, "parkComfortState"),
+        (2, "2"),
         "parking_comfort.enabled",
     ),
     # Charging start/stop - AVD-verified 2026-05-01:
@@ -202,10 +203,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
         if flag and not caps.get(flag, True):
             _LOGGER.debug("switch %s skipped (capability flag %s=False)", defn[0], flag)
             continue
-        # Parking Comfort reads no state on any car (see its row above), so on
-        # a route that cannot send its command it would be a switch that does
-        # nothing at all - the new platform's own route, until RSM is captured
-        # there (#88). Charging keeps its switch: the state it reads is real.
+        # Parking Comfort on a route that cannot send RSM - the new platform's
+        # own route, where its command is not mapped (#88; the app builds a
+        # vehicle switch of type 3 there, #45) - would be a switch that does
+        # nothing, and a Geely EM entry reads no state block for it either.
+        # Charging keeps its switch: the state it reads is real.
         if defn[0] == "parking_comfort" and not api_can_send(bundle.get("api"), defn[3]):
             _LOGGER.debug("switch %s skipped (%s not sendable on this route)",
                           defn[0], defn[3])
@@ -250,6 +252,7 @@ class GeelySwitch(_OptimisticHold, CoordinatorEntity, SwitchEntity):
         self._command_off = command_off
         self._state_path = state_path
         self._on_when_in = on_when_in
+        self._poll_state = bundle.get("poll_state")
         self._key = key
         self._attr_unique_id = f"geely_{self._vin}_sw_{key}"
         self._attr_name = name
@@ -299,7 +302,19 @@ class GeelySwitch(_OptimisticHold, CoordinatorEntity, SwitchEntity):
                       self._service_id, command, redact(params), redact(resp))
         self._hold(command == self._command_on)
         self._write_held_state()
-        schedule_refresh(self._hass, self.coordinator, 8)
+        if (self._state_path[:1] == _STATE_PATH and self._poll_state is not None
+                and api_serves(self._api, "state")):
+            # The vehicle-state block is read only every few polls, and
+            # nothing redraws the switch when its hold lapses, so a refresh at
+            # 8 s would leave it on the held state until some later poll, then
+            # on whatever reading the block last had. One refresh just after
+            # the 45 s hold instead, with the polls up to it asked for the
+            # block: the switch then shows what the car reported after the
+            # press.
+            self._poll_state["state_until"] = time.monotonic() + 90
+            schedule_refresh(self._hass, self.coordinator, 48)
+        else:
+            schedule_refresh(self._hass, self.coordinator, 8)
 
 
 class GeelyGCleanSwitch(_OptimisticHold, CoordinatorEntity, SwitchEntity):

@@ -1184,7 +1184,7 @@ class GeelyApi(CommandTrail):
         """GET /charge-server/ecarx_charge_set/{VIN}?bizType=N.
 
         Reads schedules for charge-server features:
-          - bizType=4 → Parking Comfort schedule
+          - bizType=4 → the app's Scheduled trip (departure, Cabin Comfort, `bw`, #4)
           - bizType=6 → Scheduled Charging (rbcStartTime/rbcEndTime/rbcTarget/bcCycleActive)
           - bizType=2 → an E2's Scheduled Charging (timerId/scheduleList, #72)
           - bizType=7 → Rapid (write-only; GET returns nothing useful)

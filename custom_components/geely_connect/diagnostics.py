@@ -57,9 +57,10 @@ _REDACT = {
 # known: 4 is the app's Scheduled trip (its departure, Cabin Comfort and the
 # Battery Temperature Maintenance toggle as `bw`, read in four states on one
 # car in #4), 6 is Scheduled Charging, and 2 is where an E2 keeps its own
-# Scheduled Charging instead (#72). The rest of the range is swept because
-# Parking Comfort (#30) has no readable state anywhere in the payload - if the
-# cloud holds one, it is in a slot nobody has located. The sweep is also how
+# Scheduled Charging instead (#72). The rest of the range is swept for state
+# that sits in a slot nobody has located; it began as the hunt for Parking
+# Comfort's (#30), which turned up in the status block's parkComfortState
+# instead (#45). The sweep is also how
 # slot 4 was decoded: the polled copies are in the status block above, and
 # the live read here is what an owner's one-toggle-at-a-time test compares.
 #
