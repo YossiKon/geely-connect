@@ -961,6 +961,18 @@ class ZeekrClient:
             token=self.hf_token, vin=vin, vehicle_model=self.vehicle_model,
             timezone=self.timezone, device_identifier=self.hf_device_id)
 
+    def charge_server_post(self, vin: str, body: dict) -> dict:
+        """POST /charge-server/ecarx_charge_set/{vin} with the HF JWT - the
+        write the new app sends rapid warming and cooling through (bizType 7)
+        for a car the new gateway does not list."""
+        if not self.hf_token:
+            raise ZeekrAuthError("not logged in (no HF session)")
+        return self._hf_request(
+            "POST", f"/charge-server/ecarx_charge_set/{vin}",
+            body=json.dumps(body).encode(),
+            token=self.hf_token, vin=vin, vehicle_model=self.vehicle_model,
+            timezone=self.timezone, device_identifier=self.hf_device_id)
+
     def fetch_capabilities(self, vin: str) -> list[dict]:
         """GET /geelyTCAccess/tcservices/capability/{vin} (the app's own
         query: pageSize=2000&pageIndex=1&vehicleType=0&sortField=)."""

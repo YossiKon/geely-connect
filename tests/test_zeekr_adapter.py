@@ -579,14 +579,39 @@ def test_rapid_warm_and_cool_build_the_captured_setsmarttemp_body():
     assert cool["ventilation"] == [] and "heat" not in cool
 
 
-def test_rapid_climate_is_a_no_op_without_a_token():
-    a, _ = _make_adapter()   # enc_vin defaults to ""
-    try:
-        a.rapid_climate(ac=True, temp="22.0")
-    except NotImplementedError:
-        pass
-    else:  # pragma: no cover - only reached on a regression
-        raise AssertionError("expected NotImplementedError without a token")
+def test_rapid_climate_without_a_token_sends_the_captured_charge_server_body():
+    """A car the new gateway does not list takes rapid climate on the old
+    route: POST charge-server bizType 7, in the bodies the iOS app was
+    captured sending (2026-10-29). Nothing goes to setSmartTemp."""
+    a, c = _make_adapter()   # enc_vin defaults to ""
+    sent, new_route = [], []
+    c.set_smart_temp_new = lambda *a_, **k: new_route.append(1) or {}
+    c.charge_server_post = lambda vin, body: (
+        sent.append((vin, body)) or {"code": "1000", "success": True})
+
+    resp = a.rapid_climate(ac=True, temp="28.5", heat_seats=["11", "19"],
+                           vent_seats=None, vlt=False, sw=True)
+    assert resp["code"] == "1000"
+    vin, warm = sent[-1]
+    assert vin == FAKE_VIN
+    assert {k: v for k, v in warm.items() if k != "timestamp"} == {
+        "sw": "true", "ac": "true", "ventilation": [], "scheduleList": [],
+        "temp": "28.5", "bizType": 7, "paa": "0", "duration": "180",
+        "command": "immediately",
+        "heat": [{"pos": "11", "level": "3"}, {"pos": "19", "level": "3"}],
+    }
+
+    a.rapid_climate(ac=True, temp="15.5", heat_seats=None,
+                    vent_seats=["11", "19"], vlt=True, sw=None)
+    _, cool = sent[-1]
+    assert {k: v for k, v in cool.items() if k != "timestamp"} == {
+        "sw": "false", "ac": "true",
+        "ventilation": [{"pos": "11", "level": "3"}, {"pos": "19", "level": "3"}],
+        "scheduleList": [], "temp": "15.5", "bizType": 7, "paa": "0",
+        "duration": "180", "command": "immediately", "heat": [],
+    }
+    assert "vlt" not in cool, "the app sends no window-vent keys"
+    assert new_route == [], "must not use setSmartTemp without a token"
 
 
 def test_a_safe_command_is_translated_and_its_code_rewritten():

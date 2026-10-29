@@ -17,7 +17,8 @@ secondary-endpoint failures as non-fatal and carries state forward:
   - vehicle_status_state   (legacy /remote-control/vehicle/status/state/{vin})
   - charge_server_get      (legacy /charge-server/ecarx_charge_set GET)
   - scheduled_charging_set (charge-server write)
-  - rapid_climate          (charge-server bizType=7 write)
+  - rapid_climate on a car with an x-vin is the new gateway's setSmartTemp;
+    without one it is the charge-server bizType=7 write the iOS app sends
 
 Each gap maps to an endpoint family present in the new app's static
 analysis (iovif.java lists /remote-control/* and /charge-server/* routes)
@@ -517,10 +518,30 @@ class ZeekrAdapter:
         with an object body. Warming carries the seat-heat block and sw;
         cooling carries an (empty, on this trim) ventilation list. The
         cabin itself is driven by ac + temp either way.
+
+        A car without an x-vin gets the charge-server bizType 7 write instead,
+        in the shape the iOS app (ZUOverseaSEAApp 1.3.2) was captured sending
+        for an Australian EX5 the new gateway does not list (2026-10-29, both
+        answered code 1000 with a `ctrl.paa.exec` echo): the same keys for
+        warming and cooling, the unused seat list sent empty, duration 180 and
+        no window-vent keys.
         """
         if not self._client.enc_vin:
-            raise NotImplementedError(
-                "rapid climate needs the new-platform x-vin")
+            body = {
+                "sw": "true" if sw else "false",
+                "ac": "true" if ac else "false",
+                "ventilation": [{"pos": p, "level": level}
+                                for p in vent_seats or []],
+                "scheduleList": [],
+                "temp": temp,
+                "bizType": 7,
+                "paa": "0",
+                "duration": "180",
+                "timestamp": str(int(time.time() * 1000)),
+                "command": "immediately",
+                "heat": [{"pos": p, "level": level} for p in heat_seats or []],
+            }
+            return self._authed(self._client.charge_server_post, self.vin, body)
         setting = {
             "ac": "true" if ac else "false",
             "duration": str(duration),
