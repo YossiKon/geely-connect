@@ -1,0 +1,98 @@
+{
+  "config": {
+    "step": {
+      "platform": {
+        "title": "Qual servidor da Geely?",
+        "description": "Escolha a plataforma em que sua conta está registrada.\n\nPlataforma existente: a integração atual da Geely Global (e-mail + código, certificado por dispositivo).\n\nNova plataforma Geely EM: o servidor por trás do novo aplicativo Geely EM (e-mail + senha, nuvem Zeekr) - experimental. Conclua primeiro a configuração do aplicativo no seu celular.",
+        "data": {
+          "platform": "Plataforma"
+        }
+      },
+      "user": {
+        "title": "Geely Connect",
+        "description": "Integração não oficial da comunidade - não afiliada à Geely. Escolha a plataforma que sua conta utiliza (padrão: a plataforma existente da Geely, e-mail + código). Contas na nova plataforma do aplicativo Geely EM (e-mail + senha, experimental) devem escolher essa opção - conclua primeiro a configuração do aplicativo no seu celular.\n\nO modo de atualização (polling) define a frequência com que o carro é contatado. A Geely permite apenas uma sessão por conta, portanto, cada atualização desconecta brevemente o aplicativo do celular - escolha Manual se isso for um incômodo.",
+        "data": {
+          "platform": "Plataforma",
+          "email": "E-mail",
+          "country_code": "País",
+          "pressure_unit": "Unidade de pressão dos pneus",
+          "poll_mode": "Modo de atualização (Polling)"
+        }
+      },
+      "code": {
+        "title": "Insira o código enviado para o seu e-mail",
+        "description": "Enviamos um código de 6 dígitos para {email}. Cole-o aqui.",
+        "data": {
+          "code": "Código de 6 dígitos"
+        }
+      },
+      "pick_vehicle": {
+        "title": "Escolha um veículo",
+        "description": "Sua conta Geely possui vários veículos. Escolha qual deseja adicionar. Veículos já configurados não são exibidos.",
+        "data": {
+          "vin": "Chassis"
+        }
+      },
+      "zeekr_login": {
+        "title": "Plataforma Geely EM (novo aplicativo)",
+        "description": "Experimental: a nova plataforma ainda está sendo verificada em carros reais, portanto, trate-a como beta.\n\nInsira o e-mail e a senha que você usa no novo aplicativo da Geely. Se você ainda não fez isso, abra primeiro o novo aplicativo Geely no seu celular e conclua a configuração por lá (o aplicativo orientará você a definir uma senha e vincular seu veículo). Esta integração faz o login apenas com e-mail e senha.\n\nArmazenar a senha permite que a sessão seja renovada automaticamente (assim como o aplicativo faz). É a senha da sua conta Geely: ela será ocultada dos logs e diagnósticos, e armazenada de forma criptografada se você adicionar uma 'geely_password_key' no secrets.yaml (caso contrário, será armazenada em texto simples no Home Assistant). Desmarque para reautenticar manualmente a cada 2 dias.",
+        "data": {
+          "email": "E-mail",
+          "password": "Senha",
+          "country_code": "País",
+          "pressure_unit": "Unidade de pressão dos pneus",
+          "poll_mode": "Modo de atualização (Polling)",
+          "store_password": "Salvar a senha e renovar a sessão automaticamente",
+          "zeekr_region": "Região do servidor do novo aplicativo"
+        }
+      },
+      "zeekr_pick": {
+        "title": "Escolha um veículo",
+        "description": "Sua conta possui vários veículos. Escolha qual deseja adicionar.",
+        "data": {
+          "vin": "Chassis"
+        }
+      }
+    },
+    "error": {
+      "send_code_failed": "Falha ao enviar o código por e-mail. Tente novamente em um minuto.",
+      "captcha_unreachable": "O Home Assistant não conseguiu acessar o servidor de captcha da Geely (captcha4.geely.com). A configuração é executada a partir da máquina do Home Assistant, este host fica na China continental - verifique se sua rede ou DNS não está bloqueando o acesso (listas de bloqueio do Pi-hole/AdGuard e/ou filtros geográficos do roteador) e tente novamente.",
+      "network_unreachable": "O Home Assistant não conseguiu acessar a plataforma Geely EM (zeekrlife.com). Verifique a rede e tente novamente.",
+      "invalid_code": "O código não foi aceito. Ele pode ter expirado (os códigos são de uso único).",
+      "invalid_credentials": "O e-mail ou a senha não foram aceitos. Se a sua conta é nova no aplicativo da Geely, abra primeiro o aplicativo no seu celular e conclua a configuração lá (onde você definirá sua senha e vinculará o veículo) e tente novamente.",
+      "no_vehicles": "Login efetuado com sucesso, mas nenhum veículo foi encontrado nesta conta. Abra o novo aplicativo da Geely no seu celular e certifique-se de que seu veículo está vinculado, depois tente novamente.",
+      "unknown": "Algo deu errado. Verifique os logs.",
+      "eu_app_keys_required": "As chaves do aplicativo europeu estão ausentes ou inválidas. Coloque seu próprio arquivo geely_eu_app_keys.json no diretório de configuração do Home Assistant e tente novamente. Consulte docs/LOCAL-EU-KEYS.md."
+    },
+    "abort": {
+      "already_configured": "Este veículo da Geely já está configurado.",
+      "all_configured": "Todos os veículos desta conta já estão configurados.",
+      "cert_failed": "Falha ao provisionar o certificado mTLS do dispositivo. Verifique os logs.",
+      "wrong_region": "Esta conta Geely é atendida por um servidor regional para o qual esta integração não possui credenciais. Ela suporta as nuvens da UE/Internacional, América do Norte e APAC; outras regiões precisam de suas próprias credenciais de aplicativo, que não são públicas. A linha do log informa a região que foi detectada.",
+      "reauth_successful": "Reautenticado com sucesso. Token atualizado.",
+      "reconfigure_successful": "Reconfigurado com sucesso. A entrada foi atualizada e recarregada.",
+      "unknown": "Algo deu errado. Verifique os logs.",
+      "reauth_account_mismatch": "A reautenticação usou uma conta Geely diferente da qual esta entrada foi criada. Faça login com a conta original ou remova a entrada e adicione o veículo novamente."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opções",
+        "description": "Altere a frequência com que o Home Assistant atualiza os dados do carro (polling), a unidade de pressão dos pneus e quais entidades são expostas.\n\nEco, Normal e Live são atualizados com base em um temporizador, da menor para a maior frequência. Manual nunca é atualizado automaticamente: os dados são renovados apenas quando você pressiona o botão de Atualizar Dados, chama homeassistant.update_entity ou envia um comando para o carro. Nada é contatado nesse meio-tempo, permitindo que o aplicativo do celular continue logado - porém, os valores ficarão tão antigos quanto a sua última sincronização.",
+        "data": {
+          "poll_mode": "Modo de atualização (Polling)",
+          "pressure_unit": "Unidade de pressão dos pneus",
+          "full_exposure": "Expor todos os campos brutos (adiciona ~180 entidades de diagnóstico)",
+          "zeekr_enc_vin": "Token do veículo para a nova plataforma (x-vin) - avançado. Geralmente derivado automaticamente na configuração; defina isso apenas para substituí-lo ou se a versão (build) do seu aplicativo ainda não for suportada"
+        }
+      }
+    }
+  },
+  "issues": {
+    "x_vin_missing": {
+      "title": "{name}: não foi possível derivar o token do veículo da nova plataforma",
+      "description": "Esta entrada utiliza a nova plataforma Geely EM e nenhuma versão (build) do aplicativo conhecida por esta integração produziu um token de veículo (x-vin) aceito pelo gateway para este carro. Até que se tenha um, o aquecimento e resfriamento rápidos, bem como a leitura de status do novo gateway, ficarão inativos.\n\nAbra **Configurar** na entrada do Geely Connect e cole o token do seu celular em **Token do veículo para a nova plataforma (x-vin)**. A derivação é tentada a cada inicialização, então uma atualização que adicione a versão do seu aplicativo resolverá isso automaticamente."
+    }
+  }
+}
