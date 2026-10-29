@@ -1714,6 +1714,55 @@ def test_a_car_whose_catalogue_names_slot_2_reads_its_schedule_there():
     assert coord.data["_scheduled_charging"] == _E2_SLOT_2
 
 
+def _plugged_e2(is_charging, minutes):
+    return {"code": 1000, "data": {"vehicleStatus": {
+        "basicVehicleStatus": {"speed": "0"},
+        "additionalVehicleStatus": {"electricVehicleStatus": {
+            "statusOfChargerConnection": "3", "chargeLevel": "100",
+            "isCharging": is_charging, "timeToFullyCharged": minutes}}}}}
+
+
+def test_a_1_0_car_with_the_cable_in_polls_as_parked_unless_it_is_charging():
+    """An E2 reports connection code 3 whenever the cable is in (#72, ten
+    files), so a full car left plugged in overnight polled on the fast
+    interval and the cards lit charging. Its catalogue's 1.0 charge scheme
+    now marks the car, the poller writes its verdict into every snapshot,
+    and the first snapshot - taken before the catalogue - is judged again."""
+    m = _mod()
+    idle, live = _plugged_e2("false", "0"), _plugged_e2("true", "155")
+    fast = m.POLL_PROFILES["normal"]["fast"]
+
+    def e2(api):
+        _e2_catalogue(api)
+        schedule_row = api.fetch_capabilities()
+        # The E2's charge row: a start time, not a switch - the 1.0 scheme
+        # that marks the car (capabilities.py).
+        api.fetch_capabilities = lambda: schedule_row + [
+            {"functionId": "remote_charge_1", "valueEnable": True,
+             "valueEnum": "remote_charge_1_chargestart",
+             "paramsJson": [{"nameKey": "remote_charge_1_chargestarttime",
+                             "config": "remote_charge_1_chargestart"}]}]
+        api.status_results = [dict(idle), dict(idle), dict(live)]
+
+    ok, hass, _, api, coord, _ = _setup(m, api_tweak=e2)
+    poll = hass.data["geely_connect"]["e1"]["poll_state"]
+    assert ok and poll["code_3_is_plugged"] is True
+    assert coord.data["_charging"] is False, "the first snapshot, judged again"
+    assert coord.update_interval.total_seconds() != fast, "an idle car, not a charging one"
+    asyncio.run(coord.refresh())
+    assert coord.data["_charging"] is False and m._poll_flags(coord.data)[0] is False
+    assert coord.update_interval.total_seconds() != fast
+    asyncio.run(coord.refresh())                     # the charge starts
+    assert coord.data["_charging"] is True and m._poll_flags(coord.data)[0] is True
+    assert coord.update_interval.total_seconds() == fast
+    # An EX5's catalogue leaves the code its word: 3 is charging there.
+    ok, hass, _, api, coord, _ = _setup(
+        m, api_tweak=lambda api: setattr(api, "status_results", [dict(idle)]))
+    assert ok and hass.data["geely_connect"]["e1"]["poll_state"]["code_3_is_plugged"] is False
+    assert coord.data["_charging"] is True
+    assert coord.update_interval.total_seconds() == fast
+
+
 def _one_zero_trip_catalogue(api):
     api.fetch_capabilities = lambda: [
         {"functionId": "booking_travel_1", "valueEnable": True, "paramsJson": []}]

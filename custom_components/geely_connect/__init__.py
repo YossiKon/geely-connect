@@ -366,6 +366,21 @@ def _odometer(d: dict) -> float | None:
         return None
 
 
+def _charging_verdict(data: dict, poll_state: dict) -> None:
+    """Write the poller's word on charging into the snapshot.
+
+    Entities take only the coordinator, so what the catalogue says about this
+    car's connection codes reaches them through the data: on a 1.0-scheme
+    car (an E2, #72) code 3 means the cable is in, and `isCharging` or the
+    minutes left say whether a charge runs. sensor._is_charging reads the
+    verdict first, and the fields alone where a snapshot carries none.
+    """
+    from .sensor import CHARGING_VERDICT_KEY, charging_from_fields
+    if isinstance(data, dict):
+        data[CHARGING_VERDICT_KEY] = charging_from_fields(
+            data, code_3_is_plugged=bool(poll_state.get("code_3_is_plugged")))
+
+
 def _poll_flags(d: dict) -> tuple[bool, bool]:
     """(charging, driving) from a status dict, tolerant of missing fields."""
     if not isinstance(d, dict):
@@ -678,8 +693,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # `read_trip` is whether slot 4, the scheduled trip, is read: until the
     # catalogue says the car speaks its 1.0 scheme, where that slot answers
     # in another shape (#72).
+    # `code_3_is_plugged` is the catalogue's word that this car reports
+    # connection code 3 whenever the cable is in (an E2, #72) - set after the
+    # first refresh like the two above, and read by _charging_verdict.
     poll_state = {"cycle": 0, "idle": 0, "sig": None, "fix_odo": None,
-                  "charge_slot": "6", "read_trip": True}
+                  "charge_slot": "6", "read_trip": True,
+                  "code_3_is_plugged": False}
     # Chosen polling profile (Eco / Normal / Live) from setup.
     profile = POLL_PROFILES.get(
         # Options win over data: the polling mode can be changed after setup.
@@ -693,6 +712,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Refresh Data button, homeassistant.update_entity, and the automatic
     # post-command polls - it just never starts one by itself.
     _MANUAL = bool(profile.get("manual"))
+
+    def _follow_interval(data: dict) -> None:
+        """Let the poll interval follow a snapshot. coordinator.update_interval
+        is HA's; if setting it ever raises, the data must still reach the
+        entities, so the setter is never allowed to take a poll down."""
+        if _MANUAL:
+            return
+        try:
+            coordinator.update_interval = _adaptive_interval(data, poll_state["idle"], profile)
+        except Exception:  # noqa: BLE001
+            pass
 
     async def _async_update():
         poll_state["cycle"] += 1
@@ -798,6 +828,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 hass.config_entries.async_update_entry(entry, data=new_data)
                 _LOGGER.info("zeekr: session silently renewed; entry updated")
 
+        # The verdict every reader of this snapshot follows - the flags below,
+        # the interval, the Charger Connection label, Charge Complete and the
+        # charging power, and the Charging switch on a car that has one.
+        _charging_verdict(data, poll_state)
         charging, driving = _poll_flags(data)
 
         # Secondary endpoints (parking-comfort/sentry flags + scheduled charging)
@@ -936,11 +970,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             if odo_now is not None:
                 poll_state["fix_odo"] = odo_now
 
-        if not _MANUAL:
-            try:
-                coordinator.update_interval = _adaptive_interval(data, poll_state["idle"], profile)
-            except Exception:  # noqa: BLE001
-                pass
+        _follow_interval(data)
         return data
 
     coordinator = DataUpdateCoordinator(
@@ -981,6 +1011,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if capabilities.get("scheduled_trip.enabled") is False:
         poll_state["read_trip"] = False
         (coordinator.data or {}).pop("_scheduled_trip", None)
+    # The first refresh also judged charging before the catalogue could say
+    # that this car reports connection code 3 with the cable merely in (an
+    # E2, #72). Judge that snapshot again now, and let the interval follow,
+    # or a plugged idle E2 polls fast and shows charging until the next poll.
+    if capabilities.get("charging.code_3_is_plugged"):
+        poll_state["code_3_is_plugged"] = True
+        _charging_verdict(coordinator.data, poll_state)
+        _follow_interval(coordinator.data)
 
     # What the car is powered by, decided once from the first refresh. Platforms
     # read this rather than each deciding for itself, so a PHEV cannot end up

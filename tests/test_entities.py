@@ -312,6 +312,9 @@ def test_full_exposure_keeps_fields_whose_curated_twin_was_not_built():
     add = _RichCoord.data["vehicleStatus"]["additionalVehicleStatus"]
     add["runningStatus"]["fuelLevel"] = "0"
     add["electricVehicleStatus"]["chargeUAct"] = "0.0"
+    # The poller's own verdict rides in every snapshot (#72); it is not a
+    # field the server returns and must not become a raw sensor.
+    _RichCoord.data["_charging"] = False
 
     hass, entry = _Hass(), _FullEntry()
     hass.data["geely_connect"] = {"e1": {
@@ -326,6 +329,7 @@ def test_full_exposure_keeps_fields_whose_curated_twin_was_not_built():
         "the unowned fuel field vanished from full exposure"
     assert not any(uid.endswith("electricVehicleStatus.chargeUAct") for uid in raw), \
         "the charge leg grew a raw twin despite its computed owner"
+    assert f"geely_{FAKE_VIN}_raw__charging" not in raw, "the poller's verdict became a sensor"
 
 
 def test_a_hybrid_gets_the_whole_fuel_set_and_keeps_the_electric_one():

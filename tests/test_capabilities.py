@@ -254,6 +254,10 @@ def test_a_1_0_catalogue_has_no_charge_switch_and_its_schedule_in_slot_2():
     assert out["charging.enabled"] is False
     assert out["scheduled_charging.enabled"] is True
     assert out["scheduled_charging.slot_2"] is True
+    # The same declaration says this car's connection code 3 means the cable
+    # is in, not a charge (#72) - and an EX5's does not.
+    assert out["charging.code_3_is_plugged"] is True
+    assert "charging.code_3_is_plugged" not in cap.parse([_ex5_remote_charge_2()])
     # And the rest of the car is untouched by the rule.
     assert out["find_car.enabled"] is True and out["lock.enabled"] is True
 

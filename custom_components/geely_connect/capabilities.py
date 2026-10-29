@@ -285,6 +285,17 @@ def parse(items: list[dict]) -> dict[str, Any]:
         out["charging.enabled"] = True
     elif "remote_charge_1" in by_id:
         out["charging.enabled"] = False
+        # The same car's `statusOfChargerConnection` reads 3 whenever the
+        # cable is in: ten diagnostics files from the South African E2 (#72)
+        # carry 3 at idle on 100 %, at idle on 58 % with the schedule holding
+        # the charge off, and while actually charging at 59 %. What told the
+        # three apart was `isCharging` (false, false, true) with
+        # `timeToFullyCharged` (0, 0, 155). On an EX5 the code is the word
+        # (#10, #17), and on a token-served Geely EM car `isCharging` read
+        # false through a real charge (#88), so this reading applies only
+        # where the catalogue declares the 1.0 charge scheme - the poller and
+        # sensor._is_charging read the flag.
+        out["charging.code_3_is_plugged"] = True
     # Parking Comfort, by the same evidence standard. The 1.0 catalogue
     # enumerates its remote controls one by one (lock, trunk, windows, window
     # vent, AC, charge, scheduled trip) and has no parking-comfort row in any

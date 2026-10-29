@@ -390,6 +390,59 @@ def test_the_connection_label_says_charging_during_a_dc_session():
     assert s2.native_value == "Plugged in"
 
 
+def test_a_1_0_car_with_the_cable_in_is_charging_only_when_it_says_so():
+    """Ten diagnostics files from one E2 (#72): statusOfChargerConnection 3 at
+    idle on 100 %, at idle on 58 % with the schedule holding the charge off,
+    and while charging on 59 %. isCharging read false/false/true and
+    timeToFullyCharged 0/0/155. On that car the code means the cable is in,
+    and the catalogue's 1.0 charge scheme is what says so - every other car
+    keeps reading 3 as charging, since a token-served Geely EM car's isCharging
+    read false through a real charge (#88)."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    sensor = load("sensor")
+    f = sensor.charging_from_fields
+    idle = _charging(isCharging="false", timeToFullyCharged="0")
+    live = _charging(isCharging="true", timeToFullyCharged="155")
+    assert f(idle, code_3_is_plugged=True) is False
+    assert f(live, code_3_is_plugged=True) is True
+    assert f(_charging(isCharging="false", timeToFullyCharged="40"),
+             code_3_is_plugged=True) is True, "minutes still counting"
+    assert f(_charging(isCharging=False), code_3_is_plugged=True) is False, "a real bool"
+    assert f(_charging(isCharging="false", timeToFullyCharged="2047"),
+             code_3_is_plugged=True) is False, "2047 is the car's 'no estimate', not minutes"
+    assert f(_charging(), code_3_is_plugged=True) is True, \
+        "a payload that says neither keeps the code's word"
+    assert f(idle) is True and f(live) is True, "no flag: 3 is charging, as on an EX5"
+    # The poller's verdict rides in the snapshot; a bare payload still answers.
+    assert sensor._is_charging(idle) is True
+    idle[sensor.CHARGING_VERDICT_KEY] = False
+    assert sensor._is_charging(idle) is False
+    live[sensor.CHARGING_VERDICT_KEY] = True
+    assert sensor._is_charging(live) is True
+
+
+def test_the_connection_label_follows_the_verdict_both_ways():
+    """An E2 on a full battery with the cable in lit the cards "charging" all
+    night (#72): the map says Charging for 3, and the label now defers to the
+    composite in that direction too."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    sensor = load("sensor")
+    path = ("vehicleStatus", "additionalVehicleStatus",
+            "electricVehicleStatus", "statusOfChargerConnection")
+    idle = _charging(isCharging="false", timeToFullyCharged="0")
+    idle[sensor.CHARGING_VERDICT_KEY] = False
+    s = sensor.GeelySensor(_Coord(idle), FAKE_VIN, "Geely (0000)",
+                           "charger_connected", "Charger Connection", path,
+                           None, None, "map", sensor._CHARGER_CONNECTION_MAP)
+    assert s.native_value == "Plugged in"
+    idle[sensor.CHARGING_VERDICT_KEY] = True
+    assert s.native_value == "Charging"
+    del idle[sensor.CHARGING_VERDICT_KEY]
+    assert s.native_value == "Charging", "no verdict: the code's word, as before"
+
+
 def test_charge_complete_survives_a_dc_session():
     """timeToFullyCharged counted 60 down to 16 during the #10 session while
     the old status gate hid the estimate completely."""

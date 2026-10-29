@@ -72,9 +72,15 @@ def test_manual_mode_gives_the_coordinator_no_update_interval():
     assert "update_interval=None if _MANUAL else" in body, (
         "manual mode must pass update_interval=None so nothing is scheduled"
     )
-    assert "if not _MANUAL:" in body, (
+    # The adaptive interval is applied through one closure, from the poll and
+    # from setup's second look at the first snapshot (#72); the manual-mode
+    # guard lives there, before the setter, so neither caller can skip it.
+    start = body.index("def _follow_interval(")
+    setter = body.index("coordinator.update_interval = _adaptive_interval(", start)
+    assert start < body.index("if _MANUAL:", start) < setter, (
         "the adaptive interval must not be re-applied in manual mode"
     )
+    assert body.count("_follow_interval(") == 3, "the definition and its two callers"
 
 
 def test_removing_the_entry_deletes_the_vehicle_key():

@@ -597,6 +597,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
         curated |= {".".join(spec[2]) for spec in HYBRID_SPECS}
     if charges:
         curated |= _CHARGE_LEG_PATHS
+    # The poller's own verdict, not a field the server returns.
+    curated.add(CHARGING_VERDICT_KEY)
 
     known: set[str] = set()
 
@@ -722,6 +724,13 @@ class GeelySensor(CoordinatorEntity, _AutoPrecision):
             # (#10), and a label that says "Plugged in" during a 90 kW charge
             # is technically true and practically wrong.
             return "Charging"
+        if self._key == "charger_connected" and val == "Charging"                and not _is_charging(self.coordinator.data or {}):
+            # The other way round on a 1.0-scheme car: an E2 reports 3 with
+            # the cable in and nothing flowing, and the cards lit "charging"
+            # on a full battery all night (#72). The composite has the
+            # catalogue's word on that; on every other car 3 is charging and
+            # this branch is never reached.
+            return "Plugged in"
         return val
 
 
@@ -1118,7 +1127,24 @@ class GeelyCombinedRangeSensor(CoordinatorEntity, _AutoPrecision):
         return round(fuel + electric)
 
 
+# The poller's verdict on charging, written into every snapshot it hands out
+# (see __init__._async_update). Entities take only the coordinator, so what
+# the catalogue says about this car's codes reaches them through the data;
+# _is_charging reads the verdict where there is one and falls back to the
+# fields, so a plain payload still answers.
+CHARGING_VERDICT_KEY = "_charging"
+
+
 def _is_charging(data: dict) -> bool:
+    """Whether the car is actually charging: the poller's verdict when the
+    snapshot carries one, else the fields alone (charging_from_fields)."""
+    verdict = data.get(CHARGING_VERDICT_KEY) if isinstance(data, dict) else None
+    if isinstance(verdict, bool):
+        return verdict
+    return charging_from_fields(data)
+
+
+def charging_from_fields(data: dict, *, code_3_is_plugged: bool = False) -> bool:
     """Whether the car is actually charging, from either signal it gives.
 
     `statusOfChargerConnection == 3` is the official word, and AC sessions do
@@ -1131,15 +1157,38 @@ def _is_charging(data: dict) -> bool:
     current keeps driving and plugged-idle out - the contactor alone would
     misfire if it ever glitched during a drive, and the current alone could
     catch regen.
+
+    `code_3_is_plugged` is the catalogue's word on a 1.0-scheme car (an E2,
+    capabilities.py): there 3 means the cable is in, and whether a charge is
+    running is `isCharging`, or a `timeToFullyCharged` still counting. Ten
+    files from one E2 (#72): idle on 100 %, idle on 58 % under a schedule,
+    charging on 59 % - 3 in all of them, `isCharging` false/false/true and
+    the minutes 0/0/155. An explicit false with no minutes left is not
+    charging; a payload that says neither keeps the code's word, as every
+    other car does. Not applied elsewhere: on a token-served Geely EM car
+    `isCharging` read false through a real charge (#88).
     """
     if _walk(data, (*_EV, "statusOfChargerConnection")) in _CHARGING_CODES:
-        return True
+        if not code_3_is_plugged or _a_1_0_car_says_charging(data):
+            return True
     if str(_walk(data, (*_EV, "dcDcConnectStatus"))) == "3":
         try:
             return float(_walk(data, (*_EV, "dcChargeIAct"))) < -0.5
         except (TypeError, ValueError):
             pass
     return False
+
+
+def _a_1_0_car_says_charging(data: dict) -> bool:
+    """On a 1.0-scheme car with the cable in: `isCharging`, or minutes still
+    counting, say a charge is running; an explicit false says it is not; a
+    payload with neither field leaves the connection code its word."""
+    flag = str(_walk(data, (*_EV, "isCharging"))).strip().lower()
+    # minutes_or_none, not a bare float: 2047 is the car's "no estimate".
+    minutes = _minutes_or_none(_walk(data, (*_EV, "timeToFullyCharged")))
+    if flag == "true" or minutes is not None:
+        return True
+    return flag != "false"
 
 
 def _charge_leg(data: dict) -> tuple[float, float, bool] | None:
