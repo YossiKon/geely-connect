@@ -888,7 +888,7 @@ you have installed, this integration's manifest, and how long setup took - so
 
 | Section | What it answers |
 |---|---|
-| `vehicle_token` | On a Geely EM entry: whether the new platform's vehicle token is set in the entry, in its options, and in use - never the token itself. Without one, reads and commands go the old platform's way |
+| `vehicle_token` | On a Geely EM entry: whether the new platform's vehicle token is set in the entry, in its options, and in use - never the token itself. Without one, reads and commands go the old platform's way. `car_refused` is true when the new gateway turned the car away (`079001`): on the cars seen so far, such a car has no token to paste |
 | `polling` | Why the data is as old as it is. Poll cycle, how many polls in a row saw nothing change, the interval the adaptive logic settled on, whether the last fetch succeeded, and the last error |
 | `recent_commands` | The last 25 remote commands: what was sent, what came back, and how far apart. **This is the section that shows a command the car refused because it was still busy** - which leaves no other trace at all |
 | `logging` | Whether debug logging is actually on, so "I enabled it and got nothing" has an answer |
