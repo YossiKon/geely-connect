@@ -100,8 +100,8 @@ _AUTH_FAILURE_CODES: set = {
 _CONTROL_SUCCESS_CODES: set = {1000, "1000"}
 
 # Cert-provisioning codes that mean "wrong regional backend for this account",
-# not "something went wrong". 1501 is the EU server declining to verify a
-# GeelyOS token issued by another region; 1445 is the signature check failing,
+# not "something went wrong". 1501 is a cert server declining to verify a
+# GeelyOS token issued by another backend; 1445 is the signature check failing,
 # which is what a different region's app credentials produce.
 _REGION_MISMATCH_CODES: set = {"1501", "1445"}
 
@@ -1576,9 +1576,10 @@ def provision_user_cert(*, app_id: str, app_secret: str, user_id: str,
                                       pin_path=pin_path, timeout=30))
 
     if j.get("code") != 1000:
-        # 1501 'geelyos verify error' is the EU cert server refusing to verify a
-        # token that belongs to another region's GeelyOS. Everything before this
-        # point succeeds, so say what it means instead of dumping the response.
+        # 1501 'geelyos verify error' is the cert server refusing to verify a
+        # token that belongs to another backend's GeelyOS. Everything before
+        # this point succeeds, so say what it means instead of dumping the
+        # response.
         if str(j.get("code")) in _REGION_MISMATCH_CODES:
             raise _region_refusal(cert_host, j)
         raise RuntimeError(f"cert/file failed: {redact(j)}")

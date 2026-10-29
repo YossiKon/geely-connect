@@ -276,8 +276,9 @@ def _token_report(data, options, api):
 def test_the_report_says_whether_the_vehicle_token_is_set_but_not_what_it_is():
     """Both passes mask the stored token whatever it holds, so a report could
     not tell a Geely EM entry with a token from one without (#63) - and that
-    decides which way every read and command went. Three booleans, never the
-    value; a legacy entry has no such token at all."""
+    decides which way every read and command went. Three booleans and the
+    probe's verdict on the car, never the value; a legacy entry has no such
+    token at all."""
     if not have_homeassistant():
         skip("homeassistant not installed")
     assert _report()["vehicle_token"] is None
@@ -286,21 +287,33 @@ def test_the_report_says_whether_the_vehicle_token_is_set_but_not_what_it_is():
     class Api:
         command_trail: list = []
         enc_vin = x_vin
+        car_refused = False
 
     r = _token_report({"zeekr_enc_vin": x_vin}, {}, Api())
     assert r["vehicle_token"] == {
-        "in_entry_data": True, "in_options": False, "in_use": True}
+        "in_entry_data": True, "in_options": False, "in_use": True,
+        "car_refused": False}
     assert x_vin not in json.dumps(r), "the token itself reached the report"
     # Pasted under Configure, on an entry whose setup never built a client.
     r = _token_report({}, {"zeekr_enc_vin": x_vin}, None)
     assert r["vehicle_token"] == {
-        "in_entry_data": False, "in_options": True, "in_use": None}
+        "in_entry_data": False, "in_options": True, "in_use": None,
+        "car_refused": None}
     assert x_vin not in json.dumps(r)
-    # #63: a running entry the derivation left without one.
+    # #63: a running entry the derivation left without one - no verdict on
+    # the car (a build nobody has captured, or no answer)...
     Api.enc_vin = ""
     r = _token_report({}, {}, Api())
     assert r["vehicle_token"] == {
-        "in_entry_data": False, "in_options": False, "in_use": False}
+        "in_entry_data": False, "in_options": False, "in_use": False,
+        "car_refused": False}
+    # ...or for a car the new gateway turns away (079001), which the probe
+    # says only at info: the report has to tell the two apart on its own.
+    Api.car_refused = True
+    r = _token_report({}, {}, Api())
+    assert r["vehicle_token"] == {
+        "in_entry_data": False, "in_options": False, "in_use": False,
+        "car_refused": True}
 
 
 def test_a_geely_em_entrys_commands_reach_the_report():

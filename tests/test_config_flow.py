@@ -5,6 +5,7 @@ these exercise the actual branch logic rather than a copy of it. The guards on
 identifiers live in test_config_flow_guards.py.
 """
 import asyncio
+import logging
 
 from conftest import FAKE_VIN, have_homeassistant, load
 from run import skip
@@ -168,7 +169,10 @@ def test_an_unsupported_region_aborts_before_any_network_call():
 
 def test_a_server_side_region_rejection_also_aborts_cleanly():
     """The backend can disagree with the vehicle record, so 1501/1445 during
-    provisioning must produce the same clear message, not a generic failure."""
+    provisioning must produce the same clear message, not a generic failure.
+    The abort points at a log line that names the region detected; the error
+    itself names only the server that refused, and a record that gives just
+    its market (AE, #105) falls back to another region's backend."""
     cf, flow = _flow()
 
     def boom(**kw):
@@ -176,8 +180,33 @@ def test_a_server_side_region_rejection_also_aborts_cleanly():
 
     cf.geely_api.provision_user_cert = boom
     flow._email, flow._user_id, flow._cidpsso_token = EMAIL, USER_ID, TOKEN
-    res = asyncio.run(flow._finish_with_vehicle(_vehicle()))
+    lines = []
+
+    class _Lines(logging.Handler):
+        def emit(self, record):
+            lines.append(record.getMessage())
+
+    handler = _Lines(level=logging.ERROR)
+    cf._LOGGER.addHandler(handler)
+    try:
+        res = asyncio.run(flow._finish_with_vehicle(
+            _vehicle(tspInfo=[], saleMarket="AE", tcamMarket="AE")))
+    finally:
+        cf._LOGGER.removeHandler(handler)
     assert res["type"] == "abort" and res["reason"] == "wrong_region"
+    refused = [line for line in lines if "refused" in line]
+    assert len(refused) == 1 and "region AE" in refused[0], lines
+    assert "geelyos verify error" in refused[0], refused
+    # A record that names no region at all is not "detected as" the default.
+    lines.clear()
+    cf._LOGGER.addHandler(handler)
+    try:
+        asyncio.run(flow._finish_with_vehicle(_vehicle(tspInfo=[])))
+    finally:
+        cf._LOGGER.removeHandler(handler)
+    refused = [line for line in lines if "refused" in line]
+    assert len(refused) == 1, lines
+    assert "names no region" in refused[0] and "detected" not in refused[0], refused
 
 
 def test_a_provisioning_failure_is_reported_as_such():

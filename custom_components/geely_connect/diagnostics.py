@@ -178,12 +178,19 @@ async def _charge_server(hass: HomeAssistant, api: Any,
 
 
 def _vehicle_token(entry: ConfigEntry, api: Any) -> dict[str, Any] | None:
-    """Where the new platform's vehicle token is set, as three booleans.
+    """Where the new platform's vehicle token is set, as three booleans, and
+    whether the start-up probe found the car turned away.
 
     Not "pasted" or "derived": the options form pre-fills from the entry data,
     so a token in the options may be a derived one saved back. `in_use` is
-    what the running client sends, None when setup never built one. A legacy
-    entry has no such token.
+    what the running client sends, None when setup never built one. With no
+    token, `car_refused` True is the probe's verdict that the new gateway
+    turns the car away (079001; on the cars seen so far such a car has no
+    token at all, #106), which it says only at info, so a report could not
+    tell it from the rest (#63, #84). False is no verdict of that kind: no
+    known build matched, or the probe never got an answer. Like `in_use`, it
+    is None when setup never built a client. A legacy entry has no such
+    token.
     """
     if entry.data.get(CONF_PLATFORM, DEFAULT_PLATFORM) != PLATFORM_ZEEKR:
         return None
@@ -191,6 +198,8 @@ def _vehicle_token(entry: ConfigEntry, api: Any) -> dict[str, Any] | None:
         "in_entry_data": bool(entry.data.get(CONF_ZEEKR_ENC_VIN)),
         "in_options": bool(entry.options.get(CONF_ZEEKR_ENC_VIN)),
         "in_use": bool(api.enc_vin) if hasattr(api, "enc_vin") else None,
+        "car_refused": (bool(api.car_refused)
+                        if hasattr(api, "car_refused") else None),
     }
 
 

@@ -744,6 +744,57 @@ def test_a_refusal_keeps_the_code_the_server_gave():
         assert e.code == "8500"
     assert a.command_trail[-1]["code"] == "8500"
 
+    # Nor does a refusal the server sent without one: the client words it
+    # `code=None`, which is not a code to record.
+    def no_code(vin, body):
+        raise zc.ZeekrApiError("code=None message=unknown")
+
+    c.control_resp = no_code
+    try:
+        a.control("RDL_2", [], "start")
+    except ad.GeelyControlError as e:
+        assert e.code == "8500"
+    assert a.command_trail[-1]["code"] == "8500"
+
+
+def test_a_refused_rapid_climate_keeps_its_code_too():
+    """Rapid climate goes out on its own endpoint, not through control(), and
+    a refusal there passed through as a bare ZeekrApiError: the trail noted an
+    "error" with no code, and the climate entity logged a traceback for a car
+    that was only busy. It is a refusal like any other now (#104)."""
+    a, c = _make_adapter()
+    c.enc_vin = "opaque-token"
+
+    def busy(setting, command="immediately"):
+        raise zc.ZeekrApiError(
+            "code=8070 message=The last request has not yet been executed")
+
+    c.set_smart_temp_new = busy
+    try:
+        a.rapid_climate(ac=True, temp="28.5", heat_seats=["11"], sw=True)
+    except ad.GeelyControlError as e:
+        assert e.code == "8070"
+        assert "has not yet been executed" in e.message
+    else:  # pragma: no cover - only reached on a regression
+        raise AssertionError("expected GeelyControlError")
+    note, = a.command_trail
+    assert note["command"] == "rapid_climate"
+    assert note["outcome"] == "rejected" and note["code"] == "8070"
+
+    # A dead session still goes through the renewal first and comes out as
+    # the re-auth error it always was, not as a refusal.
+    def dead(setting, command="immediately"):
+        raise zc.ZeekrApiError("code=079021 message=logged in elsewhere")
+
+    c.set_smart_temp_new = dead
+    try:
+        a.rapid_climate(ac=True, temp="28.5", heat_seats=["11"], sw=True)
+    except ad.GeelyAuthError:
+        pass
+    else:  # pragma: no cover - only reached on a regression
+        raise AssertionError("expected GeelyAuthError")
+    assert a.command_trail[-1]["outcome"] == "session-expired"
+
 
 def test_a_dead_session_is_recorded_as_one():
     a, c = _make_adapter()
