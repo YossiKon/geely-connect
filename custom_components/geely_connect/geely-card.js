@@ -142,8 +142,8 @@
   /* The button lights with the switch, which reads the car's own state since
    * #45. A car whose payload lacks the field - a Geely EM entry reads no state
    * block - leaves the switch unknown and the button unlit. */
-  const PCOMFORT_HINT = "Parking Comfort: keeps the cabin comfortable while the "
-    + "car is parked.";
+  const PCOMFORT_HINT = "Parking Comfort: shows the car's Camping mode; the "
+    + "remote on/off has not yet been seen to change a car.";
 
   /* These two buttons fire the car's own Rapid Warming / Rapid Cooling presets,
    * not a plain "start heating". Labelled Heat and Cool they read as the latter -
@@ -276,7 +276,7 @@
       "tooltip.lifetime_avg": "Average since the car was new. Your car's screen usually shows the current trip instead, which reads lower - that is the Trip Consumption entity, not this one.",
       "tooltip.navigate_with": "Navigate to the car with {app}",
       "tooltip.open_the_full_card": "Open the full card",
-      "tooltip.parking_comfort": "Parking Comfort: keeps the cabin comfortable while the car is parked.",
+      "tooltip.parking_comfort": "Parking Comfort: shows the car's Camping mode; the remote on/off has not yet been seen to change a car.",
       "tooltip.rapid_cool": "Rapid cooling: the car's own preset - drives the setpoint to its minimum, ventilates both front seats and cracks the windows",
       "tooltip.rapid_heat": "Rapid warming: the car's own preset - drives the setpoint to its maximum and heats both front seats, plus the steering wheel where fitted",
       "tooltip.schedule_toggle": "Scheduled charging on / off",
@@ -385,7 +385,7 @@
       "tooltip.lifetime_avg": "ค่าเฉลี่ยตั้งแต่รถยังใหม่ หน้าจอในรถมักแสดงค่าทริปปัจจุบันแทน ซึ่งจะน้อยกว่านี้ - นั่นคือเอนทิตี Trip Consumption ไม่ใช่ตัวนี้",
       "tooltip.navigate_with": "นำทางไปยังรถด้วย {app}",
       "tooltip.open_the_full_card": "เปิดการ์ดแบบเต็ม",
-      "tooltip.parking_comfort": "โหมดจอดสบาย: รักษาความสบายในห้องโดยสารขณะจอดรถ",
+      "tooltip.parking_comfort": "โหมดจอดสบาย: แสดงสถานะโหมดแคมป์ของรถ การสั่งเปิด/ปิดจากระยะไกลยังไม่เคยเปลี่ยนสถานะของรถ",
       "tooltip.rapid_cool": "เย็นเร็ว: โหมดสำเร็จรูปของรถ ปรับอุณหภูมิไปที่ค่าต่ำสุด ระบายความร้อนเบาะคู่หน้าทั้งสองฝั่ง และเปิดกระจกเล็กน้อย",
       "tooltip.rapid_heat": "อุ่นเร็ว: โหมดสำเร็จรูปของรถ ปรับอุณหภูมิไปที่ค่าสูงสุดและอุ่นเบาะคู่หน้าทั้งสองฝั่ง รวมถึงพวงมาลัยในรุ่นที่มี",
       "tooltip.schedule_toggle": "ตั้งเวลาชาร์จ เปิด / ปิด",
@@ -494,7 +494,7 @@
       "tooltip.lifetime_avg": "Media dall'acquisto dell'auto. Lo schermo dell'auto di solito mostra il viaggio corrente, che risulta più basso - quella è l'entità Consumo Viaggio, non questa.",
       "tooltip.navigate_with": "Naviga verso l'auto con {app}",
       "tooltip.open_the_full_card": "Apri la scheda completa",
-      "tooltip.parking_comfort": "Comfort parcheggio: mantiene confortevole l'abitacolo mentre l'auto è parcheggiata.",
+      "tooltip.parking_comfort": "Comfort parcheggio: mostra la modalità Camping dell'auto; il comando remoto non ha ancora cambiato nulla in un'auto.",
       "tooltip.rapid_cool": "Raffreddamento rapido: il preset dell'auto - porta il setpoint al minimo, ventila entrambi i sedili anteriori e abbassa leggermente i finestrini",
       "tooltip.rapid_heat": "Riscaldamento rapido: il preset dell'auto - porta il setpoint al massimo e riscalda entrambi i sedili anteriori, oltre al volante dove presente",
       "tooltip.schedule_toggle": "Ricarica programmata on / off",
@@ -603,7 +603,7 @@
       "tooltip.lifetime_avg": "Среден разход откакто колата е нова. Екранът в колата обикновено показва текущото пътуване, което е по-ниско - това е обектът Trip Consumption, а не този.",
       "tooltip.navigate_with": "Навигация до колата с {app}",
       "tooltip.open_the_full_card": "Отвори пълната карта",
-      "tooltip.parking_comfort": "Комфорт при паркиране: поддържа приятна температура в купето, докато колата е паркирана.",
+      "tooltip.parking_comfort": "Комфорт при паркиране: показва режима Camping на колата; дистанционното включване/изключване досега не е променило нищо в кола.",
       "tooltip.rapid_cool": "Бързо охлаждане: вграден режим на колата - задава минимална температура, вентилира двете предни седалки и открехва прозорците",
       "tooltip.rapid_heat": "Бързо затопляне: вграден режим на колата - задава максимална температура и затопля двете предни седалки, както и волана, ако има отопление",
       "tooltip.schedule_toggle": "Зареждане по график вкл. / изкл.",

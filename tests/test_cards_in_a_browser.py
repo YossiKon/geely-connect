@@ -1798,7 +1798,11 @@ def test_parking_comfort_appears_on_the_big_cards_when_the_car_has_it():
             # Lit with the switch, which reads the car's state since #45; an
             # unknown one must not light it either.
             assert got["lit"] is (state == "on"), (tag, state, got)
-            assert "keeps the cabin comfortable" in got["title"], (tag, got["title"])
+            # The hint says what the switch does today: it shows the car's
+            # Camping mode; the remote write has not been seen to change a
+            # car (#45), so it must not promise cabin comfort on a press.
+            assert "Camping mode" in got["title"], (tag, got["title"])
+            assert "keeps the cabin" not in got["title"], (tag, got["title"])
             assert "does not report" not in got["title"], (tag, got["title"])
 
 
