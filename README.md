@@ -618,8 +618,9 @@ back off removes the generated entities again.
 Geely's backend allows **one active session per account**: a sign-in from one
 client invalidates the other's access token, which is the `1402` both sides then
 see and renew from (measured on the EU backend,
-[#101](https://github.com/YossiKon/geely-connect/issues/101)). Polling itself
-does not sign in, and is kept as light as possible: few
+[#101](https://github.com/YossiKon/geely-connect/issues/101)). A poll does not
+sign in (a Geely EM entry renews its own session from the stored password about
+every two days, which does), and polling is kept as light as possible: few
 calls per cycle, GPS wake-ups and secondary data fetched sparingly, and long
 intervals whenever nothing changes (with an overnight quiet period). You pick a
 profile at setup:

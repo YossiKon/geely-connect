@@ -928,9 +928,9 @@
 
   const ICONS = {
     nav: `<path d="M20 4 10.5 20l-1.2-6.3L3 12.5z"/>`,
-    // Parking Comfort keeps the cabin liveable while the car sits, which is
-    // what mdi:sleep says on the switch itself - so a crescent, not the
-    // climate fan it was borrowing.
+    // Parking Comfort is the car's Camping mode, a cabin kept liveable while
+    // the car sits, which is what mdi:sleep says on the switch itself - so a
+    // crescent, not the climate fan it was borrowing.
     sleep: `<path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a7.5 7.5 0 1 0 10.5 10.5z"/>`,
     driving: `<path d="M3.5 14.5h17M5 14.5l1.7-4.6A2 2 0 0 1 8.6 8.5h6.8a2 2 0 0 1 1.9 1.4l1.7 4.6"/>
               <path d="M4.5 14.5v3h3v-3M16.5 14.5v3h3v-3"/>
@@ -2060,8 +2060,10 @@
       const ventRow = this._hidden("seat_cooling") ? ""
         : seat("seat_vent_driver", driverWord, "seatvent", seatCoolMode) +
           seat("seat_vent_passenger", passengerWord, "seatvent", seatCoolMode);
-      /* Parking Comfort keeps the cabin liveable while the car sits, so it belongs
-       * beside the cabin-air controls rather than among the one-shot actions.
+      /* Parking Comfort is the car's Camping mode, a cabin kept liveable while
+       * the car sits, so it belongs beside the cabin-air controls rather than
+       * among the one-shot actions (the button shows that mode; the remote
+       * write has not been seen to change a car, #45).
        *
        * It is wired to the state like every other button here. It used to be
        * unable to light up, while the switch read unknown on every car; it was
