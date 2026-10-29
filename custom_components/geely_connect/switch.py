@@ -145,8 +145,10 @@ SWITCH_DEFS: list[tuple] = [
     # app's own decode, which takes every other value as off (#45), and it
     # was measured on an EX5: the field read 1 with the feature off and moved
     # to 2 when Camping mode was switched on in the car, campingModeActive
-    # following about 30 s later. Not seen yet: the field going back to 1
-    # when the mode is switched off again.
+    # following about 30 s later. With the mode switched off in the car
+    # again, the next read had it back at 1 - the drop came somewhere in the
+    # 2.5 minutes between two reads - and it stayed 1 with Rest mode on: on
+    # that one cycle it followed Camping mode both ways.
     #
     # It is not a plain flag. On a P145-J1 with parking comfort *off* it read
     # 1 too, alongside activateState, inhibitionState, liveDetectionState,
