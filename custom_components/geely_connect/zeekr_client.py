@@ -727,6 +727,10 @@ class ZeekrClient:
         # The last probe's verdict when it found no token: True when the
         # gateway turned the car away (079001) rather than the token.
         self.car_refused: bool = False
+        # What each known build drew in the last probe, when none matched and
+        # the car was not turned away; "" otherwise. Setup names it in the
+        # warning it gives once it has read the garage.
+        self.probe_summary: str = ""
 
     @property
     def profile(self) -> ZeekrRegion | None:
@@ -1052,19 +1056,24 @@ class ZeekrClient:
         disturbs a value already in use.
 
         Every candidate's outcome is logged at debug and, when none matches,
-        summarised - an owner on an app build nobody has captured (#84, iOS)
+        summarised at info and kept in `probe_summary`, which setup's warning
+        names - an owner on an app build nobody has captured (#84, iOS)
         otherwise saw nothing at all: the flow swallowed each rejection and
         stored an empty token in silence. Three failures are told apart: a
-        `079025` is the gateway's verdict on the KEY, so the probe answers ""
-        and warns, and the caller can say so; a `079001` turns the CAR away
-        once a key got past the decrypt check, so it answers "" as well but
-        sets `car_refused` and says so at info, since on the cars seen so far
-        there is no token to paste for such a car (#106); and a candidate that
-        met a dead session was never judged at all, so when any did the probe
-        raises instead, and the adapter's renewal gets its turn. No log line
+        `079025` is the gateway's verdict on the KEY, so the probe answers "";
+        a `079001` turns the CAR away once a key got past the decrypt check, so
+        it answers "" as well but sets `car_refused`, since on the cars seen so
+        far there is no token to paste for such a car (#106); and a candidate
+        that met a dead session was never judged at all, so when any did the
+        probe raises instead, and the adapter's renewal gets its turn. Whether
+        a token is missing after a `079025` depends on the new gateway holding
+        the car, which the probe cannot tell: for a car its garage does not
+        list, a pasted token turns every read into `079001`. So the advice to
+        paste one is setup's to give, once it has read the garage. No log line
         carries the VIN or a candidate value.
         """
         self.car_refused = False
+        self.probe_summary = ""
         if not self.access_token or not vin:
             return ""
         saved = self.enc_vin
@@ -1111,12 +1120,14 @@ class ZeekrClient:
                     "The derivation is retried at every start",
                     "; ".join(outcomes))
                 return ""
-            _LOGGER.warning(
+            # No advice here: setup reads the new gateway's garage next and
+            # warns with this summary, unless the garage shows the car is not
+            # on the new gateway.
+            self.probe_summary = "; ".join(outcomes)
+            _LOGGER.info(
                 "x-vin auto-derivation: none of the %d known app builds matched "
-                "this vehicle (%s). Paste the token from your app under "
-                "Configure -> Vehicle token; the derivation is retried at every "
-                "start, so a release that adds your build fixes this by itself",
-                len(materials), "; ".join(outcomes))
+                "this vehicle (%s); the derivation is retried at every start",
+                len(materials), self.probe_summary)
             return ""
         finally:
             self.enc_vin = saved

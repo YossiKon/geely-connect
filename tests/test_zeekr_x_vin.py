@@ -120,11 +120,16 @@ def _capture(fn):
         logger.setLevel(old)
 
 
-def test_probe_logs_each_candidate_and_warns_when_none_matches():
+def test_probe_logs_each_candidate_and_summarises_when_none_matches():
     """An owner on an app build nobody has captured (#84, iOS) saw nothing: the
     flow swallowed every rejection and stored "" in silence. Now each candidate's
-    verdict is at debug and the summary at warning - naming the Configure field
-    - and neither line carries the VIN or a candidate value."""
+    verdict is at debug and the summary at info, and neither line carries the
+    VIN or a candidate value.
+
+    The summary gives no advice. It used to warn "paste the token" at every
+    start, and for a car the new gateway does not hold, the only kind seen to
+    have no token, a pasted one turns every read into 079001 (#106). Setup
+    reads the garage after the probe, so the warning is setup's to give."""
     client = _client_with("something-no-build-produces")
     got, records = _capture(lambda: client.probe_x_vin(FAKE_VIN))
     assert got == ""
@@ -133,10 +138,17 @@ def test_probe_logs_each_candidate_and_warns_when_none_matches():
     assert len(debug) == len(zc._X_VIN_MATERIAL), debug
     for note_line, (_k, _iv, note) in zip(debug, zc._X_VIN_MATERIAL):
         assert note in note_line and "079025" in note_line, note_line
-    warn = [r.getMessage() for r in records if r.levelno == logging.WARNING]
-    assert len(warn) == 1, warn
-    assert "Vehicle token" in warn[0] and "retried" in warn[0], warn[0]
-    for line in debug + warn:
+    assert not [r for r in records if r.levelno >= logging.WARNING], \
+        [r.getMessage() for r in records]
+    info = [r.getMessage() for r in records if r.levelno == logging.INFO]
+    assert len(info) == 1, info
+    assert "079025" in info[0] and "retried" in info[0], info[0]
+    assert "Configure" not in info[0] and "Vehicle token" not in info[0], info[0]
+    # The summary is kept for setup's warning, which a default log shows.
+    assert client.probe_summary and client.probe_summary in info[0], client.probe_summary
+    for _k, _iv, note in zc._X_VIN_MATERIAL:
+        assert note in client.probe_summary, client.probe_summary
+    for line in debug + info + [client.probe_summary]:
         assert FAKE_VIN not in line, line
         for key, iv, _n in zc._X_VIN_MATERIAL:
             assert zc.derive_x_vin(FAKE_VIN, key, iv) not in line, line
@@ -145,8 +157,10 @@ def test_probe_logs_each_candidate_and_warns_when_none_matches():
 def test_an_accepted_candidate_is_logged_and_raises_no_warning():
     key, iv, note = zc._X_VIN_MATERIAL[-1]
     client = _client_with(zc.derive_x_vin(FAKE_VIN, key, iv))
+    client.probe_summary = "left over from an earlier probe"
     got, records = _capture(lambda: client.probe_x_vin(FAKE_VIN))
     assert got
+    assert client.probe_summary == "", "a match leaves nothing to warn about"
     assert not [r for r in records if r.levelno == logging.WARNING]
     accepted = [r.getMessage() for r in records if "accepted" in r.getMessage()]
     assert len(accepted) == 1 and note in accepted[0], accepted
@@ -229,6 +243,7 @@ def test_a_car_the_gateway_turns_away_is_told_no_token_to_paste():
     client.capabilities_new = caps
     got, records = _capture(lambda: client.probe_x_vin(FAKE_VIN))
     assert got == "" and client.car_refused is True
+    assert client.probe_summary == "", "setup gets nothing to warn with"
     assert not [r for r in records if r.levelno >= logging.WARNING], records
     info = [r.getMessage() for r in records if r.levelno == logging.INFO]
     assert len(info) == 1, info
@@ -244,9 +259,11 @@ def test_a_car_the_gateway_turns_away_is_told_no_token_to_paste():
 
     client.capabilities_new = wrong_key
     assert client.probe_x_vin(FAKE_VIN) == "" and client.car_refused is False
+    assert "079025" in client.probe_summary, client.probe_summary
     client.car_refused = True
     client.access_token = None
     assert client.probe_x_vin(FAKE_VIN) == "" and client.car_refused is False
+    assert client.probe_summary == "", "a probe that tried no build has no summary"
 
 
 def test_the_two_verdict_predicates():

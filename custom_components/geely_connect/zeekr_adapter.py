@@ -440,6 +440,12 @@ class ZeekrAdapter(CommandTrail):
         for such a car: the app reads it by its plain VIN (#106)."""
         return self._client.car_refused
 
+    @property
+    def probe_summary(self) -> str:
+        """What each known build drew in the last probe that matched none and
+        was not a refusal of the car; "" otherwise. Setup's warning names it."""
+        return self._client.probe_summary
+
     def probe_x_vin(self, vin: str) -> str:
         """Derive and gateway-verify the x-vin from the plain VIN, "" when no
         known app build matches. Runs through the renewal wrapper so a dead
@@ -448,25 +454,31 @@ class ZeekrAdapter(CommandTrail):
         """
         return self._authed(self._client.probe_x_vin, vin) or ""
 
-    def new_gateway_lists_vehicle(self) -> bool:
-        """Whether the new gateway's garage has this car at all.
+    def new_gateway_lists_vehicle(self) -> bool | None:
+        """Whether the new gateway's garage has this car at all: True or
+        False, or None when its answer cannot tell.
 
         An account on the new app can have a car the new gateway does not
         list: its vehicle list answers ok with no vehicles, the car is read and
         commanded by plain VIN on the old route, and the app sends an x-vin to
         no endpoint that serves it - a pasted token turns every read into
         `079001`. No key can be missing for such a car. A list whose records
-        carry no recognisable VIN cannot rule this car out, so it counts as
-        listing it - and so does an answer in no shape the client reads,
-        which is not an empty garage: the caller takes the x-vin Repairs
-        issue down on a False, and a car that has since moved to the new
-        gateway must keep the one hint that says where its token goes.
+        carry no recognisable VIN cannot rule this car out, and neither can an
+        answer in no shape the client reads, which is not an empty garage:
+        both are None. The caller takes the x-vin Repairs issue down only on a
+        False, since a car that has since moved to the new gateway must keep
+        the one hint that says where its token goes, and gives the advice to
+        paste a token only on a True.
         """
         records = self._authed(self._client.vehicle_list_bff)
         if records is None:
-            return True
+            return None
         vins = [vehicle_vin(r) for r in records]
-        return self.vin in vins or (bool(records) and not any(vins))
+        if self.vin in vins:
+            return True
+        if records and not any(vins):
+            return None
+        return False
 
     # ---- coordinator surface ----------------------------------------------
 

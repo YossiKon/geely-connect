@@ -1086,11 +1086,12 @@ redacted from logs and from the diagnostics report like every other credential.
 while the new gateway lists no car for it, or turns its car away (`079001`).
 On the cars seen so far the app then reads and commands that car by its plain
 VIN on the old route, and so does this integration: there is no token to
-paste, and once the new gateway's garage has been read, no Repairs issue asks
-for one. The GPS position wake and rapid heat / cool go out in the bodies the
-iOS app was captured sending to such a car, an Australian EX5: there the wake
-brought a fresh fix within 10 seconds of a 38-minute sleep, and rapid climate
-came on in the car ([#106](https://github.com/YossiKon/geely-connect/pull/106)).
+paste, the log does not ask for one, and neither does a Repairs issue, unless
+the new gateway's vehicle list could not be read at that start. The GPS
+position wake and rapid heat / cool go out in the bodies the iOS app was
+captured sending to such a car, an Australian EX5: there the wake brought a
+fresh fix within 10 seconds of a 38-minute sleep, and rapid climate came on in
+the car ([#106](https://github.com/YossiKon/geely-connect/pull/106)).
 
 Its security model is genuinely different from the legacy one above, and it is
 only fair to state that plainly:

@@ -602,19 +602,48 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 # VIN (#106). The issue would ask for one, and an earlier
                 # release raised it for exactly these cars, so it comes down.
                 # So it does for a car the new gateway's garage does not hold:
-                # no key can be missing for it either. A failed garage read
-                # keeps the issue.
+                # no key can be missing for it either. A garage that could not
+                # be read, or whose answer cannot tell, keeps the issue.
                 missing = not api.car_refused
                 if missing:
+                    unread = ""
                     try:
-                        missing = await hass.async_add_executor_job(
+                        listed = await hass.async_add_executor_job(
                             api.new_gateway_lists_vehicle)
                     except Exception as e:  # noqa: BLE001 - keep it on doubt
+                        listed, unread = None, type(e).__name__
                         _LOGGER.debug("new-gateway vehicle list failed: %s", e)
+                    else:
+                        if listed is None:
+                            unread = "unreadable answer"
+                    missing = listed is not False
+                    # The advice the probe used to give at every start, given
+                    # here instead: a pasted token on a car the garage does not
+                    # list turns every read into 079001, and while the garage
+                    # cannot be read, nobody knows yet which kind of car this is.
+                    summary = api.probe_summary
                     if not missing:
-                        _LOGGER.debug("the new gateway does not list this "
-                                      "vehicle; it stays on the old route and "
-                                      "needs no x-vin")
+                        _LOGGER.info("the new gateway does not list this "
+                                     "vehicle; it stays on the old route and "
+                                     "needs no vehicle token")
+                    elif not summary:
+                        _LOGGER.debug("x-vin derivation tried no app build "
+                                      "(no new-platform session to ask on)")
+                    elif unread:
+                        _LOGGER.warning(
+                            "x-vin auto-derivation: none of the known app "
+                            "builds matched this vehicle (%s), and the new "
+                            "gateway's vehicle list did not show whether it "
+                            "holds this car (%s), so it is not known yet whether "
+                            "a vehicle token is missing; both are checked again "
+                            "at every start", summary, unread)
+                    else:
+                        _LOGGER.warning(
+                            "x-vin auto-derivation: none of the known app "
+                            "builds matched this vehicle (%s). Paste the token "
+                            "from your app under Configure -> Vehicle token; the "
+                            "derivation is retried at every start, so a release "
+                            "that adds your build fixes this by itself", summary)
                 _x_vin_repair(hass, entry, missing=missing)
     else:
         # The x-vin Repairs issue is about the new platform, but it is keyed
