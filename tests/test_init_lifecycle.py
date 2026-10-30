@@ -1841,16 +1841,49 @@ def test_the_slot_2_read_at_setup_leaves_the_data_alone_when_it_fails():
 
 # -------------------------------------------------------- package namespace ---
 
-def _top_level_import_names(source: str) -> set:
-    """Names a module's top-level import statements bind, except the siblings
-    `from . import x` binds on purpose - those are the very objects the import
-    system would set."""
+def _assigned_names(target) -> set:
+    if isinstance(target, ast.Name):
+        return {target.id}
+    if isinstance(target, (ast.Tuple, ast.List)):
+        return set().union(*(_assigned_names(e) for e in target.elts))
+    return set()                                    # x.y = ..., x[i] = ...: not a binding
+
+
+def _module_level_bindings(source: str) -> set:
+    """Names a module binds in its own namespace: imports, defs, classes and
+    assignments at the top level, looked for inside top-level if/try/with
+    blocks too; function and class bodies bind elsewhere and are not walked.
+    The siblings `from . import x` binds on purpose are left out - those are
+    the very objects the import system would set."""
     bound = set()
-    for node in ast.parse(source).body:
-        if isinstance(node, ast.Import):
-            bound |= {a.asname or a.name.split(".")[0] for a in node.names}
-        elif isinstance(node, ast.ImportFrom) and not (node.level and node.module is None):
-            bound |= {a.asname or a.name for a in node.names}
+
+    def visit(stmts):
+        for node in stmts:
+            if isinstance(node, ast.Import):
+                bound.update(a.asname or a.name.split(".")[0] for a in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                if not (node.level and node.module is None):
+                    bound.update(a.asname or a.name for a in node.names)
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                bound.add(node.name)
+            elif isinstance(node, ast.Assign):
+                for t in node.targets:
+                    bound.update(_assigned_names(t))
+            elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+                bound.update(_assigned_names(node.target))
+            elif isinstance(node, ast.If):
+                visit(node.body)
+                visit(node.orelse)
+            elif isinstance(node, ast.Try):
+                visit(node.body)
+                visit(node.orelse)
+                visit(node.finalbody)
+                for handler in node.handlers:
+                    visit(handler.body)
+            elif isinstance(node, (ast.With, ast.AsyncWith)):
+                visit(node.body)
+
+    visit(ast.parse(source).body)
     return bound
 
 
@@ -1860,10 +1893,13 @@ def test_the_package_namespace_binds_no_name_one_of_its_own_files_will_take():
     Assistant imports it as a platform - `time` and `select` are also stdlib
     modules. A plain `import time` there was replaced by the time platform
     when it loaded, and every poll's clock read after that raised (#72)."""
-    siblings = {os.path.splitext(f)[0] for f in os.listdir(PKG) if f.endswith(".py")}
-    siblings.discard("__init__")
+    siblings = {os.path.splitext(f)[0] for f in os.listdir(PKG)
+                if f.endswith(".py") or os.path.isdir(os.path.join(PKG, f))}
+    siblings -= {"__init__", "__pycache__"}
+    assert {"time", "select", "translations"} <= siblings, siblings
     with open(os.path.join(PKG, "__init__.py"), encoding="utf-8") as fh:
-        bound = _top_level_import_names(fh.read())
+        bound = _module_level_bindings(fh.read())
+    assert {"PLATFORMS", "async_setup_entry", "_LOGGER"} <= bound   # the rule sees every kind
     assert not (bound & siblings), bound & siblings
 
 
@@ -1887,9 +1923,14 @@ def test_loading_the_time_platform_leaves_the_poller_its_clock():
         assert ok is True
         platform = importlib.import_module(f"{name}.time")
         assert getattr(pkg, "time") is platform, "the import system binds it here"
-        reads = api.calls.count("status")
+        # A press just now: the clock read decides to fetch the state block,
+        # so that fetch is the witness that the read ran, not only that the
+        # poll did not raise. The status read comes before the clock.
+        hass.data["geely_connect"]["e1"]["poll_state"]["state_until"] = time.monotonic() + 60
+        state_reads = api.calls.count("state")
         asyncio.run(coord.refresh())                # raised before the fix
-        assert api.calls.count("status") == reads + 1, api.calls
+        assert api.calls.count("state") == state_reads + 1, api.calls
     finally:
+        _FakeCoordinator.instance = None            # let the second package tree go
         for key in [k for k in sys.modules if k == name or k.startswith(name + ".")]:
             sys.modules.pop(key, None)
