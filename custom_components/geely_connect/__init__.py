@@ -7,8 +7,12 @@ import logging
 import os
 import shutil
 import socket
-import time
 from datetime import timedelta
+# Not `import time`: this package has a `time` platform, and when Home
+# Assistant loads it the import system binds that module to the name `time`
+# in this namespace. The stdlib module bound here was replaced the moment the
+# platform loaded, and every poll's clock read after that failed (#72).
+from time import monotonic
 from typing import Any
 
 import voluptuous as vol
@@ -874,7 +878,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # every poll until the refresh just after its hold (switch.py). Read
         # only every few polls otherwise, the block would hand the switch back
         # the reading from before the press. A read, never a wake.
-        state_wanted = time.monotonic() < poll_state.get("state_until", 0.0)
+        state_wanted = monotonic() < poll_state.get("state_until", 0.0)
         if (forced or charging or was_charging or state_wanted
                 or (cyc - 1) % _SECONDARY_EVERY == 0):
             if serves_state:

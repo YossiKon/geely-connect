@@ -4,8 +4,10 @@ The update closure here is the only code between the cloud and every entity,
 and the teardown path is what keeps a removed car's private key from living
 on inside backups - both were almost entirely unexercised before this file.
 """
+import ast
 import asyncio
 import functools
+import importlib
 import importlib.util
 import os
 import sys
@@ -1835,3 +1837,59 @@ def test_the_slot_2_read_at_setup_leaves_the_data_alone_when_it_fails():
                                    charge_server_get=lambda biz: 1 / 0)
     assert run(served, dict(keep)) == keep
     assert run(types.SimpleNamespace(charge_server_get=lambda biz: 1 / 0), None) is None
+
+
+# -------------------------------------------------------- package namespace ---
+
+def _top_level_import_names(source: str) -> set:
+    """Names a module's top-level import statements bind, except the siblings
+    `from . import x` binds on purpose - those are the very objects the import
+    system would set."""
+    bound = set()
+    for node in ast.parse(source).body:
+        if isinstance(node, ast.Import):
+            bound |= {a.asname or a.name.split(".")[0] for a in node.names}
+        elif isinstance(node, ast.ImportFrom) and not (node.level and node.module is None):
+            bound |= {a.asname or a.name for a in node.names}
+    return bound
+
+
+def test_the_package_namespace_binds_no_name_one_of_its_own_files_will_take():
+    """__init__.py runs in the package's namespace, and every module file in
+    the package becomes an attribute of that namespace the moment Home
+    Assistant imports it as a platform - `time` and `select` are also stdlib
+    modules. A plain `import time` there was replaced by the time platform
+    when it loaded, and every poll's clock read after that raised (#72)."""
+    siblings = {os.path.splitext(f)[0] for f in os.listdir(PKG) if f.endswith(".py")}
+    siblings.discard("__init__")
+    with open(os.path.join(PKG, "__init__.py"), encoding="utf-8") as fh:
+        bound = _top_level_import_names(fh.read())
+    assert not (bound & siblings), bound & siblings
+
+
+def test_loading_the_time_platform_leaves_the_poller_its_clock():
+    """The real mechanism, not a simulation: __init__.py loaded as a package
+    and its time platform imported through the import system the way Home
+    Assistant does, which binds the platform to the package's `time` name.
+    The next poll must still read the clock; before the fix it raised
+    AttributeError, and an entry reload then failed at its first refresh with
+    "module '...geely_connect.time' has no attribute 'monotonic'" (#72)."""
+    m = _mod()                                      # skips without HA
+    name = "gc_pkg_clock"
+    spec = importlib.util.spec_from_file_location(
+        name, os.path.join(PKG, "__init__.py"), submodule_search_locations=[PKG])
+    pkg = importlib.util.module_from_spec(spec)
+    sys.modules[name] = pkg
+    try:
+        spec.loader.exec_module(pkg)
+        assert pkg.PLATFORMS == m.PLATFORMS and "time" in pkg.PLATFORMS
+        ok, hass, _, api, coord, _ = _setup(pkg)
+        assert ok is True
+        platform = importlib.import_module(f"{name}.time")
+        assert getattr(pkg, "time") is platform, "the import system binds it here"
+        reads = api.calls.count("status")
+        asyncio.run(coord.refresh())                # raised before the fix
+        assert api.calls.count("status") == reads + 1, api.calls
+    finally:
+        for key in [k for k in sys.modules if k == name or k.startswith(name + ".")]:
+            sys.modules.pop(key, None)
