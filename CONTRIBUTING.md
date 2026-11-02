@@ -37,7 +37,10 @@ code.
   future submission as an official integration.
 - User-facing text goes through `strings.json` and every file in
   `translations/` (en, he, ar, fr, ru, th, bg, pt-BR) - never hard-code UI
-  strings. The eight files must have identical key sets.
+  strings. The eight files must have identical key sets, and a value of three
+  words or more copied unchanged from en.json fails the tests until it is
+  translated or its key is listed for that file in `SAME_AS_ENGLISH_OK` in
+  `tests/test_translations.py`.
 - Every numeric sensor needs a `state_class`, or Home Assistant records no
   long-term statistics for it.
 - New entities ship **enabled**. If something is only worth having

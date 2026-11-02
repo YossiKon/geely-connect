@@ -79,6 +79,39 @@ def test_every_translation_has_the_english_key_set_and_placeholders():
                 f"English has {sorted(TOKEN.findall(english[key]))}")
 
 
+# Keys a translation may keep word for word from the English, by file: a name,
+# or a sentence someone decided to leave in English for now - written down here,
+# like KNOWN_GAPS above, and taken off once translated. A sentence copied over
+# from en.json passes the key check and shows English to everyone reading that
+# language: #100's two strings sat that way in six of the seven translations
+# until a Thai reader noticed (#110). Values of one or two words (Email,
+# Options, Geely Connect) are not checked.
+SAME_AS_ENGLISH_OK: dict[str, frozenset] = {}
+
+
+def _words(text):
+    return " ".join(text.split()) if isinstance(text, str) else text
+
+
+def test_no_translation_leaves_a_sentence_in_english():
+    english = _flat(_load(os.path.join(PKG, "translations", "en.json")))
+    for path in sorted(glob.glob(os.path.join(PKG, "translations", "*.json"))):
+        name = os.path.basename(path)
+        if name == "en.json":
+            continue
+        allowed = SAME_AS_ENGLISH_OK.get(name, frozenset())
+        copied = {
+            key for key, text in _flat(_load(path)).items()
+            if isinstance(text, str) and len(text.split()) > 2
+            and _words(text) == _words(english.get(key))}
+        assert not copied - allowed, (
+            f"{name} still has the English text for {sorted(copied - allowed)} "
+            f"- translate it, or list it for {name} in SAME_AS_ENGLISH_OK")
+        assert not allowed - copied, (
+            f"{name} now translates {sorted(allowed - copied)} - take them off "
+            f"SAME_AS_ENGLISH_OK")
+
+
 def test_strings_json_is_the_english_translation():
     """Home Assistant builds en.json from strings.json; a hand edit to one of
     them alone leaves the other stale."""
