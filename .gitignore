@@ -26,3 +26,6 @@ Thumbs.db
 
 # Local European app identity.
 geely_eu_app_keys*.json
+
+# Local app keys for an original-login region (docs/LOCAL-REGION-KEYS.md).
+geely_region_keys*.json

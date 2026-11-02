@@ -139,6 +139,9 @@ _SECRET_KEYS: set = {
     # Locally supplied app identities must never appear in diagnostics.
     "hmacaccesskey", "hmacsecret", "sncsecret", "vinkey", "viniv",
     "vinkeyhex", "vinivhex", "euappkeys",
+    # An original-login region's app id, which an owner may supply locally
+    # with its secret (region_keys.py, #105); "appsecret" is covered above.
+    "appid",
 }
 
 # "key" is ambiguous: it holds PEM material in provisioning responses, but the
@@ -387,15 +390,17 @@ class GeelyTLSPinError(Exception):
 
 _TLS_LEGACY_RENEG = 0x4   # OP_LEGACY_SERVER_CONNECT - old handshake mode only
 
-# Hosts that legitimately cannot validate against a public CA. Only
-# apis.ecloudeu.com qualifies: it serves a leaf issued by Geely's own PKI
-# ("Geely Trust Center / External Services Issuing EU-CA", valid 2022-2032)
-# and sends no intermediate. Every other Geely host answers with a normal
-# GlobalSign or Amazon chain and so must validate strictly.
+# Hosts that legitimately cannot validate against a public CA: the regional
+# control gateways, which serve a leaf issued by Geely's own PKI ("Geely Trust
+# Center / External Services Issuing EU-CA") and send no intermediate. Every
+# other Geely host answers with a normal GlobalSign or Amazon chain and so must
+# validate strictly.
 _PRIVATE_PKI_HOSTS: frozenset = frozenset({
     "apis.ecloudeu.com",
     "apis.ecloudus.com",
     "apis.ecloudkr.com",
+    # The UAE control gateway, used only with owner-supplied keys (#105).
+    "tsp-geely-apis-uae.xcloudsvc.com",
 })
 
 # SubjectPublicKeyInfo SHA-256 pins (base64) for those hosts. Captured
@@ -411,6 +416,13 @@ _BUNDLED_TLS_PINS: dict[str, tuple[str, ...]] = {
     # against the strict-failure chain (Geely Trust Center / EU-CA leaf,
     # subject CN=apis.ecloudkr.com, valid 2022-2032).
     "apis.ecloudkr.com": ("XFUV7VhyECWtALG5wEQoAj3FSWtsf3IpBq6l2mBgVWA=",),
+    # Captured 2026-11-02 from all three published A records (13.124.241.156,
+    # 3.34.6.92, 3.37.250.216; the same three from the system resolver, Google
+    # and AdGuard DoH) - same SPKI on all, subject
+    # CN=tsp-geely-apis-uae.xcloudsvc.com, valid 2025-2035. Its signature, and
+    # apis.ecloudeu.com's, both verify under one P-256 key recovered from them:
+    # the leaf was issued by the same Geely EU-CA as the hosts pinned above.
+    "tsp-geely-apis-uae.xcloudsvc.com": ("JIGFVVeM/B567lljFZ+hktI1eY5lNFbZq60UfABgclQ=",),
 }
 
 # OpenSSL verify codes that mean "the chain is fine, we just don't have this
@@ -813,6 +825,7 @@ class GeelyApi(CommandTrail):
         key_path: str,
         control_host: str = "apis.ecloudeu.com",
         email: str | None = None,
+        mint_host: str | None = None,
     ) -> None:
         self.app_id = app_id
         self.app_secret = app_secret
@@ -827,6 +840,10 @@ class GeelyApi(CommandTrail):
         self.key_path = key_path
         # Regional control endpoint; see const.REGIONS.
         self.control_host = control_host
+        # The host that mints the login code this backend exchanges, for an area
+        # that names its own (const.LOCAL_KEY_REGIONS); None keeps the choice
+        # refresh_jwt makes from the control host.
+        self.mint_host = mint_host
         # Login email: the APAC session exchange authenticates with it as
         # receiverId in the request body (the EU exchange does not).
         self.email = email
@@ -1039,9 +1056,10 @@ class GeelyApi(CommandTrail):
         # account resolved to NA proved the EU-minted default fails the
         # apis.ecloudus.com exchange with 8500 (#9); the NA gateway wants its
         # code from the US cidpsso host.
-        mint_host = ("m-lcmsam-us.geely.com"
-                     if "ecloudus" in (self.control_host or "")
-                     else "m-lcmsam-eu.geely.com")
+        mint_host = self.mint_host or (
+            "m-lcmsam-us.geely.com"
+            if "ecloudus" in (self.control_host or "")
+            else "m-lcmsam-eu.geely.com")
         ac = self._get_access_code(host=mint_host)
         body = json.dumps({"authCode": ac}).encode()
         status, resp = self._mtls_send(
@@ -1469,9 +1487,10 @@ def _region_refusal(cert_host: str, j: dict) -> GeelyRegionError:
     """A region-mismatch code, said in words. It names the server that refused
     and no particular other backend: APAC and North America are signed for
     now, so an account refused here is on one there are no credentials for,
-    or on one its vehicle record did not lead to (a UAE car's record names
-    only its market, AE, which no backend here matches, so it was signed
-    for EU, #105)."""
+    or on one its vehicle record did not lead to (a record that names only a
+    market no backend here matches is signed for EU). On a UAE car set up with
+    owner-supplied keys (#105) it is the UAE cert server refusing, and those
+    keys are the first thing to check."""
     return GeelyRegionError(
         f"Geely's cert server ({cert_host}) rejected this account "
         f"(code {j.get('code')}: {j.get('hint') or j.get('message')}). "

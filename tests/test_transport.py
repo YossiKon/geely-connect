@@ -24,7 +24,11 @@ def test_public_hosts_are_not_allowlisted_for_pinning():
     # These must validate strictly against public CAs and can never downgrade.
     for host in ("api.ecloudeu.com", "api.ecloudus.com", "api.ecloudkr.com",
                  "m-lcmsam-eu.geely.com", "m-lcmsam-kr.geely.com",
-                 "captcha4.geely.com", "access-app-global.geely.com"):
+                 "captcha4.geely.com", "access-app-global.geely.com",
+                 # The UAE cert and login-code servers present public
+                 # certificates (#105); only its control server is Geely PKI.
+                 "tsp-geely-api-uae.xcloudsvc.com", "m-lcmsam-ae.geely.com",
+                 "m-lcmsam-us.geely.com"):
         assert host not in api._PRIVATE_PKI_HOSTS, host
 
 

@@ -1293,6 +1293,17 @@ def test_the_access_code_is_minted_by_the_backend_that_will_exchange_it():
     a2.refresh_jwt()
     assert seen["host"] == "m-lcmsam-eu.geely.com"
 
+    # An area that names its own login-code host (#105, the UAE with the
+    # owner's keys) mints there, whatever its control host is called.
+    seen.clear()
+    assert a2.mint_host is None, "a shipped region keeps the choice above"
+    a3 = _client(control_host="tsp-geely-apis-uae.xcloudsvc.com",
+                 mint_host="m-lcmsam-ae.geely.com")
+    a3._get_access_code = fake_get
+    _scripted_mtls(a3, [{"code": 1000, "data": {"accessToken": "T", "userId": "U"}}])
+    a3.refresh_jwt()
+    assert seen["host"] == "m-lcmsam-ae.geely.com"
+
 
 # ------------------------------------------- scheduled charging, slot 2 ---
 

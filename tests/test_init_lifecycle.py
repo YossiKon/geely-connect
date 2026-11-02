@@ -548,6 +548,68 @@ def test_setup_builds_the_bundle_and_forwards_every_platform():
     assert coord.data["_scheduled_charging"] == {"rbcStartTime": "23:00"}
     assert coord.data["_scheduled_trip"]["bw"] == "1"
     assert api.kw["vin"] == FAKE_VIN
+    # A shipped region keeps refresh_jwt's own choice of login-code host.
+    assert api.kw["control_host"] == "apis.ecloudeu.com"
+    assert api.kw["mint_host"] is None
+
+
+def _uae_hass(keys):
+    """A hass whose config dir is a temp dir, with the UAE keys file when
+    given (#105)."""
+    import json
+    import tempfile
+
+    root = tempfile.mkdtemp()
+    if keys is not None:
+        with open(os.path.join(root, "geely_region_keys.json"), "w") as f:
+            f.write(json.dumps(keys))
+    hass = _Hass()
+    hass.config = types.SimpleNamespace(path=lambda *p: os.path.join(root, *p))
+    return hass
+
+
+_UAE_KEYS = {"region": "AE", "app_id": "FAKEAPPID01",
+             "app_secret": "fakesecret0123456789abcdef"}
+
+
+def test_a_uae_entry_reads_its_keys_from_the_file_at_every_start():
+    """The entry stores the area and nothing of the owner's file, so setup
+    reads the file again and builds the client on the UAE servers, signed with
+    its app id and secret, minting the login code at the area's own host."""
+    m = _mod()
+    const = load("const")
+    hosts = const.LOCAL_KEY_REGIONS["AE"]
+    ok, hass, entry, api, coord, _ = _setup(
+        m, hass=_uae_hass(_UAE_KEYS), entry=_entry(region="AE"))
+    assert ok is True
+    assert api.kw["app_id"] == "FAKEAPPID01"
+    assert api.kw["app_secret"] == "fakesecret0123456789abcdef"
+    assert api.kw["control_host"] == hosts["control_host"]
+    assert api.kw["mint_host"] == hosts["mint_host"]
+    assert "FAKEAPPID01" not in repr(entry.data)
+    # The area is read case-insensitively from an entry, as it is stored.
+    ok, hass, entry, api, coord, _ = _setup(
+        m, hass=_uae_hass(_UAE_KEYS), entry=_entry(region="ae"))
+    assert ok is True and api.kw["control_host"] == hosts["control_host"]
+
+
+def test_a_uae_entry_without_its_keys_waits_instead_of_signing_for_the_eu():
+    """Missing or invalid keys make the entry wait, with a message naming the
+    file and never a value, rather than build a client for another area."""
+    m = _mod()
+    from homeassistant.exceptions import ConfigEntryNotReady
+
+    for keys in (None, dict(_UAE_KEYS, region="SA")):
+        built = []
+        try:
+            _setup(m, hass=_uae_hass(keys), entry=_entry(region="AE"),
+                   api_tweak=built.append)
+        except ConfigEntryNotReady as e:
+            assert "geely_region_keys.json" in str(e), e
+            assert "fakesecret" not in str(e) and "FAKEAPPID01" not in str(e), e
+        else:
+            raise AssertionError("a UAE entry started without its keys")
+        assert not built, "a client was built without the area's keys"
 
 
 def _without_secondary(api):

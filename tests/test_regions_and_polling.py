@@ -67,8 +67,17 @@ def test_market_codes_map_somewhere_real():
 
 def test_only_the_pinned_control_hosts_are_used():
     api = load("api")
-    for cfg in const.REGIONS.values():
+    for cfg in (*const.REGIONS.values(), *const.LOCAL_KEY_REGIONS.values()):
         assert cfg["control_host"] in api._BUNDLED_TLS_PINS, cfg["control_host"]
+
+
+def test_a_uae_record_resolves_to_the_area_its_keys_are_read_for():
+    """The UAE record names only its market (#105). It resolves to AE, which
+    LOCAL_KEY_REGIONS serves with the owner's keys - not to a guess, and not
+    to a backend this integration ships credentials for."""
+    v = {"tspInfo": [], "saleMarket": "AE", "tcamMarket": "AE"}
+    assert const.resolve_vehicle_region(v) == "AE"
+    assert "AE" in const.LOCAL_KEY_REGIONS and "AE" not in const.REGIONS
 
 
 # ---------------------------------------------------------------- polling ---

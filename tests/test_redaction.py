@@ -23,6 +23,19 @@ def test_secrets_are_removed_entirely():
         assert v == "***redacted***", f"{k} survived as {v!r}"
 
 
+def test_a_locally_supplied_region_key_pair_is_masked_in_both_passes():
+    """A UAE owner's app id and secret live in a local file (#105) and never
+    in the entry; should either ever be folded into a log line or a report,
+    both passes mask it, under the key spellings a body would use."""
+    out = api.redact({"app_id": "FAKEAPPID01", "appId": "FAKEAPPID01",
+                      "APP-ID": "FAKEAPPID01", "app_secret": "fakesecret0123",
+                      "appSecret": "fakesecret0123"})
+    for k, v in out.items():
+        assert v == "***redacted***", f"{k} survived as {v!r}"
+    diag = load("diagnostics")
+    assert {"app_id", "app_secret"} <= diag._REDACT
+
+
 def test_identifiers_are_shortened_not_removed():
     out = api.redact({"vin": FAKE_VIN, "userId": USER_ID, "email": EMAIL})
     assert out["vin"] == "...0000", out["vin"]

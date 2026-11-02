@@ -54,6 +54,11 @@ _REDACT = {
     "zeekr_enc_vin",
     "hmac_access_key", "hmac_secret", "snc_secret", "vin_key", "vin_iv",
     "vin_key_hex", "vin_iv_hex", "eu_app_keys",
+    # An original-login region's app id and secret, which an owner may supply
+    # locally (region_keys.py, #105). They are never written into the entry;
+    # redact() masks them by normalised name, and this is the belt to that
+    # pass's braces.
+    "app_id", "app_secret",
 }
 
 

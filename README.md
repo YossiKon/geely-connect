@@ -1126,6 +1126,7 @@ Geely runs a separate backend per area, each with its **own app credentials**:
 | **EU / International** (and South African accounts, which resolve here) | `api.ecloudeu.com` | ✅ supported |
 | **NA** (US, CA, MX - and Brazilian accounts, which resolve here) | `api.ecloudus.com` | ✅ supported |
 | **APAC** (AU, NZ, JP, KR, SG, TH…) | `api.ecloudkr.com` | ✅ supported |
+| **UAE** (vehicle record names `AE`) | `tsp-geely-api-uae.xcloudsvc.com` | ⚠️ with your own app keys in a local file, not yet tried on a car ([setup](docs/LOCAL-REGION-KEYS.md)) |
 | **SA** | `tsp-geely-api-sa.xcloudsvc.com` | ❌ credentials not public |
 
 The area belongs to the **vehicle**, not to the country you pick at setup - the
@@ -1142,7 +1143,8 @@ the same regional backend that will exchange it.** A code from the wrong
 region is refused with an opaque `8500`, which is what stopped Brazilian
 accounts until the mint host was made to follow the region - NA accounts now
 mint on `m-lcmsam-us.geely.com`, APAC on `m-lcmsam-kr.geely.com`, everyone
-else on the EU host.
+else on the EU host. A UAE car with local keys is set to mint on
+`m-lcmsam-ae.geely.com` by the same rule, not yet tried on a car.
 
 APAC specifics: the session exchange runs on the **public** host
 `api.ecloudkr.com` at `/auth-center/account/session` (not on the mTLS control
@@ -1154,7 +1156,9 @@ the full write-up.
 A car in an area whose credentials are unknown stops the setup with a clear
 message naming the area, rather than being signed against the European backend
 and failing with the opaque `1501 geelyos verify error` that the upstream
-project reports. Adding SA needs that area's app id and secret.
+project reports. Adding SA needs that area's app id and secret. A UAE car does
+the same unless its owner has put that area's app id and secret in
+`geely_region_keys.json`; see [UAE and local app keys](docs/LOCAL-REGION-KEYS.md).
 
 ---
 
@@ -1346,8 +1350,9 @@ Everything built on top of it is original work under MIT (see `LICENSE`):
   pinning, a persistent pin store, log and diagnostics redaction, CR/LF request
   guards, owner-only key storage and identifier validation (see
   [Security](#-security))
-- **Multi-region support** - EU and North-American backends with per-vehicle
-  region detection, and a clear error for regions with no public credentials
+- **Multi-region support** - EU, North-American and APAC backends with
+  per-vehicle region detection, the UAE with owner-supplied app keys, and a
+  clear error for regions with no public credentials
 - **Adaptive polling** - Eco / Normal / Live profiles with idle back-off and
   quiet hours, which matters because Geely allows one session per account
 - **Computed sensors** - efficiency, trip distance, charge-completion time and

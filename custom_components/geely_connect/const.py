@@ -56,6 +56,22 @@ UNSUPPORTED_REGIONS: dict[str, str] = {
     "SA":   "tsp-geely-api-sa.xcloudsvc.com",
 }
 
+# Areas whose servers are known and whose app credentials an installation owner
+# may supply in a local file (region_keys.py, docs/LOCAL-REGION-KEYS.md); none
+# ship here. The UAE pair is what the international app builds from its
+# host.txt by the same rule that gives api/apis.ecloudeu.com for the EU, and it
+# picks the area from a market string containing AE (#105). The login code is
+# minted by the area's own lcmsam host, as North America's is by -us (#9) and
+# APAC's by -kr: m-lcmsam-ae resolves and presents Geely's public *.geely.com
+# certificate. No car has been read or commanded through these yet.
+LOCAL_KEY_REGIONS: dict[str, dict[str, str]] = {
+    "AE": {
+        "cert_host":    "tsp-geely-api-uae.xcloudsvc.com",
+        "control_host": "tsp-geely-apis-uae.xcloudsvc.com",
+        "mint_host":    "m-lcmsam-ae.geely.com",
+    },
+}
+
 DEFAULT_REGION = "EU"
 
 # Vehicle / client metadata sent in headers during control commands.
@@ -274,7 +290,8 @@ def region_config(region: str | None) -> dict[str, str]:
     Unknown areas fall back to EU, which is right for a blank or unrecognised
     value; areas in UNSUPPORTED_REGIONS are rejected by the config flow before
     they get here, so this never silently signs a foreign account with European
-    credentials."""
+    credentials. Areas in LOCAL_KEY_REGIONS never come here either: setup and
+    the config flow read them through region_keys.load_region_backend."""
     return REGIONS.get((region or DEFAULT_REGION).upper(), REGIONS[DEFAULT_REGION])
 
 

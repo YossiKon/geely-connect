@@ -50,6 +50,7 @@ from .const import (
     PLATFORM_LABELS,
     PLATFORM_LEGACY,
     PLATFORM_ZEEKR,
+    LOCAL_KEY_REGIONS,
     UNSUPPORTED_REGIONS,
     region_config,
     resolve_vehicle_region,
@@ -77,6 +78,7 @@ from .const import (
     DOMAIN,
 )
 from .helpers import password_encrypt, vehicle_metadata
+from .region_keys import LocalRegionKeysError, load_region_backend
 from .zeekr_regions import (
     RegionKeysError, ZeekrRegion, load_region_profile,
 )
@@ -435,7 +437,19 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 UNSUPPORTED_REGIONS[region],
             )
             raise _LegacyProvisionError("wrong_region")
-        backend = region_config(region)
+        if region in LOCAL_KEY_REGIONS:
+            # An area whose app credentials only the owner can supply (#105).
+            # Without the file, stop here as for an unsupported area: signing
+            # it for EU is what produced the 1501 in the first place.
+            try:
+                backend = await self.hass.async_add_executor_job(
+                    load_region_backend, self.hass.config.path(""), region)
+            except LocalRegionKeysError as e:
+                _LOGGER.error("vehicle %s is registered in the %s region: %s",
+                              vin[-4:], region, e)
+                raise _LegacyProvisionError("wrong_region") from e
+        else:
+            backend = region_config(region)
         _LOGGER.debug("provisioning against the %s backend (%s)",
                       region, backend["cert_host"])
 
@@ -456,13 +470,18 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         except geely_api.GeelyRegionError as e:
             # The abort says this line names the region that was detected; the
             # error names only the server that refused, and a record that
-            # gives only its market (AE, #105) falls back to another region's
-            # backend. A record with no region at all is said as such, not
-            # as the default it fell back to.
+            # gives only a market no backend here knows falls back to another
+            # region's backend. A record with no region at all is said as
+            # such, not as the default it fell back to. On an area signed with
+            # the owner's keys (#105) the refusal came from that area's own
+            # server, so the likeliest cause is the keys, and the line says so.
+            hint = (
+                "; the app_id and app_secret in geely_region_keys.json are the "
+                "first thing to check" if region in LOCAL_KEY_REGIONS else "")
             _LOGGER.error(
-                "cert provisioning refused for a vehicle %s: %s",
+                "cert provisioning refused for a vehicle %s: %s%s",
                 f"detected as region {detected}" if detected
-                else f"whose record names no region (tried {region})", e)
+                else f"whose record names no region (tried {region})", e, hint)
             raise _LegacyProvisionError("wrong_region") from e
         except Exception as e:
             _LOGGER.exception("cert provisioning failed")

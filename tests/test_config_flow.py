@@ -171,8 +171,10 @@ def test_a_server_side_region_rejection_also_aborts_cleanly():
     """The backend can disagree with the vehicle record, so 1501/1445 during
     provisioning must produce the same clear message, not a generic failure.
     The abort points at a log line that names the region detected; the error
-    itself names only the server that refused, and a record that gives just
-    its market (AE, #105) falls back to another region's backend."""
+    itself names only the server that refused, and a record that gives just a
+    market no backend here knows (TR) falls back to another region's backend.
+    A UAE record (AE, #105) no longer gets this far without its keys: see the
+    next test."""
     cf, flow = _flow()
 
     def boom(**kw):
@@ -190,13 +192,15 @@ def test_a_server_side_region_rejection_also_aborts_cleanly():
     cf._LOGGER.addHandler(handler)
     try:
         res = asyncio.run(flow._finish_with_vehicle(
-            _vehicle(tspInfo=[], saleMarket="AE", tcamMarket="AE")))
+            _vehicle(tspInfo=[], saleMarket="TR", tcamMarket="TR")))
     finally:
         cf._LOGGER.removeHandler(handler)
     assert res["type"] == "abort" and res["reason"] == "wrong_region"
     refused = [line for line in lines if "refused" in line]
-    assert len(refused) == 1 and "region AE" in refused[0], lines
+    assert len(refused) == 1 and "region TR" in refused[0], lines
     assert "geelyos verify error" in refused[0], refused
+    # The hint about local keys belongs to an area signed with them alone.
+    assert "geely_region_keys.json" not in refused[0], refused
     # A record that names no region at all is not "detected as" the default.
     lines.clear()
     cf._LOGGER.addHandler(handler)
@@ -207,6 +211,110 @@ def test_a_server_side_region_rejection_also_aborts_cleanly():
     refused = [line for line in lines if "refused" in line]
     assert len(refused) == 1, lines
     assert "names no region" in refused[0] and "detected" not in refused[0], refused
+    assert "geely_region_keys.json" not in refused[0], refused
+
+
+def _uae_flow(keys_file_content):
+    """A flow whose Home Assistant config dir is a temp dir, holding the UAE
+    keys file when given (#105)."""
+    import json
+    import os
+    import tempfile
+
+    cf, flow = _flow()
+    root = tempfile.mkdtemp()
+    if keys_file_content is not None:
+        with open(os.path.join(root, "geely_region_keys.json"), "w") as f:
+            f.write(json.dumps(keys_file_content) if isinstance(
+                keys_file_content, dict) else keys_file_content)
+    flow.hass.config = type("config", (), {
+        "path": staticmethod(lambda p: os.path.join(root, p))})
+    flow._email, flow._user_id, flow._cidpsso_token = EMAIL, USER_ID, TOKEN
+    return cf, flow
+
+
+_UAE_KEYS = {"region": "AE", "app_id": "FAKEAPPID01",
+             "app_secret": "fakesecret0123456789abcdef"}
+
+
+def _error_lines(cf, run):
+    lines = []
+
+    class _Lines(logging.Handler):
+        def emit(self, record):
+            lines.append(record.getMessage())
+
+    handler = _Lines(level=logging.ERROR)
+    cf._LOGGER.addHandler(handler)
+    try:
+        return run(), lines
+    finally:
+        cf._LOGGER.removeHandler(handler)
+
+
+def test_a_uae_car_without_its_keys_stops_before_the_cert_server():
+    """A UAE record names only its market, AE, and was signed for the EU,
+    which answered 1501 (#105). Its app credentials are the owner's to
+    supply; without the file - or with one that is invalid or for another
+    area - setup stops with the region message before any certificate
+    request, and the log line names the file and the doc, never a value."""
+    for content in (None, "{not json", dict(_UAE_KEYS, region="SA"),
+                    dict(_UAE_KEYS, cert_host="evil.example.com")):
+        cf, flow = _uae_flow(content)
+        called = []
+        cf.geely_api.provision_user_cert = lambda **kw: called.append(kw)
+        res, lines = _error_lines(cf, lambda: asyncio.run(flow._finish_with_vehicle(
+            _vehicle(tspInfo=[], saleMarket="AE", tcamMarket="AE"))))
+        assert res["type"] == "abort" and res["reason"] == "wrong_region", content
+        assert not called, ("contacted a cert server without the area's keys", content)
+        said = [line for line in lines if "AE region" in line]
+        assert len(said) == 1 and "geely_region_keys.json" in said[0], lines
+        if content is None:
+            assert "docs/LOCAL-REGION-KEYS.md" in said[0], said
+        for value in ("FAKEAPPID01", "fakesecret0123456789abcdef", FAKE_VIN):
+            assert value not in said[0], said
+
+
+def test_a_uae_car_with_its_keys_is_provisioned_against_the_uae_servers():
+    """With the owner's file, the certificate is requested from the UAE cert
+    server, signed with the file's app id and secret; the entry records the
+    area and nothing of the file, so every later start reads it again."""
+    cf, flow = _uae_flow(_UAE_KEYS)
+    const = load("const")
+    seen = {}
+    cf.geely_api.provision_user_cert = lambda **kw: seen.update(kw)
+    res = asyncio.run(flow._finish_with_vehicle(
+        _vehicle(tspInfo=[], saleMarket="AE", tcamMarket="AE")))
+    assert res["type"] == "create_entry", res
+    assert seen["cert_host"] == const.LOCAL_KEY_REGIONS["AE"]["cert_host"]
+    assert seen["app_id"] == "FAKEAPPID01"
+    assert seen["app_secret"] == "fakesecret0123456789abcdef"
+    data = res["data"]
+    assert data["region"] == "AE"
+    flat = repr(data) + repr(res.get("options"))
+    for value in ("FAKEAPPID01", "fakesecret0123456789abcdef"):
+        assert value not in flat, "a local key was written into the entry"
+
+
+def test_a_uae_refusal_points_at_the_keys_in_the_file():
+    """With the owner's keys, a 1445 or 1501 comes from the UAE cert server
+    itself, so a typo in the file is the likeliest cause: the log line says
+    to check app_id and app_secret there, and still carries neither."""
+    cf, flow = _uae_flow(_UAE_KEYS)
+
+    def refuse(**kw):
+        raise cf.geely_api.GeelyRegionError("code 1445: signature error")
+
+    cf.geely_api.provision_user_cert = refuse
+    res, lines = _error_lines(cf, lambda: asyncio.run(flow._finish_with_vehicle(
+        _vehicle(tspInfo=[], saleMarket="AE", tcamMarket="AE"))))
+    assert res["type"] == "abort" and res["reason"] == "wrong_region"
+    refused = [line for line in lines if "refused" in line]
+    assert len(refused) == 1, lines
+    assert "region AE" in refused[0] and "geely_region_keys.json" in refused[0], refused
+    assert "app_id and app_secret" in refused[0], refused
+    for value in ("FAKEAPPID01", "fakesecret0123456789abcdef"):
+        assert value not in refused[0], refused
 
 
 def test_a_provisioning_failure_is_reported_as_such():

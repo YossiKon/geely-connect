@@ -40,6 +40,7 @@ from . import cards
 from . import propulsion
 from .api import GeelyApi, GeelyAuthError, GeelyControlError, GeelyTLSPinError, redact
 from .zeekr_adapter import ZeekrAdapter
+from .region_keys import LocalRegionKeysError, load_region_backend
 from .zeekr_regions import RegionKeysError, load_region_profile
 from .const import (
     CONF_ZEEKR_REGION,
@@ -79,6 +80,7 @@ from .const import (
     SCAN_INTERVAL_SECONDS,
     SERIES_TO_FRIENDLY_NAME,
     SERVICE_PARKING_COMFORT,
+    LOCAL_KEY_REGIONS,
     region_config,
 )
 from .helpers import (api_can_send, api_serves, password_decrypt,
@@ -672,7 +674,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             )
         # Entries created before regions were tracked carry no CONF_REGION and
         # resolve to EU, which is the backend they were provisioned against.
-        backend = region_config(d.get(CONF_REGION))
+        # An area whose app credentials the owner supplies (#105) reads them
+        # from the local file at every setup; they are never in the entry, so
+        # a missing file waits rather than signing for another region.
+        region = str(d.get(CONF_REGION) or "").upper()
+        if region in LOCAL_KEY_REGIONS:
+            try:
+                backend = await hass.async_add_executor_job(
+                    load_region_backend, hass.config.path(""), region)
+            except LocalRegionKeysError as exc:
+                raise ConfigEntryNotReady(str(exc)) from None
+        else:
+            backend = region_config(d.get(CONF_REGION))
         api = GeelyApi(
             app_id=backend["app_id"],
             app_secret=backend["app_secret"],
@@ -687,6 +700,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             key_path=d[CONF_KEY_PATH],
             control_host=backend["control_host"],
             email=d.get(CONF_EMAIL),
+            mint_host=backend.get("mint_host"),
         )
 
     _SUCCESS_CODES = {1000, "1000", 10000000, "10000000", None}
