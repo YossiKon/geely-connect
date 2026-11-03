@@ -362,7 +362,8 @@ _TIRE_PRECISION_SCRIPT = r"""(cases) => cases.map((c) => {
     });
     if (c.formatted) hass.formatEntityState = (st) => {
       const i = corners.findIndex((corner) => st.entity_id.endsWith(corner));
-      return i < 0 ? st.state : c.formatted[i] + "\u00a0" + c.unit;
+      if (i < 0) return st.state;
+      return c.bare ? c.formatted[i] : c.formatted[i] + (c.sep || "\u00a0") + c.unit;
     };
     if (c.throws) hass.formatEntityState = () => { throw new Error("not ready"); };
     el.hass = hass;
@@ -401,6 +402,33 @@ def test_tires_without_a_formatter_keep_the_sensor_unit_precision():
     expected = {"bar": "2.50", "psi": "36.3", "kPa": "250"}
     for case, got in zip(cases, _evaluate(_TIRE_PRECISION_SCRIPT, arg=cases)):
         assert got["values"] == [expected[case["unit"]]] * 4, (case, got)
+
+
+def _tire_units(case):
+    if case["tag"].endswith("top"):
+        return [f"{case['unit'].upper()} {corner}" for corner in ("FL", "FR", "RL", "RR")]
+    return [case["unit"]] * 4
+
+
+def test_a_plain_space_before_the_unit_still_leaves_home_assistants_number():
+    cases = [dict(tag=tag, unit="bar", states=["2.5", "2.35", "2.4", "2.65"],
+                  formatted=["2,50", "2,35", "2,40", "2,65"], sep=" ")
+             for tag in ("geely-card", "geely-card-top")]
+    for case, got in zip(cases, _evaluate(_TIRE_PRECISION_SCRIPT, arg=cases)):
+        assert got["values"] == case["formatted"], (case, got)
+        assert got["units"] == _tire_units(case), got
+
+
+def test_a_formatted_number_without_its_unit_falls_back_to_the_sensor_rounding():
+    """The card trusts formatted text only when it ends in the sensor's unit;
+    anything else, such as the bare number, gets the sensor's own rounding."""
+    cases = [dict(tag=tag, unit=unit, states=[value] * 4, formatted=[value] * 4, bare=True)
+             for tag in ("geely-card", "geely-card-top")
+             for unit, value in (("bar", "2.5"), ("psi", "36.27"), ("kPa", "250.4"))]
+    expected = {"bar": "2.50", "psi": "36.3", "kPa": "250"}
+    for case, got in zip(cases, _evaluate(_TIRE_PRECISION_SCRIPT, arg=cases)):
+        assert got["values"] == [expected[case["unit"]]] * 4, (case, got)
+        assert got["units"] == _tire_units(case), got
 
 
 def test_missing_and_non_numeric_tire_readings_do_not_become_zero():

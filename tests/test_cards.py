@@ -166,6 +166,22 @@ def test_the_shipped_card_defines_both_elements_and_the_picker_entries():
     assert "geely_connect" in src, "auto-detection must key off the platform"
 
 
+def test_the_card_file_holds_no_optional_chaining_or_nullish_coalescing():
+    """geely-card.js is one file, and a browser that cannot parse any line of
+    it drops all of it: every card disappears, not just the line with the new
+    syntax. Optional chaining and nullish coalescing are such syntax before
+    Chromium 80 and Safari 13.1, and the file has never needed either (#111)."""
+    import re
+
+    src = open(os.path.join(PKG, "geely-card.js"), encoding="utf-8").read()
+    # "?.5" is a conditional followed by a decimal, not optional chaining.
+    for pattern, name in ((r"\?\.(?!\d)", "optional chaining"),
+                          (r"\?\?", "nullish coalescing")):
+        lines = [n for n, line in enumerate(src.split("\n"), 1)
+                 if re.search(pattern, line)]
+        assert not lines, f"{name} on line(s) {lines} of geely-card.js"
+
+
 # ----------------------------------------------------- lovelace resources ---
 # A card delivered only through an extra-module URL is not awaited by
 # Lovelace: if its class is not defined when the picker asks, the frontend's

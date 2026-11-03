@@ -2135,9 +2135,10 @@
       // Keep HA's chosen precision and locale, but render the unit separately
       // in the small tire labels. Splitting on spaces loses localized spacing
       // (NBSP) and grouped numbers, so remove only the known trailing unit.
-      if (typeof this._hass?.formatEntityState === "function") {
+      const hass = this._hass;
+      if (hass && typeof hass.formatEntityState === "function") {
         try {
-          const text = this._hass.formatEntityState(st);
+          const text = hass.formatEntityState(st);
           if (text && (!unit || text.endsWith(unit))) {
             return { value: unit ? text.slice(0, -unit.length).trimEnd() : text, unit };
           }
