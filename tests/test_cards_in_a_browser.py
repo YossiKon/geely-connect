@@ -431,6 +431,17 @@ def test_a_formatted_number_without_its_unit_falls_back_to_the_sensor_rounding()
         assert got["units"] == _tire_units(case), got
 
 
+def test_a_tire_unit_that_is_not_a_string_still_renders_both_cards():
+    """customize passes `unit_of_measurement: 5` through as a number, and so
+    does a state set from the developer tools."""
+    cases = [dict(tag=tag, unit=5, states=["2.5"] * 4, formatted=formatted)
+             for tag in ("geely-card", "geely-card-top")
+             for formatted in (None, ["2.50"] * 4)]
+    for case, got in zip(cases, _evaluate(_TIRE_PRECISION_SCRIPT, arg=cases)):
+        assert got["values"] == (case["formatted"] or ["2.5"] * 4), (case, got)
+        assert got["units"] == _tire_units(dict(case, unit="5")), (case, got)
+
+
 def test_missing_and_non_numeric_tire_readings_do_not_become_zero():
     cases = [dict(tag=tag, unit="bar", states=[state] * 4, missing=state is None)
              for tag in ("geely-card", "geely-card-top")

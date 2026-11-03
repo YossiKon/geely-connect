@@ -2131,7 +2131,9 @@
       const st = this._st(`sensor.tire_${suffix}`);
       const n = NUM(st);
       if (!OK(st) || n == null) return { value: "—", unit: "" };
-      const unit = UNIT(st);
+      // customize hands the unit over as whatever its YAML parsed to, and the
+      // top view upper-cases it: a number there would blank the whole card.
+      const unit = String(UNIT(st));
       // Keep HA's chosen precision and locale, but render the unit separately
       // in the small tire labels. Splitting on spaces loses localized spacing
       // (NBSP) and grouped numbers, so remove only the known trailing unit.
