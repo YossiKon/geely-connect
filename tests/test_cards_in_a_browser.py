@@ -347,6 +347,80 @@ def test_the_top_view_mirrors_the_tires_with_the_doors():
     assert rhd["left"][0] == "240" and rhd["right"][0] == "220", rhd
 
 
+# The sensor reports 2.50 bar; rounding it in the card used to print 3.
+_TIRE_PRECISION_SCRIPT = r"""(cases) => cases.map((c) => {
+    const el = document.createElement(c.tag);
+    document.body.appendChild(el);
+    el.setConfig({});
+    const hass = window.mkHass({});
+    const corners = ["front_left", "front_right", "rear_left", "rear_right"];
+    corners.forEach((corner, i) => {
+      const id = `sensor.car_tire_${corner}`;
+      if (c.missing) { delete hass.states[id]; return; }
+      hass.states[id] = { entity_id: id, state: c.states[i],
+                         attributes: {unit_of_measurement: c.unit} };
+    });
+    if (c.formatted) hass.formatEntityState = (st) => {
+      const i = corners.findIndex((corner) => st.entity_id.endsWith(corner));
+      return i < 0 ? st.state : c.formatted[i] + "\u00a0" + c.unit;
+    };
+    if (c.throws) hass.formatEntityState = () => { throw new Error("not ready"); };
+    el.hass = hass;
+    const root = el.shadowRoot;
+    const top = c.tag === "geely-card-top";
+    return {
+      values: [...root.querySelectorAll(top ? ".tv-val" : ".tires b")]
+        .map((e) => top ? e.textContent : e.firstChild.textContent),
+      units: [...root.querySelectorAll(top ? ".tv-val + .tv-lab" : ".tires i")]
+        .map((e) => e.textContent),
+      injected: root.querySelectorAll("script, img").length
+    };
+})"""
+
+
+def test_tires_keep_home_assistants_precision_and_localized_spacing():
+    cases = []
+    for tag in ("geely-card", "geely-card-top"):
+        for formatted in (["2.50", "2.35", "2.40", "2.65"],
+                          ["2,50", "2,35", "2,40", "2,65"],
+                          ["2.500", "2.350", "2.400", "2.650"]):
+            cases.append(dict(tag=tag, unit="bar", states=["2.5", "2.35", "2.4", "2.65"],
+                              formatted=formatted))
+    for case, got in zip(cases, _evaluate(_TIRE_PRECISION_SCRIPT, arg=cases)):
+        assert got["values"] == case["formatted"], (case, got)
+        expected_units = (["BAR FL", "BAR FR", "BAR RL", "BAR RR"]
+                          if case["tag"].endswith("top") else ["bar"] * 4)
+        assert got["units"] == expected_units, got
+
+
+def test_tires_without_a_formatter_keep_the_sensor_unit_precision():
+    cases = [dict(tag=tag, unit=unit, states=[value] * 4, throws=throws)
+             for tag in ("geely-card", "geely-card-top")
+             for unit, value in (("bar", "2.5"), ("psi", "36.3"), ("kPa", "250"))
+             for throws in (False, True)]
+    expected = {"bar": "2.50", "psi": "36.3", "kPa": "250"}
+    for case, got in zip(cases, _evaluate(_TIRE_PRECISION_SCRIPT, arg=cases)):
+        assert got["values"] == [expected[case["unit"]]] * 4, (case, got)
+
+
+def test_missing_and_non_numeric_tire_readings_do_not_become_zero():
+    cases = [dict(tag=tag, unit="bar", states=[state] * 4, missing=state is None)
+             for tag in ("geely-card", "geely-card-top")
+             for state in (None, "unknown", "unavailable", "", "NaN")]
+    for got in _evaluate(_TIRE_PRECISION_SCRIPT, arg=cases):
+        assert got["values"] == ["—"] * 4, got
+
+
+def test_formatted_tire_text_is_escaped_in_html_and_svg():
+    malicious = "<script>throw new Error('injected')</script>"
+    cases = [dict(tag=tag, unit="bar", states=["2.5"] * 4,
+                  formatted=[malicious] * 4)
+             for tag in ("geely-card", "geely-card-top")]
+    for got in _evaluate(_TIRE_PRECISION_SCRIPT, arg=cases):
+        assert got["values"] == [malicious] * 4, got
+        assert got["injected"] == 0, got
+
+
 # --------------------------------- every card renders what it watches
 
 def test_no_card_renders_an_entity_it_does_not_watch():
