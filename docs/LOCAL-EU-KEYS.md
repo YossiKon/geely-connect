@@ -40,7 +40,8 @@ Assistant user. Do not paste it into an issue, PR or diagnostics report.
 After installing the integration and restarting Home Assistant, select
 **New Geely EM app platform (Zeekr backend) - experimental**. In its login form,
 set **New-app server region** to **Europe (requires local app keys)**, then select
-your account country. Successful operation has only been verified in Spain.
+your account country. Successful operation has so far been verified only in
+Spain and France.
 
 The default server remains **Australia / SEA (existing new-app server)**, even
 when the country field is GB. Existing new-app entries without a saved server
@@ -80,6 +81,10 @@ Home Assistant instance: restoring its existing session and manually reading
 vehicle status worked. A fresh live login and forced session expiry were not
 retested on that variant, and remote commands were not exercised during
 validation.
+
+A French E2 Max+ owner later set up a new entry on v1.56.0: discovery worked,
+the sensors populated, and lock and unlock moved the car. The other remote
+commands still need independent validation.
 
 Automated tests use invented keys and fake accounts to exercise regional
 signatures, login, discovery, renewal, local-file validation and isolation

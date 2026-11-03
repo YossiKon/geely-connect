@@ -1071,8 +1071,10 @@ owner in a local file. Choose **Europe (requires local app keys)** in the new-ap
 login's **New-app server region** field; country alone does not change servers.
 Existing new-app entries and the default selection stay on SEA.
 See [European setup](docs/LOCAL-EU-KEYS.md). Discovery
-and status reads were verified on an E2 in Spain with Android app 1.1.1;
-other European markets and remote commands still need independent validation.
+and status reads were verified on an E2 in Spain with Android app 1.1.1, and on
+an E2 Max+ in France, where lock and unlock also moved the car on v1.56.0
+([#97](https://github.com/YossiKon/geely-connect/issues/97)); other European
+markets and the other remote commands still need independent validation.
 
 **Migrated accounts.** When the official app moves an account onto the new
 platform, the old backend stops knowing the car - every read answers
