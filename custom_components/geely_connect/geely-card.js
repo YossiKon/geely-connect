@@ -899,14 +899,14 @@
       <circle class="ind ${d.doors.fr ? "on" : ""}" cx="316" cy="306" r="6"/>
       <circle class="ind ${d.doors.rr ? "on" : ""}" cx="316" cy="400" r="6"/>
 
-      <text class="tv-val" x="42" y="84" text-anchor="middle">${d.tires.fl.split(" ")[0]}</text>
-      <text class="tv-lab" x="42" y="100" text-anchor="middle">${esc((d.tires.fl.split(" ")[1] || "").toUpperCase())} FL</text>
-      <text class="tv-val" x="358" y="84" text-anchor="middle">${d.tires.fr.split(" ")[0]}</text>
-      <text class="tv-lab" x="358" y="100" text-anchor="middle">${esc((d.tires.fr.split(" ")[1] || "").toUpperCase())} FR</text>
-      <text class="tv-val" x="42" y="612" text-anchor="middle">${d.tires.rl.split(" ")[0]}</text>
-      <text class="tv-lab" x="42" y="628" text-anchor="middle">${esc((d.tires.rl.split(" ")[1] || "").toUpperCase())} RL</text>
-      <text class="tv-val" x="358" y="612" text-anchor="middle">${d.tires.rr.split(" ")[0]}</text>
-      <text class="tv-lab" x="358" y="628" text-anchor="middle">${esc((d.tires.rr.split(" ")[1] || "").toUpperCase())} RR</text>
+      <text class="tv-val" x="42" y="84" text-anchor="middle">${esc(d.tires.fl.value)}</text>
+      <text class="tv-lab" x="42" y="100" text-anchor="middle">${esc(d.tires.fl.unit.toUpperCase())} FL</text>
+      <text class="tv-val" x="358" y="84" text-anchor="middle">${esc(d.tires.fr.value)}</text>
+      <text class="tv-lab" x="358" y="100" text-anchor="middle">${esc(d.tires.fr.unit.toUpperCase())} FR</text>
+      <text class="tv-val" x="42" y="612" text-anchor="middle">${esc(d.tires.rl.value)}</text>
+      <text class="tv-lab" x="42" y="628" text-anchor="middle">${esc(d.tires.rl.unit.toUpperCase())} RL</text>
+      <text class="tv-val" x="358" y="612" text-anchor="middle">${esc(d.tires.rr.value)}</text>
+      <text class="tv-lab" x="358" y="628" text-anchor="middle">${esc(d.tires.rr.unit.toUpperCase())} RR</text>
 
       <text class="${cl(d.doors.fl)}" x="58" y="311" text-anchor="end">${esc(stat(d.doors.fl))}</text>
       <text class="${cl(d.doors.rl)}" x="58" y="405" text-anchor="end">${esc(stat(d.doors.rl))}</text>
@@ -2127,6 +2127,26 @@
       return `${st.state}${UNIT(st) ? " " + UNIT(st) : ""}`;
     }
 
+    _tire(suffix) {
+      const st = this._st(`sensor.tire_${suffix}`);
+      const n = NUM(st);
+      if (!OK(st) || n == null) return { value: "—", unit: "" };
+      const unit = UNIT(st);
+      // Keep HA's chosen precision and locale, but render the unit separately
+      // in the small tire labels. Splitting on spaces loses localized spacing
+      // (NBSP) and grouped numbers, so remove only the known trailing unit.
+      if (typeof this._hass?.formatEntityState === "function") {
+        try {
+          const text = this._hass.formatEntityState(st);
+          if (text && (!unit || text.endsWith(unit))) {
+            return { value: unit ? text.slice(0, -unit.length).trimEnd() : text, unit };
+          }
+        } catch (err) { /* older frontend: use the sensor's unit convention */ }
+      }
+      const digits = { bar: 2, psi: 1, kPa: 0 }[unit];
+      return { value: digits == null ? st.state : n.toFixed(digits), unit };
+    }
+
     _row(label, st, opts = {}) {
       if (!st && !opts.value) return "";
       const value = opts.value != null ? opts.value
@@ -2785,8 +2805,8 @@
       const speedUnit = UNIT(this._st("sensor.speed")) || "km/h";
 
       const tire = (suffix) => {
-        const st = this._st(`sensor.tire_${suffix}`);
-        return OK(st) ? `${Math.round(NUM(st))}<i>${esc(UNIT(st))}</i>` : "—";
+        const { value, unit } = this._tire(suffix);
+        return `${esc(value)}${unit ? `<i>${esc(unit)}</i>` : ""}`;
       };
       // Driving comes from the same composite as the banner and the action lock,
       // not from the raw speed. Keyed on speed, this line said "Parked" on a car
@@ -3248,10 +3268,7 @@
         return st ? st.state === "on" : null;
       };
       const sunroofSt = this._st("cover.sunroof");
-      const tire = (suffix) => {
-        const st = this._st(`sensor.tire_${suffix}`);
-        return OK(st) ? `${Math.round(NUM(st))} ${UNIT(st)}`.trim() : "—";
-      };
+      const tire = (suffix) => this._tire(suffix);
       // Driving comes from the same composite as the banner and the action lock,
       // not from the raw speed. Keyed on speed, this line said "Parked" on a car
       // whose banner two lines above said Driving and whose buttons were greyed
