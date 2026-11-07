@@ -28,7 +28,6 @@ AVD-verified 2026-05-01 - see docs/AVD_CAPTURE_GUIDE.md.
 # -----------------------------------------------------------------------------
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from typing import Any
@@ -47,7 +46,6 @@ from .const import (
     DOMAIN,
     SERVICE_CHARGING_START_PARAMS,
     SERVICE_CHARGING_STOP_PARAMS,
-    SERVICE_WINDOW_VENT_PARAMS,
     RCE_KEY_CONDITIONER,
     RCE_KEY_HEAT,
     RCE_KEY_LEVEL,

@@ -38,16 +38,13 @@ shape exactly. Once `pass_token` is returned, can be fed straight into
 """
 from __future__ import annotations
 
-import binascii
 import json
-import os
 import random
 import re
 import secrets
 import sys
 import time
 from dataclasses import dataclass, field
-from typing import Any
 from urllib.parse import quote
 from uuid import uuid4
 

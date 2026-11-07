@@ -867,7 +867,7 @@ def test_the_fuel_section_reports_the_engine_and_not_the_headline_twice():
     section wastes a row. Whether the engine is running is the one hybrid fact
     these cards could not show anywhere else."""
     probe = """[...el.shadowRoot.querySelectorAll(".row")]
-                 .map((r) => r.textContent.replace(/\s+/g, " ").trim())"""
+                 .map((r) => r.textContent.replace(/\\s+/g, " ").trim())"""
     rows = _mount("geely-card", probe, fuel={}, engine="Running")
     assert any(r.startswith("Fuel level") for r in rows), rows
     assert any(r.startswith("Fuel range") for r in rows), rows
@@ -1225,12 +1225,12 @@ def test_only_the_temperature_row_is_pinned_to_one_line():
 
 _SEAT_PROBE = """(() => {
     const label = (sel) => [...el.shadowRoot.querySelectorAll(sel)]
-        .map((n) => n.textContent.replace(/\s+/g, " ").trim());
+        .map((n) => n.textContent.replace(/\\s+/g, " ").trim());
     return {
         headings: label(".csub"),
         buttons: [...el.shadowRoot.querySelectorAll('[data-act^="seat_"]')]
             .map((b) => ({ act: b.dataset.act,
-                           text: b.textContent.replace(/\s+/g, " ").trim(),
+                           text: b.textContent.replace(/\\s+/g, " ").trim(),
                            lit: b.classList.contains("on") })),
     };
 })()"""
@@ -1479,7 +1479,7 @@ def test_no_card_says_parked_while_it_says_driving():
     speed and the lock on the composite - and #21 showed how often those differ:
     that owner's speed field read 0 for twenty-five minutes of a drive."""
     probe = """[...el.shadowRoot.querySelectorAll(".status, .chip, .driving span")]
-                 .map((n) => n.textContent.replace(/\s+/g, " ").trim()).join(" | ")"""
+                 .map((n) => n.textContent.replace(/\\s+/g, " ").trim()).join(" | ")"""
     for tag in CARD_TAGS:
         # Moving, and the speed field says 0 - the #21 backend behaviour.
         text = _mount(tag, probe, speed="0", engine="Running")
@@ -1881,7 +1881,7 @@ def test_the_rapid_buttons_say_rapid():
     said exactly that: "I initially thought heat just turned on heating, not rapid
     heating" (#29)."""
     probe = """[...el.shadowRoot.querySelectorAll('[data-act^="rapid"]')]
-                 .map((b) => [b.dataset.act, b.textContent.replace(/\s+/g, " ").trim(),
+                 .map((b) => [b.dataset.act, b.textContent.replace(/\\s+/g, " ").trim(),
                               b.getAttribute("title")])"""
     for tag in CARD_TAGS:
         got = _mount(tag, probe)
@@ -1899,7 +1899,7 @@ def test_parking_comfort_appears_on_the_big_cards_when_the_car_has_it():
     one-shot actions, because it keeps the cabin liveable while the car sits."""
     probe = """(() => {
         const b = el.shadowRoot.querySelector('[data-act="pcomfort"]');
-        return b ? { text: b.textContent.replace(/\s+/g, " ").trim(),
+        return b ? { text: b.textContent.replace(/\\s+/g, " ").trim(),
                      title: b.getAttribute("title"),
                      lit: b.classList.contains("on") } : null;
     })()"""
@@ -2014,7 +2014,7 @@ def _head_line(tag, **hass_opts):
     """The single line of readings in a small card's head row."""
     return _mount(tag, """(() => {
         const sel = el.shadowRoot.querySelector(".head .temp, .head .micro");
-        return sel ? sel.textContent.replace(/\s+/g, " ").trim() : null;
+        return sel ? sel.textContent.replace(/\\s+/g, " ").trim() : null;
     })()""", **hass_opts)
 
 
@@ -2043,7 +2043,7 @@ def test_a_missing_reading_leaves_no_stray_separator():
     for tag in ("geely-card-mini", "geely-card-compact"):
         line = _mount(tag, """(() => {
             const sel = el.shadowRoot.querySelector(".head .temp, .head .micro");
-            return sel ? sel.textContent.replace(/\s+/g, " ").trim() : null;
+            return sel ? sel.textContent.replace(/\\s+/g, " ").trim() : null;
         })()""", noInteriorTemp=True)
         assert "·" not in line, (tag, line)
         assert line.strip().endswith("%"), (tag, line)

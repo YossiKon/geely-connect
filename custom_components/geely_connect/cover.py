@@ -27,7 +27,6 @@ taught in #4, where the catalogue's own spellings were not the request's.
 # -----------------------------------------------------------------------------
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 

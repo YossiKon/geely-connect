@@ -27,11 +27,9 @@ untried there.
 # -----------------------------------------------------------------------------
 from __future__ import annotations
 
-import asyncio
 import logging
 import time as time_mod
 from datetime import time as dtime
-from typing import Any
 
 from homeassistant.components.time import TimeEntity
 from homeassistant.config_entries import ConfigEntry

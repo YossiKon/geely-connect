@@ -40,7 +40,6 @@ scope.
 # -----------------------------------------------------------------------------
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from dataclasses import dataclass
@@ -80,7 +79,6 @@ from .const import (
     RCE_KEY_CONDITIONER,
     RCE_KEY_TEMP,
     RCE_VAL_AC,
-    RCE_VAL_DEFROST,
     SERVICE_CLIMATE,
     SERVICE_CLIMATE_1_0,
 )

@@ -34,10 +34,8 @@ Empirical proof: across the AVD session, drvHeatSts went
 # -----------------------------------------------------------------------------
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
-from typing import Any
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
