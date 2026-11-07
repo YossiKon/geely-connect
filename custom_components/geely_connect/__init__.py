@@ -1256,7 +1256,8 @@ def _register_debug_service(hass: HomeAssistant) -> None:
     # guess: the request that carries it was never variable. bizType is pinned
     # to the rapid body on purpose, because 4 and 6 on the same endpoint write
     # the scheduled-trip and scheduled-charging windows and a malformed probe
-    # there would clobber a schedule the owner set.
+    # there would clobber a schedule the owner set. rapid_climate applies
+    # `extra` last, so the pin is enforced here, before the call.
     rapid_schema = vol.Schema({
         vol.Required("temp"): cv.string,
         vol.Optional("ac", default=True): cv.boolean,
@@ -1273,6 +1274,12 @@ def _register_debug_service(hass: HomeAssistant) -> None:
         heat = call.data.get("heat_seats") or None
         vent = call.data.get("vent_seats") or None
         level = call.data.get("level", "3")
+        extra = call.data.get("extra") or None
+        if extra and {str(k).lower() for k in extra} & {"biztype", "command"}:
+            raise ServiceValidationError(
+                "fire_rapid: 'extra' cannot override bizType or command - on "
+                "this endpoint 4 and 6 write the scheduled-trip and "
+                "scheduled-charging slots")
         resp = await _send(entry_id, "fire_rapid", functools.partial(
             bundle["api"].rapid_climate,
             ac=call.data.get("ac", True),
@@ -1281,11 +1288,11 @@ def _register_debug_service(hass: HomeAssistant) -> None:
             vent_seats=vent,
             vlt=call.data.get("window_vent", False),
             level=level,
-            extra=call.data.get("extra") or None,
+            extra=extra,
         ))
         _LOGGER.warning(
-            "fire_rapid temp=%s heat=%s vent=%s level=%s → response=%s",
-            call.data["temp"], heat, vent, level, redact(resp),
+            "fire_rapid temp=%s heat=%s vent=%s level=%s extra=%s → response=%s",
+            call.data["temp"], heat, vent, level, redact(extra), redact(resp),
         )
         _read_back(bundle)
 
