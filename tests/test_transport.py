@@ -78,6 +78,23 @@ def test_pin_store_round_trips_and_migrates_the_old_list_format():
     assert got["h"]["pins"] == ["BBB="] and got["h"]["strict"] is False
 
 
+def test_an_unreadable_pin_store_names_no_vin_in_its_error():
+    """open() puts the file name into the OSError, and the store sits in a
+    directory named after the VIN. The error text reaches the log at ERROR and
+    the re-authentication card, so the OS error is masked like the path."""
+    import os, tempfile
+    from conftest import FAKE_VIN
+    p = os.path.join(tempfile.mkdtemp(), FAKE_VIN, "server_pins.json")
+    os.makedirs(p)                       # a directory where the file should be
+    try:
+        api._load_pin_store(p)
+    except api.GeelyTLSPinError as e:
+        assert FAKE_VIN not in str(e), str(e)
+        assert "could not be read" in str(e)
+    else:
+        raise AssertionError("a directory was accepted as a pin store")
+
+
 # ------------------------------------------------------------- injection ---
 
 def test_crlf_is_rejected_everywhere_it_could_be_injected():

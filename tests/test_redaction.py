@@ -55,6 +55,27 @@ def test_pin_field_is_masked_because_it_carries_the_vin():
     assert out["pin"] == "***redacted***"
 
 
+def test_the_certificate_paths_are_masked_by_both_passes():
+    """cert_path and key_path read .storage/geely_connect/<VIN>/...: the second
+    pass dropped them and the first let them through, which is exactly the
+    drift the two lists exist to prevent."""
+    out = api.redact({"cert_path": f"/config/.storage/geely_connect/{FAKE_VIN}/cert.pem",
+                      "keyPath": f"/config/.storage/geely_connect/{FAKE_VIN}/key.pem"})
+    assert out == {"cert_path": "***redacted***", "keyPath": "***redacted***"}, out
+    diag = load("diagnostics")
+    assert {"cert_path", "key_path"} <= diag._REDACT
+
+
+def test_the_login_account_and_an_authorization_header_are_covered():
+    """The login bodies spell the email "account", and the new platform's HF
+    JWT travels in an Authorization header; a failure body or a header dump
+    folded into a log must not print either."""
+    out = api.redact({"account": EMAIL, "Authorization": TOKEN})
+    assert out["account"] == "....com", out
+    assert out["Authorization"] == "***redacted***", out
+    assert EMAIL not in str(out) and TOKEN not in str(out)
+
+
 def test_zeekr_platform_secrets_are_masked_but_the_expiry_stays_readable():
     # Forward-support for the new EM platform (#33): the entry stores the
     # account password and three session tokens - one of which (the HF JWT)
