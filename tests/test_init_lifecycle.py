@@ -1395,6 +1395,25 @@ def test_fire_rapid_forwards_extra_fields_and_a_chosen_level():
     assert kw["heat_seats"] == ["11", "19"]
 
 
+def test_fire_rapid_refuses_an_extra_that_moves_the_body_to_another_slot():
+    """rapid_climate applies `extra` last, so without this check the comment
+    that bizType is pinned was only a comment: bizType 4 and 6 on the same
+    endpoint write the scheduled-trip and scheduled-charging windows."""
+    m = _mod()
+    from homeassistant.exceptions import ServiceValidationError
+    for extra in ({"bizType": "6"}, {"biztype": "4"}, {"command": "later"}):
+        api = _FakeApi()
+        _, run = _service(m, {"e1": {"vin": FAKE_VIN, "api": api}},
+                          {"temp": "28.5", "extra": extra}, name="fire_rapid")
+        try:
+            run()
+        except ServiceValidationError:
+            pass
+        else:
+            raise AssertionError(f"{extra} reached the car")
+        assert api.calls == [], extra
+
+
 def test_fire_rapid_surfaces_a_rejection_instead_of_looking_successful():
     m = _mod()
     api_mod = load("api")
