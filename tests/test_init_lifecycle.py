@@ -1616,6 +1616,33 @@ def test_a_failed_shred_warns_instead_of_blocking_the_removal():
         assert os.path.exists(vin_dir), "the failure path must not half-delete"
 
 
+def test_removal_finds_the_key_directory_of_an_entry_that_moved_platforms():
+    """The move to the new platform drops cert_path from the entry and leaves
+    the key on disk. Removing that entry later used to return at once, so the
+    key - which can unlock the car - stayed in .storage and in every backup."""
+    m = _mod()
+    with tempfile.TemporaryDirectory() as root:
+        hass = _Hass()
+        hass.config = types.SimpleNamespace(
+            path=lambda *p: os.path.join(root, *p))
+        vin_dir = os.path.join(root, ".storage", "geely_connect", FAKE_VIN)
+        os.makedirs(vin_dir)
+        open(os.path.join(vin_dir, "key.pem"), "w").write("KEY")
+        entry = types.SimpleNamespace(
+            entry_id="e1", data={"vin": FAKE_VIN, "platform": "zeekr"})
+        with _Patched(m, ir=_ir_module()):
+            asyncio.run(m.async_remove_entry(hass, entry))
+        assert not os.path.exists(vin_dir), "the key outlived the entry"
+        # A VIN that is not a plain identifier never becomes a path, and a car
+        # that never had a key directory (a new-platform-native entry) is left
+        # alone without a word in the log.
+        for vin in ("../not-ours", "L6T00000000000001"):
+            with _Patched(m, ir=_ir_module()):
+                asyncio.run(m.async_remove_entry(hass, types.SimpleNamespace(
+                    entry_id="e2", data={"vin": vin})))
+        assert os.listdir(os.path.join(root, ".storage", "geely_connect")) == []
+
+
 def test_a_probe_polls_afterwards_so_its_effect_becomes_visible():
     """The gateway answers "operation succeed" to any well-formed request,
     including targets the car ignores - three candidate tailgate commands in

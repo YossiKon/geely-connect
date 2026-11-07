@@ -48,16 +48,13 @@ from .const import (
     DEFAULT_PLATFORM,
     DEFAULT_REGION,
     PLATFORM_LABELS,
-    PLATFORM_LEGACY,
     PLATFORM_ZEEKR,
     LOCAL_KEY_REGIONS,
     UNSUPPORTED_REGIONS,
     region_config,
     resolve_vehicle_region,
-    DEFAULT_LANGUAGE,
     DEFAULT_POLL_MODE,
     DEFAULT_PRESSURE_UNIT,
-    LANGUAGES,
     POLL_MODES,
     PRESSURE_UNITS,
     COUNTRY_CHOICES,
@@ -69,7 +66,6 @@ from .const import (
     CONF_DEVICE_IDFV,
     CONF_EMAIL,
     CONF_KEY_PATH,
-    CONF_LANGUAGE,
     CONF_POLL_MODE,
     CONF_PRESSURE_UNIT,
     CONF_USER_ID,
@@ -77,7 +73,7 @@ from .const import (
     CONF_VIN,
     DOMAIN,
 )
-from .helpers import password_encrypt, vehicle_metadata
+from .helpers import PasswordKeyError, password_encrypt, vehicle_metadata
 from .region_keys import LocalRegionKeysError, load_region_backend
 from .zeekr_regions import (
     RegionKeysError, ZeekrRegion, load_region_profile,
@@ -530,6 +526,7 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             for zeekr_key in (
                 CONF_PLATFORM, CONF_ZEEKR_ACCESS_TOKEN, CONF_ZEEKR_REFRESH_TOKEN,
                 CONF_ZEEKR_HF_TOKEN, CONF_ZEEKR_HF_EXPIRY, CONF_ZEEKR_PASSWORD,
+                CONF_ZEEKR_REGION, CONF_ZEEKR_ENC_VIN,
             ):
                 new_data.pop(zeekr_key, None)
             new_data[CONF_CIDPSSO_TOKEN] = self._cidpsso_token
@@ -558,7 +555,14 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     new_data.update(await self._provision_legacy(vin, vehicle))
                 except _LegacyProvisionError as e:
                     return self.async_abort(reason=e.reason)
-            self.hass.config_entries.async_update_entry(self._reauth_entry, data=new_data)
+            update: dict[str, Any] = {"data": new_data}
+            options = dict(getattr(self._reauth_entry, "options", None) or {})
+            if CONF_ZEEKR_ENC_VIN in options:
+                # The vehicle token is a capability secret of the platform the
+                # entry is leaving; the option must not outlive the move.
+                options.pop(CONF_ZEEKR_ENC_VIN)
+                update["options"] = options
+            self.hass.config_entries.async_update_entry(self._reauth_entry, **update)
             await self.hass.config_entries.async_reload(self._reauth_entry.entry_id)
             return self.async_abort(
                 reason="reconfigure_successful"
@@ -649,6 +653,10 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                                 "garage found on the new-platform "
                                 "ms-app-bff route")
                     self._vehicles = [v for v in raw if _valid_vin(vehicle_vin(v))]
+                    if self._reauth_entry is not None and self._vehicles:
+                        self._vehicles = self._reauth_candidates(self._vehicles)
+                        if not self._vehicles:
+                            return self.async_abort(reason="already_configured")
                     if not self._vehicles:
                         errors["base"] = "no_vehicles"
                     elif len(self._vehicles) == 1:
@@ -660,6 +668,13 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except (ZeekrAuthError, ZeekrApiError) as e:
                 _LOGGER.warning("zeekr login rejected: %s", e)
                 errors["base"] = "invalid_credentials"
+            except PasswordKeyError as e:
+                # The login worked; storing the password did not. Nothing is
+                # written: a secrets.yaml that cannot be read today must not
+                # turn into a password stored in clear.
+                _LOGGER.error("%s; fix secrets.yaml, or sign in without storing "
+                              "the password", e)
+                errors["base"] = "unknown"
             except Exception:
                 _LOGGER.exception("zeekr login failed")
                 errors["base"] = "network_unreachable"
@@ -691,6 +706,25 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders={"email": self._email or ""},
         )
 
+    def _reauth_candidates(self, vehicles: list[dict]) -> list[dict]:
+        """The cars a re-authentication or reconfiguration may land on.
+
+        The entry's own car, when the account still lists it, is the only
+        candidate. A two-car account used to get the full picker here, and
+        picking the other car re-pointed this entry at a car another entry
+        already held: two entries on one VIN, and the first car impossible to
+        add again because this entry's unique id still claimed it. When the
+        account no longer lists the entry's car (a migration to the new
+        platform can renumber it), the cars other entries hold are left out
+        and whatever remains is offered.
+        """
+        own_vin = self._reauth_entry.data.get(CONF_VIN)
+        own = [v for v in vehicles if vehicle_vin(v) == own_vin]
+        if own:
+            return own
+        held = _already_configured_vins(self.hass) - {own_vin}
+        return [v for v in vehicles if vehicle_vin(v) not in held]
+
     async def async_step_zeekr_pick(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         if user_input is not None:
             chosen = next(
@@ -699,7 +733,12 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
             if chosen is None:
                 return self.async_abort(reason="unknown")
-            return await self._finish_zeekr(chosen)
+            try:
+                return await self._finish_zeekr(chosen)
+            except PasswordKeyError as e:
+                _LOGGER.error("%s; fix secrets.yaml, or sign in without storing "
+                              "the password", e)
+                return self.async_abort(reason="unknown")
         options = {
             vehicle_vin(v): f"{vehicle_nickname(v) or 'Geely'} ({vehicle_vin(v)})"
             for v in self._vehicles
@@ -786,7 +825,12 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             new_data[CONF_COUNTRY_CODE] = self._country_code
             new_data[CONF_PRESSURE_UNIT] = self._pressure_unit
             new_data[CONF_POLL_MODE] = self._poll_mode
-            self.hass.config_entries.async_update_entry(entry, data=new_data)
+            update: dict[str, Any] = {"data": new_data}
+            if vin != entry.data.get(CONF_VIN):
+                # Re-pointed at a renumbered car: the unique id follows, or
+                # the old VIN stays claimed and can never be added again.
+                update["unique_id"] = f"zeekr:{self._email}:{vin}"
+            self.hass.config_entries.async_update_entry(entry, **update)
             await self.hass.config_entries.async_reload(entry.entry_id)
             return self.async_abort(
                 reason="reconfigure_successful"

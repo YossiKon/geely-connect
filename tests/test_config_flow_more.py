@@ -345,6 +345,27 @@ def test_a_return_from_the_new_platform_that_cannot_provision_leaves_the_entry_a
     assert "device_id" not in entry.data
 
 
+def test_a_return_from_the_new_platform_drops_its_region_and_vehicle_token_too():
+    """zeekr_region and zeekr_enc_vin - the latter a capability secret of the
+    platform the entry is leaving - used to survive the move back, in the
+    entry's data and in its options."""
+    cf, flow = _flow()
+    _prime(flow)
+    entry = _returning_from_zeekr()
+    entry.data.update({"zeekr_region": "eu", "zeekr_enc_vin": "pasted-token"})
+    entry.options = {"zeekr_enc_vin": "pasted-token", "poll_interval": 90}
+    flow._reauth_entry = entry
+    cf.geely_api.cidpsso_login = lambda *a, **k: _login_ok(token="tok-2")
+    cf.geely_api.list_vehicles = lambda *a, **k: [_vehicle()]
+    cf.geely_api.provision_user_cert = lambda **kw: None
+
+    res = asyncio.run(flow.async_step_code({"code": "123456"}))
+
+    assert res["type"] == "abort" and res["reason"] == "reauth_successful"
+    assert "zeekr_region" not in entry.data and "zeekr_enc_vin" not in entry.data
+    assert entry.options == {"poll_interval": 90}, entry.options
+
+
 def test_an_account_with_every_car_configured_aborts_cleanly():
     already = types.SimpleNamespace(data={"vin": FAKE_VIN})
     cf, flow = _flow(entries=[already])
