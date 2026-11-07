@@ -331,6 +331,13 @@ def _make_nonce() -> str:
 
 # ---------- Raw-socket mTLS sender ----------
 
+# A chunk-size line is plain hex, optionally followed by ";extensions". int()
+# would also take a sign, whitespace and underscores - and a negative size sent
+# the cursor backwards, so a stream starting "-6\r\n" looped forever while the
+# output grew without bound. Match the token instead of converting it.
+_CHUNK_SIZE = re.compile(rb"\A([0-9A-Fa-f]{1,8})[ \t]*(?:;.*)?\Z", re.S)
+
+
 def _parse_chunked(body: bytes) -> bytes:
     out = b''
     pos = 0
@@ -338,10 +345,10 @@ def _parse_chunked(body: bytes) -> bytes:
         end = body.find(b'\r\n', pos)
         if end < 0:
             break
-        try:
-            sz = int(body[pos:end], 16)
-        except ValueError:
+        m = _CHUNK_SIZE.match(body[pos:end])
+        if not m:
             break
+        sz = int(m.group(1), 16)
         if sz == 0:
             break
         pos = end + 2
@@ -444,6 +451,7 @@ def _strict_ctx() -> ssl.SSLContext:
     ctx.options |= _TLS_LEGACY_RENEG
     ctx.check_hostname = True
     ctx.verify_mode = ssl.CERT_REQUIRED
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
     return ctx
 
 
@@ -456,6 +464,10 @@ def _pinning_ctx() -> ssl.SSLContext:
     ctx.options |= _TLS_LEGACY_RENEG
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
+    # Explicit, not inherited: a bare context takes its floor from the
+    # interpreter's build profile, and some distributions defer that to
+    # OpenSSL's policy, which can still allow TLS 1.0.
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
     return ctx
 
 

@@ -257,6 +257,28 @@ def test_garbage_chunking_ends_the_parse_instead_of_raising():
     assert api._parse_chunked(b"4\r\nWiki") == b"Wiki"     # truncated tail
 
 
+def test_a_signed_or_padded_chunk_size_ends_the_parse():
+    """int(x, 16) also takes "+4", " 4" and "4_0"; only plain hex is a chunk
+    size. A negative size sent the cursor backwards, so a stream starting
+    "-6\\r\\n" looped forever while the output grew by the rest of the body on
+    every pass, until the process ran out of memory. The negative case runs on
+    a thread so a regression fails in two seconds instead of hanging the suite."""
+    assert api._parse_chunked(b"+4\r\nWiki\r\n0\r\n\r\n") == b""
+    assert api._parse_chunked(b" 4\r\nWiki\r\n0\r\n\r\n") == b""
+    assert api._parse_chunked(b"4_0\r\n" + b"W" * 64 + b"\r\n") == b""
+    # A chunk extension (";name=value") is part of the size line and ignored.
+    assert api._parse_chunked(b"4;ext=1\r\nWiki\r\n0\r\n\r\n") == b"Wiki"
+    import threading
+    out = []
+    t = threading.Thread(
+        target=lambda: out.append(api._parse_chunked(b"-6\r\n" + b"A" * 10 + b"\r\n")),
+        daemon=True)
+    t.start()
+    t.join(2)
+    assert not t.is_alive(), "a negative chunk size still loops"
+    assert out == [b""], out
+
+
 # ---------------------------------------------------------- error mapping ---
 
 def test_an_auth_code_in_a_control_reply_is_an_auth_error():
@@ -303,6 +325,7 @@ def test_the_strict_context_verifies_chain_and_hostname():
     assert ctx.check_hostname is True
     assert ctx.verify_mode == ssl.CERT_REQUIRED
     assert ctx.options & api._TLS_LEGACY_RENEG
+    assert ctx.minimum_version == ssl.TLSVersion.TLSv1_2
 
 
 def test_a_broken_certifi_does_not_disable_verification():
@@ -331,6 +354,9 @@ def test_the_pinning_context_disables_chain_checks_for_manual_pinning():
     assert ctx.check_hostname is False
     assert ctx.verify_mode == ssl.CERT_NONE
     assert ctx.options & api._TLS_LEGACY_RENEG
+    # Explicit, not inherited from the interpreter's build profile: the pin
+    # stops a foreign key, not a downgraded record layer.
+    assert ctx.minimum_version == ssl.TLSVersion.TLSv1_2
 
 
 def test_the_pin_is_a_key_hash_not_a_cert_hash():

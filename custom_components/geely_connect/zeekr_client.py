@@ -60,7 +60,6 @@ import string
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Any
 from urllib.parse import urlparse, parse_qsl, quote
 
 from .api import redact
