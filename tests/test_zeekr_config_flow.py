@@ -298,6 +298,104 @@ def test_reauth_of_a_zeekr_entry_routes_to_the_zeekr_login():
     assert res["type"] == "form" and res["step_id"] == "zeekr_login", res
 
 
+class _TwoCarClient(_FakeClient):
+    """An account that lists two cars, the entry's own one second."""
+
+    def list_vehicles(self, user_id):
+        return [{"vin": "L6T00000000000099", "nickName": "Other",
+                 "appModelCode": "E245-J1", "engineType": "BEV"},
+                {"vin": self._vin, "nickName": "Mock EX5",
+                 "appModelCode": "E245-J1", "engineType": "BEV"}]
+
+
+def test_zeekr_reauth_keeps_the_entrys_own_car_when_the_account_lists_two():
+    """A two-car account used to get the full picker on re-authentication,
+    and picking the other car re-pointed this entry at a car its sibling entry
+    already held. The entry's own car is the only candidate: no picker."""
+    cf, flow = _flow()
+    entry = _legacy_entry()
+    entry.data.update({"platform": "zeekr", "vin": FAKE_VIN})
+    flow._reauth_entry = entry
+    cf._zeekr_login_password = lambda e, p, c: _TwoCarClient()
+    res = asyncio.run(flow.async_step_zeekr_login(_zeekr_login_input()))
+    assert res["type"] == "abort" and res["reason"] == "reauth_successful", res
+    assert entry.data["vin"] == FAKE_VIN
+
+
+def test_zeekr_reauth_never_lands_on_a_car_another_entry_holds():
+    """The account no longer lists this entry's car, and the one car it does
+    list belongs to another entry: re-pointing would put two entries on one
+    VIN. The flow stops before writing anything."""
+    other = _legacy_entry()
+    other.data["vin"] = FAKE_VIN
+    cf, flow = _flow(entries=[other])
+    entry = _legacy_entry()
+    entry.data.update({"platform": "zeekr", "vin": "LJXK0EX50N00000001"})
+    flow._reauth_entry = entry
+    cf._zeekr_login_password = lambda e, p, c: _FakeClient()   # lists FAKE_VIN only
+    res = asyncio.run(flow.async_step_zeekr_login(_zeekr_login_input()))
+    assert res["type"] == "abort" and res["reason"] == "already_configured", res
+    assert entry.data["vin"] == "LJXK0EX50N00000001", "the entry was re-pointed"
+    assert entry.data.get("zeekr_access_token") != "mock-at", "the entry was written"
+
+
+def test_a_zeekr_reauth_that_renumbers_the_car_moves_the_unique_id_with_it():
+    """When the account lists only a renumbered car, the entry follows it -
+    and so must its unique id, or the old VIN stays claimed for ever."""
+    cf, flow = _flow()
+    entry = _legacy_entry()                 # its VIN is not the one listed
+    flow._reauth_entry = entry
+    cf._zeekr_login_password = lambda e, p, c: _FakeClient()
+    res = asyncio.run(flow.async_step_zeekr_login(_zeekr_login_input()))
+    assert res["reason"] == "reauth_successful", res
+    assert entry.data["vin"] == FAKE_VIN
+    assert entry.unique_id == f"zeekr:user@example.com:{FAKE_VIN}"
+
+
+def test_an_unreadable_secrets_yaml_stops_the_login_instead_of_storing_in_clear():
+    """password_encrypt refuses when secrets.yaml exists but cannot be read.
+    The flow turns that into a form error and writes nothing."""
+    cf, flow = _flow()
+    helpers = load("helpers")
+
+    def _refuse(hass, plain):
+        raise helpers.PasswordKeyError("secrets.yaml exists but could not be read")
+
+    orig = cf.password_encrypt
+    cf.password_encrypt = _refuse
+    try:
+        cf._zeekr_login_password = lambda e, p, c: _FakeClient()
+        asyncio.run(flow.async_step_user({"platform": "zeekr"}))
+        res = asyncio.run(flow.async_step_zeekr_login(
+            _zeekr_login_input({"store_password": True})))
+    finally:
+        cf.password_encrypt = orig
+    assert res["type"] == "form" and res["errors"]["base"] == "unknown", res
+
+
+def test_an_unreadable_secrets_yaml_stops_the_vehicle_picker_too():
+    """The picker finishes the entry outside the login step's error handling,
+    so it needs its own refusal: an abort, and still nothing written."""
+    cf, flow = _flow()
+    helpers = load("helpers")
+
+    def _refuse(hass, plain):
+        raise helpers.PasswordKeyError("secrets.yaml exists but could not be read")
+
+    orig = cf.password_encrypt
+    cf.password_encrypt = _refuse
+    try:
+        cf._zeekr_login_password = lambda e, p, c: _FakeClient(n_vehicles=2)
+        asyncio.run(flow.async_step_user({"platform": "zeekr"}))
+        res = asyncio.run(flow.async_step_zeekr_login(
+            _zeekr_login_input({"store_password": True})))
+        assert res["type"] == "form" and res["step_id"] == "zeekr_pick", res
+        res = asyncio.run(flow.async_step_zeekr_pick({"vin": FAKE_VIN}))
+    finally:
+        cf.password_encrypt = orig
+    assert res["type"] == "abort" and res["reason"] == "unknown", res
+
+
 def test_reconfigure_shows_the_backend_picker():
     cf, flow = _flow()
     entry = _legacy_entry()

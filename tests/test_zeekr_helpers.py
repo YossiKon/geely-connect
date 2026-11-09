@@ -44,11 +44,36 @@ def test_encrypt_without_a_key_falls_back_to_plaintext():
     assert h.password_encrypt(hass, "hunter2") == "hunter2"
 
 
-def test_malformed_secrets_yaml_is_treated_as_no_key():
+def test_a_broken_secrets_yaml_refuses_to_store_the_password_in_clear():
+    """A secrets.yaml that exists but cannot be parsed used to count as "no
+    key", and the password went into .storage in plain text under a warning
+    that said no key was configured. Unknown is not "no": the flow refuses,
+    with a message that names the file and never a value."""
     h = _helpers()
     hass = _Hass(secrets_content="::: this is not yaml :::\n\tbroken")
-    assert h.password_encrypt(hass, "hunter2") == "hunter2", \
-        "a broken secrets.yaml must not crash the flow"
+    try:
+        h.password_encrypt(hass, "hunter2")
+    except h.PasswordKeyError as e:
+        assert "hunter2" not in str(e) and "secrets.yaml" in str(e), str(e)
+    else:
+        raise AssertionError("a broken secrets.yaml stored the password in clear")
+    # A file that parses to something other than a mapping is just as unknown.
+    try:
+        h.password_encrypt(_Hass(secrets_content="- a\n- b\n"), "hunter2")
+    except h.PasswordKeyError:
+        pass
+    else:
+        raise AssertionError("a list-shaped secrets.yaml stored the password in clear")
+    # An empty file is an explicit "nothing configured", like a missing one.
+    assert h.password_encrypt(_Hass(secrets_content=""), "hunter2") == "hunter2"
+
+
+def test_decrypting_under_a_broken_secrets_yaml_fails_closed_without_raising():
+    h = _helpers()
+    stored = h.password_encrypt(
+        _Hass(secrets_content="geely_password_key: key-a\n"), "hunter2")
+    broken = _Hass(secrets_content="::: this is not yaml :::\n\tbroken")
+    assert h.password_decrypt(broken, stored) == ""
 
 
 def test_decrypt_passes_plaintext_through():

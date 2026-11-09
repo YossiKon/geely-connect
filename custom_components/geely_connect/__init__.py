@@ -5,6 +5,7 @@ import asyncio
 import functools
 import logging
 import os
+import re
 import shutil
 import socket
 from datetime import timedelta
@@ -77,7 +78,6 @@ from .const import (
     DOMAIN,
     PLATFORM_ZEEKR,
     POLL_PROFILES,
-    SCAN_INTERVAL_SECONDS,
     SERIES_TO_FRIENDLY_NAME,
     SERVICE_PARKING_COMFORT,
     LOCAL_KEY_REGIONS,
@@ -392,8 +392,6 @@ def _poll_flags(d: dict) -> tuple[bool, bool]:
     if not isinstance(d, dict):
         return False, False
     vs = d.get("vehicleStatus") or {}
-    add = vs.get("additionalVehicleStatus") or {}
-    ev = add.get("electricVehicleStatus") or {}
     basic = vs.get("basicVehicleStatus") or {}
     # The composite from sensor.py: DC fast charge can hold
     # statusOfChargerConnection at 1 for a whole session (#10), and a car
@@ -1416,12 +1414,22 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     # A Repairs issue outliving the entry it was about would point at a
     # Configure page that no longer exists.
     ir.async_delete_issue(hass, DOMAIN, _x_vin_issue_id(entry))
-    cert_path = entry.data.get(CONF_CERT_PATH)
-    if not cert_path:
-        return
-    vin_dir = os.path.dirname(cert_path)
-    # Only ever inside our own storage directory, never a path the server chose.
     expected_root = os.path.join(hass.config.path(".storage"), DOMAIN)
+    cert_path = entry.data.get(CONF_CERT_PATH)
+    if cert_path:
+        vin_dir = os.path.dirname(cert_path)
+    else:
+        # An entry that moved to the new platform dropped its certificate
+        # paths but not the files: the key stayed on disk, in every backup
+        # since, with nothing left pointing at it. The directory is named
+        # after the VIN, so it can still be found - under the root check below.
+        vin = entry.data.get(CONF_VIN)
+        if not isinstance(vin, str) or not re.fullmatch(r"[A-Za-z0-9]{8,20}", vin):
+            return
+        vin_dir = os.path.join(expected_root, vin)
+        if not await hass.async_add_executor_job(os.path.isdir, vin_dir):
+            return
+    # Only ever inside our own storage directory, never a path the server chose.
     if os.path.commonpath([os.path.abspath(vin_dir),
                            os.path.abspath(expected_root)]) != os.path.abspath(expected_root):
         _LOGGER.warning("refusing to remove %s: outside the integration's storage",

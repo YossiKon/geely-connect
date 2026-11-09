@@ -78,14 +78,34 @@ _ENC_PREFIX = "enc:"
 _SECRET_KEY_NAME = "geely_password_key"
 
 
+class PasswordKeyError(HomeAssistantError):
+    """secrets.yaml exists but cannot be read, so whether a key is configured
+    is unknown. Treating that as "no key" would store the password in clear
+    because of a stray YAML error; the caller refuses instead. The message
+    names the file and the failure, never a value."""
+
+
 def _encryption_key(hass: HomeAssistant) -> bytes | None:
     """32-byte AES key from secrets.yaml, or None when the user has not
-    configured one (plaintext fallback applies)."""
+    configured one (plaintext fallback applies).
+
+    None means the owner chose not to set a key: no secrets.yaml, an empty
+    one, or one without the key. A file that exists but cannot be read or
+    parsed raises PasswordKeyError."""
     try:
         secrets = yaml_util.load_yaml(hass.config.path("secrets.yaml"))
-    except Exception:  # noqa: BLE001 - missing or malformed secrets.yaml means "no key"
+    except FileNotFoundError:
         return None
-    key = (secrets or {}).get(_SECRET_KEY_NAME)
+    except Exception as e:  # noqa: BLE001 - YAML errors, permissions, encoding
+        raise PasswordKeyError(
+            f"secrets.yaml exists but could not be read ({type(e.__cause__ or e).__name__}), "
+            f"so whether it holds a '{_SECRET_KEY_NAME}' is unknown"
+        ) from e
+    if not secrets:
+        return None
+    if not isinstance(secrets, dict):
+        raise PasswordKeyError("secrets.yaml is not a mapping of names to values")
+    key = secrets.get(_SECRET_KEY_NAME)
     if not key:
         return None
     return hashlib.sha256(str(key).encode()).digest()
@@ -132,6 +152,10 @@ def password_decrypt(hass: HomeAssistant, stored: str) -> str:
         nonce = base64.b64decode(nonce_b64)
         ct = base64.b64decode(ct_b64)
         return AESGCM(key).decrypt(nonce, ct, None).decode()
+    except PasswordKeyError as e:
+        _LOGGER.error("zeekr password cannot be decrypted: %s - fix secrets.yaml "
+                      "or reauthenticate", e)
+        return ""
     except Exception:  # noqa: BLE001 - wrong key or tampered value
         _LOGGER.error("zeekr password decrypt failed (key changed?) - reauthenticate")
         return ""
