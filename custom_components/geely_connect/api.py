@@ -142,6 +142,14 @@ _SECRET_KEYS: set = {
     # An original-login region's app id, which an owner may supply locally
     # with its secret (region_keys.py, #105); "appsecret" is covered above.
     "appid",
+    # The entry's certificate and key paths are named after the VIN
+    # (.storage/geely_connect/<VIN>/cert.pem). diagnostics._REDACT drops them;
+    # this pass used to let them through, which is the drift the two lists
+    # exist to prevent.
+    "certpath", "keypath",
+    # The new platform's HF JWT travels in an Authorization header. No path
+    # folds headers into a log today; the hedge costs nothing.
+    "authorization",
 }
 
 # "key" is ambiguous: it holds PEM material in provisioning responses, but the
@@ -158,6 +166,9 @@ _AMBIGUOUS_KEYS: set = {"key"}
 _IDENTIFYING_KEYS: set = {
     "vin", "userid", "deviceid", "devicehardwareidfa", "devicehardwareidfv",
     "deviceidfa", "deviceidfv", "email", "mobile", "phone", "username",
+    # The login bodies spell the email "account" (cidpsso_login, the new
+    # platform's code exchange); a failure body that echoes it is logged.
+    "account",
 }
 
 
@@ -507,9 +518,12 @@ def _load_pin_store(pin_path: str | None) -> dict[str, dict]:
         with open(pin_path, "r") as fh:
             raw = json.load(fh)
     except (OSError, ValueError) as e:
+        # The OS error names the file, and the file sits in a directory named
+        # after the VIN - mask the error text as well as the path.
         raise GeelyTLSPinError(
-            f"{mask_path(pin_path)} exists but could not be read ({e}). Refusing to "
-            "continue without the pins it should contain - fix or delete it."
+            f"{mask_path(pin_path)} exists but could not be read ({mask_path(e)}). "
+            "Refusing to continue without the pins it should contain - fix or "
+            "delete it."
         ) from e
     if not isinstance(raw, dict):
         raise GeelyTLSPinError(f"{mask_path(pin_path)} is not a JSON object; refusing to use it")
@@ -614,7 +628,8 @@ def _secure_tls_connect(host: str, port: int, *, pin_path: str | None,
             except OSError as e:
                 _LOGGER.warning(
                     "could not record that %s validates publicly (%s); the "
-                    "host allowlist still blocks a pinning downgrade", host, e,
+                    "host allowlist still blocks a pinning downgrade",
+                    host, mask_path(e),
                 )
         return ssock
 
@@ -685,8 +700,8 @@ def _secure_tls_connect(host: str, port: int, *, pin_path: str | None,
     except OSError as e:
         ssock.close()
         raise GeelyTLSPinError(
-            f"{host}: could not persist the first-use pin to {mask_path(pin_path)} ({e}); "
-            "refusing to continue unverified."
+            f"{host}: could not persist the first-use pin to {mask_path(pin_path)} "
+            f"({mask_path(e)}); refusing to continue unverified."
         ) from e
     _LOGGER.warning(
         "%s is not publicly-trusted and ships no bundled pin; recorded its "
@@ -1628,26 +1643,32 @@ def provision_user_cert(*, app_id: str, app_secret: str, user_id: str,
         encryption_algorithm=serialization.NoEncryption(),
     )
     vin_dir = os.path.dirname(cert_out_path)
-    os.makedirs(vin_dir, mode=0o700, exist_ok=True)
-    # makedirs applies `mode` to the leaf only - intermediate directories get
-    # the default umask. The intermediate here is .storage/geely_connect, whose
-    # entries are named after the VIN, so leaving it 0755 lets any local account
-    # list it and read the VIN off the directory name even though the key inside
-    # is unreadable. Tighten both.
-    for d in (vin_dir, os.path.dirname(vin_dir)):
+    try:
+        os.makedirs(vin_dir, mode=0o700, exist_ok=True)
+        # makedirs applies `mode` to the leaf only - intermediate directories
+        # get the default umask. The intermediate here is .storage/geely_connect,
+        # whose entries are named after the VIN, so leaving it 0755 lets any
+        # local account list it and read the VIN off the directory name even
+        # though the key inside is unreadable. Tighten both.
+        for d in (vin_dir, os.path.dirname(vin_dir)):
+            try:
+                os.chmod(d, 0o700)
+            except OSError:
+                pass
+        with open(cert_out_path, "w") as fh:
+            fh.write(cert_pem)
         try:
-            os.chmod(d, 0o700)
+            os.chmod(cert_out_path, 0o600)
         except OSError:
             pass
-    with open(cert_out_path, "w") as fh:
-        fh.write(cert_pem)
-    try:
-        os.chmod(cert_out_path, 0o600)
-    except OSError:
-        pass
-    key_fd = os.open(key_out_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(key_fd, "wb") as fh:
-        fh.write(key_bytes)
+        key_fd = os.open(key_out_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(key_fd, "wb") as fh:
+            fh.write(key_bytes)
+    except OSError as e:
+        # The OS error names the file it could not write, and the file sits in
+        # a directory named after the VIN. config_flow logs this with its
+        # traceback, so the original is dropped rather than chained.
+        raise OSError(f"could not store the vehicle certificate: {mask_path(e)}") from None
     try:
         os.chmod(key_out_path, 0o600)
     except OSError:

@@ -293,6 +293,41 @@ def test_provisioning_writes_the_cert_and_a_private_key():
         assert "BEGIN CERTIFICATE REQUEST" in calls[1][1]["csr"]
 
 
+def test_a_failed_certificate_write_names_no_vin():
+    """The OS error names the file it could not write, and the file sits in a
+    directory named after the VIN; config_flow logs the failure with its
+    traceback. A file where the VIN directory should be makes makedirs fail."""
+    if not _deps():
+        skip("cryptography not installed")
+    from conftest import FAKE_VIN
+    api = _api()
+    with tempfile.TemporaryDirectory() as d:
+        open(os.path.join(d, FAKE_VIN), "w").close()
+
+        def _fake_raw(host, method, path, headers, body, **kw):
+            if path.endswith("/info"):
+                return json.dumps({"code": 1000, "data": {"checkCode": "chk"}}).encode()
+            return json.dumps({"code": 1000, "data": {"cert": "-----FAKE CERT-----"}}).encode()
+
+        orig = api._raw_https
+        api._raw_https = _fake_raw
+        try:
+            api.provision_user_cert(
+                app_id="a", app_secret="s", user_id="user-1", cidpsso_token="tok",
+                cert_out_path=os.path.join(d, FAKE_VIN, "cert.pem"),
+                key_out_path=os.path.join(d, FAKE_VIN, "key.pem"))
+        except OSError as e:
+            assert FAKE_VIN not in str(e), str(e)
+            assert "certificate" in str(e), str(e)   # the text itself is not VIN-shaped
+            # The original error, which names the path, must not ride along
+            # in the traceback either.
+            assert e.__cause__ is None and e.__suppress_context__, "the original error is chained"
+        else:
+            raise AssertionError("writing through a file as a directory succeeded")
+        finally:
+            api._raw_https = orig
+
+
 def test_a_wrong_region_account_gets_the_explanation_not_a_dump():
     """Code 1501 means 'wrong backend', and everything before it succeeds -
     without this mapping it looks like a bug in the integration."""
