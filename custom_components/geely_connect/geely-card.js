@@ -790,8 +790,16 @@
       const [x, y] = PHOTO_SPOTS[k];
       base[k] = [right ? Math.round((100 - x) * 10) / 10 : x, y];
     }
-    const S = Object.assign(base, cfg.car_image_hotspots || {});
-    const at = (k) => `left:${S[k][0]}%; top:${S[k][1]}%`;
+    const S = Object.assign({}, base, cfg.car_image_hotspots || {});
+    // A hotspot is a pair of percentages. Anything else in the config - a
+    // string, a null, a missing half - falls back to the measured default, so
+    // a typo can neither throw nor put text into a style attribute.
+    const pct = (k, i) => {
+      const raw = Array.isArray(S[k]) ? S[k][i] : null;
+      const own = raw == null || raw === "" || typeof raw === "boolean" ? NaN : Number(raw);
+      return Number.isFinite(own) ? own : base[k][i];
+    };
+    const at = (k) => `left:${pct(k, 0)}%; top:${pct(k, 1)}%`;
     const lamp = (k, on) =>
       `<i class="lamp ${k}${on ? " on" : ""}" style="${at(k)}"></i>`;
     const ind = (k) =>
@@ -1411,7 +1419,9 @@
 
     setConfig(config) {
       this._config = config || {};
-      this._prefix = this._config.prefix || null;
+      // YAML hands over a bare number for `prefix: 2024`; _title() and the
+      // entity ids need a string.
+      this._prefix = this._config.prefix ? String(this._config.prefix) : null;
       this._sig = "";
       if (this._hass) {
         this._prefix = this._prefix || this._detectPrefix(this._hass);
@@ -1850,7 +1860,8 @@
         case "seat_vent_driver": case "seat_vent_passenger": {
           // Tap cycles Off -> Low -> Medium -> High -> Off.
           const st = this._st(`select.${key}`);
-          if (!st || !st.attributes || !Array.isArray(st.attributes.options)) break;
+          if (!st || !st.attributes || !Array.isArray(st.attributes.options)
+              || !st.attributes.options.length) break;
           const opts = st.attributes.options;
           const next = opts[(opts.indexOf(st.state) + 1) % opts.length];
           this._call("select", "select_option", key, { option: next });
@@ -2007,7 +2018,10 @@
       const seat = (key, label, ic, mode) => {
         const st = this._st(`select.${key}`);
         if (!st) return "";
-        const opts = (st.attributes && st.attributes.options) || [];
+        // The same guard the tap handler uses: a non-array `options` must not
+        // take the whole card down.
+        const opts = Array.isArray(st.attributes && st.attributes.options)
+          ? st.attributes.options : [];
         // "unavailable"/"unknown" must read as Off, not as an active level.
         const lvl = opts.includes(st.state) ? st.state : "Off";
         // Fill the button in proportion to the level: High fills it (same as
@@ -2822,7 +2836,7 @@
             { power: OK(power) ? " · " + this._fmt(power) : "" })
         : driving
         ? this._t("status.driving_line", "Driving{speed}",
-            { speed: speed != null && speed > 0 ? ` · ${Math.round(speed)} ${esc(speedUnit)}` : "" })
+            { speed: speed != null && speed > 0 ? ` · ${Math.round(speed)} ${speedUnit}` : "" })
         : s.doorsOpen.length ? this._t("status.n_openings_open",
             "{count} opening{plural} open",
             { count: s.doorsOpen.length, plural: s.doorsOpen.length > 1 ? "s" : "" })
@@ -3003,7 +3017,10 @@
       src = (tag && tag.src) || "";
     }
     const m = /[?&]v=([^&]+)/.exec(src);
-    return m ? decodeURIComponent(m[1]) : "?";
+    if (!m) return "?";
+    // A resource URL written by hand can carry a malformed escape, and a throw
+    // here stops the whole file before any card is defined.
+    try { return decodeURIComponent(m[1]); } catch (e) { return m[1]; }
   })();
 
   const T0 = Date.now();
@@ -3283,7 +3300,7 @@
             { power: OK(power) ? " · " + this._fmt(power) : "" })
         : driving
         ? this._t("status.driving_line", "Driving{speed}",
-            { speed: speed != null && speed > 0 ? ` · ${Math.round(speed)} ${esc(speedUnit)}` : "" })
+            { speed: speed != null && speed > 0 ? ` · ${Math.round(speed)} ${speedUnit}` : "" })
         : s.doorsOpen.length ? this._t("status.n_openings_open",
             "{count} opening{plural} open",
             { count: s.doorsOpen.length, plural: s.doorsOpen.length > 1 ? "s" : "" })

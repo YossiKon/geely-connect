@@ -1806,6 +1806,42 @@ def test_a_module_load_still_finds_its_own_version():
         pw.stop()
 
 
+def test_a_malformed_version_in_the_script_url_does_not_stop_the_file():
+    """The banner decodes `?v=` off the script tag. A resource URL written by
+    hand - the YAML-mode fallback cards.py asks for - can carry a bad escape,
+    and decodeURIComponent threw at module level, before any card was
+    defined: every dashboard said "Custom element not found"."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        skip("playwright not installed")
+    pw = sync_playwright().start()
+    try:
+        browser = pw.chromium.launch(headless=True)
+    except Exception as e:
+        pw.stop()
+        skip(f"chromium unavailable: {str(e)[:60]}")
+    try:
+        page = browser.new_page()
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        # A tag the version lookup finds, with an escape that cannot decode;
+        # type=text/plain keeps the browser from fetching it.
+        page.set_content(
+            "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+            "<script type='text/plain' "
+            "src='https://example.invalid/geely-card.js?v=%E0%'></script>"
+            "</head><body></body></html>")
+        page.add_script_tag(content=_HASS_FACTORY)
+        page.add_script_tag(content=_source(CARD))
+        page.wait_for_function("() => !!customElements.get('geely-card')",
+                               timeout=4000)
+        assert not errors, errors
+    finally:
+        browser.close()
+        pw.stop()
+
+
 def _rgb(value):
     """Chromium reports a resolved color-mix() as `color(srgb f f f)` rather than
     `rgb(r, g, b)`, so accept both and return 0-255 triples either way."""
@@ -2075,6 +2111,56 @@ def test_hide_name_removes_the_title_text():
     assert got2["dot"] is False, got2      # status dot removed with the name
 
 
+def test_a_numeric_prefix_still_renders_a_title():
+    """YAML hands over `prefix: 2024` as a number. With no name configured and
+    no device name to fall back on, _title() called .replace on it and the
+    card read "Render failed"."""
+    got = _evaluate("""() => {
+        const el = document.createElement("geely-card-compact");
+        document.body.appendChild(el);
+        el.setConfig({ prefix: 2024 });
+        const hass = window.mkHass({});
+        // The same entities under the numeric prefix, and no registry or
+        // device to name the card after.
+        for (const id of Object.keys(hass.states)) {
+          hass.states[id.replace("car_", "2024_")] = hass.states[id];
+        }
+        hass.entities = {}; hass.devices = {};
+        el.hass = hass;
+        const t = el.shadowRoot.querySelector(".title");
+        return { title: t ? t.textContent.trim() : null,
+                 failed: /Render failed/.test(el.shadowRoot.textContent) };
+    }""")
+    assert got["failed"] is False, got
+    assert got["title"] and "2024" in got["title"], got
+
+
+def test_a_seat_select_whose_options_are_not_a_list_does_not_break_the_card():
+    """The tap handler already checked Array.isArray; the renderer did not,
+    so a numeric `options` attribute threw inside the climate panel."""
+    got = _evaluate("""() => {
+        const el = document.createElement("geely-card");
+        document.body.appendChild(el);
+        el.setConfig({});
+        const hass = window.mkHass({});
+        hass.states["select.car_seat_heat_driver"] = {
+          entity_id: "select.car_seat_heat_driver", state: "Off",
+          attributes: { options: 3 } };
+        el.hass = hass;
+        return /Render failed/.test(el.shadowRoot.textContent);
+    }""")
+    assert got is False, "a numeric `options` took the card down"
+
+
+def test_the_driving_line_escapes_the_speed_unit_once():
+    """The unit was escaped inside the substitution and again when the status
+    line was written, so an ampersand in a unit read "&amp;" on screen."""
+    probe = "el.shadowRoot.querySelector('.status').textContent.trim()"
+    for tag in ("geely-card", "geely-card-top"):
+        got = _mount(tag, probe, speed="63", speedUnit="km&h", engine="Running")
+        assert got == "Driving · 63 km&h", (tag, got)
+
+
 def test_battery_size_promotes_the_percentage_above_the_range():
     got = _mount("geely-card-compact", """{
             battpct: (el.shadowRoot.querySelector('.battpct')||{}).textContent || null,
@@ -2314,6 +2400,21 @@ def test_a_right_facing_car_photo_mirrors_the_default_lamp_spots():
     own = _photo({"car_image_facing": "right",
                   "car_image_hotspots": {"taillight": [7, 40]}})["spots"]
     assert own["taillight"] == "7%", own
+
+
+def test_a_malformed_hotspot_falls_back_instead_of_breaking_the_card():
+    """`car_image_hotspots` went straight into a style attribute: a string
+    ended the attribute and started markup, and a null threw, so the whole
+    card read "Render failed". Anything that is not a pair of numbers falls
+    back to the measured default."""
+    got = _photo({"car_image_hotspots": {
+        "taillight": ['1" onmouseover="x', 40], "hood": None, "port": 7, "front": [None, 37]}},
+        brake="on")
+    spots = got["spots"]
+    assert spots["taillight"] == "94.3%", spots
+    assert spots["hood"] == "15%", spots
+    assert spots["port"] == "86.2%", spots
+    assert spots["front"] == "50%", spots
 
 
 def test_the_photo_only_states_are_watched_when_a_photo_is_shown():
