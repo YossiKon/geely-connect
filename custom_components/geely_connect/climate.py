@@ -162,6 +162,11 @@ class GeelyClimate(CoordinatorEntity, ClimateEntity, RestoreEntity):
         # UI doesn't flicker through IDLE while the cabin temp catches up.
         self._optimistic_action: HVACAction | None = None
         self._optimistic_action_until: float = 0.0
+        # Moved on by every command of this entity's that the gateway accepts,
+        # so the rapid check that runs a minute after a press can tell it has
+        # been overtaken. Neither defrost, which is its own entity, nor the admin
+        # services, which call the API directly, count.
+        self._commands_accepted = 0
 
         features = (
             ClimateEntityFeature.TARGET_TEMPERATURE
@@ -325,9 +330,11 @@ class GeelyClimate(CoordinatorEntity, ClimateEntity, RestoreEntity):
         # command doesn't leave the UI showing a state the car never reached.
         if hvac_mode == HVACMode.HEAT_COOL:
             await self._fire_ac("start", self._cached_target_temp)
+            self._commands_accepted += 1
             self._set_optimistic(HVACMode.HEAT_COOL)
         elif hvac_mode == HVACMode.OFF:
             await self._fire_ac("stop", self._cached_target_temp)
+            self._commands_accepted += 1
             # One command, and no optimistic Off while the defroster is still
             # running. This used to chain a second stop for the defroster, so
             # that hvac_mode - which reports HEAT_COOL for defrost as well as
@@ -366,6 +373,12 @@ class GeelyClimate(CoordinatorEntity, ClimateEntity, RestoreEntity):
         # the server accepts. Avoids the UI showing a temp the car never
         # received.
         await self._fire_ac("start", clamped)
+        self._commands_accepted += 1
+        # The setpoint goes out as a start, so on a car that was off it turns
+        # the climate on. Without this the entity went on saying Off, and
+        # hvac_action - which answers OFF whenever the mode is Off - hid the
+        # optimistic action set below.
+        self._set_optimistic(HVACMode.HEAT_COOL)
         # Optimistic action so the UI doesn't flicker through IDLE while
         # the dead-band recomputes against the not-yet-changed cabin temp.
         current = _to_float(_walk(self.coordinator.data or {}, _INTERIOR_TEMP_PATH))
@@ -468,13 +481,15 @@ class GeelyClimate(CoordinatorEntity, ClimateEntity, RestoreEntity):
         # cycle stand, or drops every optimistic override and says out loud
         # that the car has not reported starting.
         self._rapid_warming = warming
+        self._commands_accepted += 1
+        press = self._commands_accepted
         schedule_refresh(self._hass, self.coordinator, 8, 20, 40,
-                         after=self._verify_rapid)
+                         after=lambda: self._verify_rapid(press))
         self.async_write_ha_state()
 
     # ---- helpers ----
 
-    def _verify_rapid(self) -> None:
+    def _verify_rapid(self, press: int | None = None) -> None:
         """The gateway said yes; this is whether the car did.
 
         Runs after the last post-rapid poll, ~70s in. A cycle that started
@@ -487,7 +502,16 @@ class GeelyClimate(CoordinatorEntity, ClimateEntity, RestoreEntity):
         Worded as "has not reported starting" rather than "failed", because
         a car can be asleep and catch up late - rare, and a wrong "it is
         running" costs more than a wrong "check the car".
+
+        `press` is the count of accepted commands when the cycle was asked
+        for. Anything accepted since - Off, a new setpoint, a second press -
+        has overtaken it, and the check says nothing: turning the climate off
+        within the minute drew "has not reported starting" for a cycle the
+        owner had ended, and a second press had the first check clear the
+        second one's state.
         """
+        if press is not None and press != self._commands_accepted:
+            return                          # overtaken by a later command
         if _truthy(_walk(self.coordinator.data or {}, _PRECLIMATE_PATH)):
             return                          # visibly running - nothing to say
         self._optimistic_hvac_mode = None

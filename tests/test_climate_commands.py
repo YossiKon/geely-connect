@@ -341,6 +341,21 @@ def test_set_temperature_picks_the_matching_optimistic_action():
         assert e._optimistic_action == expected, (interior, target)
 
 
+def test_a_setpoint_sent_while_off_shows_the_climate_on():
+    """A new setpoint goes out as a start, so on a car that was off it turns
+    the climate on - and the entity went on saying Off, which also hid the
+    optimistic action it had just set."""
+    _ha()
+    from homeassistant.components.climate import HVACAction
+    e, api, c = _entity(_status(interior="18"))
+    assert e.hvac_mode == c.HVACMode.OFF
+    with _quiet_refresh(c):
+        asyncio.run(e.async_set_temperature(temperature=24))
+    assert api.calls[0][2] == "start", api.calls
+    assert e.hvac_mode == c.HVACMode.HEAT_COOL
+    assert e.hvac_action == HVACAction.HEATING
+
+
 def test_a_garbled_interior_temperature_reads_absent():
     """float("junk") must become None, not a crash inside the thermostat."""
     _ha()
@@ -652,6 +667,37 @@ def test_a_visibly_running_rapid_is_left_alone():
         sched[0][1]()
         assert said == [], "a running cycle was reported as silent"
         assert e.hvac_mode == c.HVACMode.HEAT_COOL
+    finally:
+        c.schedule_refresh = orig
+
+
+def test_a_later_command_retires_the_rapid_check():
+    """The check runs a minute after the press, whatever came between. Rapid
+    cooling turned off within that minute drew "has not reported starting"
+    for a cycle the owner had ended, and a second press had the first check
+    clear the second one's state."""
+    _ha()
+    e, api, c = _entity(data=_status(interior="30.0"))    # no preClimateActive
+    checks = []
+    orig = c.schedule_refresh
+    c.schedule_refresh = lambda h, co, *d, after=None: checks.append(after)
+    said = []
+    e._notify_rapid_silence = lambda what: said.append(what)
+    try:
+        asyncio.run(e.async_set_preset_mode(c.PRESET_RAPID_COOLING))
+        asyncio.run(e.async_set_hvac_mode(c.HVACMode.OFF))
+        checks[0]()
+        assert said == [], "a cycle the owner ended was reported as silent"
+        assert e.hvac_mode == c.HVACMode.OFF, "the Off the owner asked for"
+
+        asyncio.run(e.async_set_preset_mode(c.PRESET_RAPID_WARMING))
+        asyncio.run(e.async_set_preset_mode(c.PRESET_RAPID_WARMING))
+        first, second = [a for a in checks if a is not None][-2:]
+        first()
+        assert said == [] and e.preset_mode == c.PRESET_RAPID_WARMING, (
+            "the first press's check cleared the second press")
+        second()
+        assert said == ["warming"], "the last press still gets its check"
     finally:
         c.schedule_refresh = orig
 
