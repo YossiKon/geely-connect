@@ -908,12 +908,15 @@ class GeelyIntlOptionsFlow(config_entries.OptionsFlow):
         entry = self.config_entry
         current = {**entry.data, **entry.options}
 
+        new_platform = current.get(CONF_PLATFORM, DEFAULT_PLATFORM) == PLATFORM_ZEEKR
         if user_input is not None:
             # A token pasted from a wrapped line carries the break, or a space
-            # where the break was; neither is part of it.
-            if CONF_ZEEKR_ENC_VIN in user_input:
+            # where the break was; neither is part of it. A field the owner
+            # emptied can arrive without its key - the frontend leaves an empty
+            # optional field out - and either way the override is gone.
+            if new_platform:
                 user_input[CONF_ZEEKR_ENC_VIN] = clean_x_vin(
-                    user_input[CONF_ZEEKR_ENC_VIN])
+                    user_input.get(CONF_ZEEKR_ENC_VIN))
             # Changing the pressure unit has to reach entities that already
             # exist: Home Assistant only reads suggested_unit_of_measurement
             # when an entity is first registered, so afterwards the display
@@ -930,10 +933,16 @@ class GeelyIntlOptionsFlow(config_entries.OptionsFlow):
         # an optional field: without it the entry behaves exactly as
         # before, reading status from the old platform.
         extra: dict[Any, Any] = {}
-        if current.get(CONF_PLATFORM, DEFAULT_PLATFORM) == PLATFORM_ZEEKR:
+        if new_platform:
+            # The owner's own override and nothing else, as a suggestion rather
+            # than a default. A default is put back whenever the form leaves an
+            # emptied field out, so a pasted token could never be cleared; and
+            # read from the entry data as well, the token derived at setup was
+            # saved back on every visit as if the owner had typed it.
             extra[vol.Optional(
                 CONF_ZEEKR_ENC_VIN,
-                default=current.get(CONF_ZEEKR_ENC_VIN) or "",
+                description={"suggested_value":
+                             entry.options.get(CONF_ZEEKR_ENC_VIN) or ""},
             )] = str
 
         return self.async_show_form(

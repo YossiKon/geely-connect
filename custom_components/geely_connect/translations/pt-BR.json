@@ -84,6 +84,8 @@
           "poll_mode": "Modo de atualização (Polling)",
           "pressure_unit": "Unidade de pressão dos pneus",
           "full_exposure": "Expor todos os campos brutos (adiciona ~180 entidades de diagnóstico)",
+          "battery_capacity_kwh": "Capacidade útil da bateria (kWh) - 0 mantém Range At Full Charge na estimativa do próprio carro",
+          "exterior_temp_offset": "Ajuste da temperatura externa (°C) - graus somados a Exterior Temperature, 0 por padrão",
           "zeekr_enc_vin": "Token do veículo para a nova plataforma (x-vin) - avançado. Geralmente derivado automaticamente na configuração; defina isso apenas para substituí-lo ou se a versão (build) do seu aplicativo ainda não for suportada"
         }
       }

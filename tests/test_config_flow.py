@@ -5,9 +5,11 @@ these exercise the actual branch logic rather than a copy of it. The guards on
 identifiers live in test_config_flow_guards.py.
 """
 import asyncio
+import json
 import logging
+import os
 
-from conftest import FAKE_VIN, have_homeassistant, load
+from conftest import FAKE_VIN, PKG, have_homeassistant, load
 from run import skip
 
 EMAIL = "owner@example.com"
@@ -505,3 +507,79 @@ def test_a_zeekr_entry_gets_the_x_vin_field_and_strips_it_on_save():
             "poll_mode": "normal", "pressure_unit": "psi",
             const.CONF_ZEEKR_ENC_VIN: emptied}))
         assert saved["data"][const.CONF_ZEEKR_ENC_VIN] == "", repr(emptied)
+
+
+def test_every_field_of_the_options_form_has_a_label():
+    """The battery size and the exterior temperature offset reached the form
+    with no label in any language, so Configure showed their raw keys while
+    the README sent owners looking for "Usable battery capacity (kWh)". The
+    translations are held to strings.json elsewhere; this holds strings.json to
+    the form."""
+    cf, flow = _flow()
+    const = load("const")
+    with open(os.path.join(PKG, "strings.json"), encoding="utf-8") as fh:
+        labels = json.load(fh)["options"]["step"]["init"]["data"]
+
+    class Entry:
+        entry_id = "z1"
+        # A new-platform entry: its form is the widest, with the x-vin field.
+        data = {"poll_mode": "normal", "pressure_unit": "psi",
+                const.CONF_PLATFORM: const.PLATFORM_ZEEKR}
+        options: dict = {}
+
+    entry = Entry()
+    opts = cf.GeelyIntlOptionsFlow()
+    opts.handler = entry.entry_id
+    flow.hass.config_entries.async_get_known_entry = lambda _id: entry
+    opts.hass = flow.hass
+    opts.async_show_form = flow.async_show_form
+    fields = {str(k) for k in
+              asyncio.run(opts.async_step_init(None))["data_schema"].schema}
+    assert len(fields) >= 6, fields
+    assert not fields - set(labels), f"no label for {sorted(fields - set(labels))}"
+
+
+def test_an_emptied_x_vin_field_clears_the_override():
+    """The form leaves an emptied optional field out of what it sends, and a
+    default is then put back: with the token as the field's default, a pasted
+    token could never be removed. Read from the entry data as well, the token
+    derived at setup was saved back on every visit as an override."""
+    cf, flow = _flow()
+    import voluptuous as vol
+    const = load("const")
+
+    class Entry:
+        entry_id = "z1"
+        data = {"poll_mode": "normal", "pressure_unit": "psi",
+                const.CONF_PLATFORM: const.PLATFORM_ZEEKR,
+                const.CONF_ZEEKR_ENC_VIN: "DERIVED=="}
+        options = {const.CONF_ZEEKR_ENC_VIN: "PASTED=="}
+
+    entry = Entry()
+    opts = cf.GeelyIntlOptionsFlow()
+    opts.handler = entry.entry_id
+    flow.hass.config_entries.async_get_known_entry = lambda _id: entry
+    opts.hass = flow.hass
+    opts.async_show_form = flow.async_show_form
+    opts.async_create_entry = lambda **kw: {"type": "create_entry", **kw}
+
+    def x_vin_field():
+        schema = asyncio.run(opts.async_step_init(None))["data_schema"]
+        return schema, next(k for k in schema.schema
+                            if str(k) == const.CONF_ZEEKR_ENC_VIN)
+
+    schema, field = x_vin_field()
+    assert field.default is vol.UNDEFINED, "a default comes back when emptied"
+    assert field.description == {"suggested_value": "PASTED=="}
+    # What the form sends once the owner has emptied the field: no key at all.
+    sent = schema({"poll_mode": "normal", "pressure_unit": "psi"})
+    assert const.CONF_ZEEKR_ENC_VIN not in sent, sent
+    saved = asyncio.run(opts.async_step_init(sent))
+    assert saved["data"][const.CONF_ZEEKR_ENC_VIN] == "", saved
+
+    # An entry whose only token is the derived one is offered an empty field,
+    # so saving the form leaves that token where it is rather than turning it
+    # into an override.
+    entry.options = {}
+    _schema, field = x_vin_field()
+    assert field.description == {"suggested_value": ""}

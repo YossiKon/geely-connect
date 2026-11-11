@@ -84,6 +84,8 @@
           "poll_mode": "Mode d'interrogation",
           "pressure_unit": "Unité de pression des pneus",
           "full_exposure": "Exposer tous les champs bruts (ajoute ~180 entités de diagnostic)",
+          "battery_capacity_kwh": "Capacité utile de la batterie (kWh) - 0 laisse Range At Full Charge sur l'estimation de la voiture",
+          "exterior_temp_offset": "Correction de la température extérieure (°C) - degrés ajoutés à Exterior Temperature, 0 par défaut",
           "zeekr_enc_vin": "Jeton du véhicule pour la nouvelle plateforme (x-vin) - avancé. Habituellement dérivé automatiquement lors de la configuration ; ne le renseignez que pour le remplacer, ou si votre version de l'application n'est pas encore connue"
         }
       }
