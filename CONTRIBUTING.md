@@ -13,9 +13,10 @@ and include:
 - The one-click **diagnostics** download (Settings → Devices & Services →
   Geely Connect → ⋮ → Download diagnostics) - secrets are masked automatically
 
-If setup stops with *"this Geely account is not served by the EU/International
-cloud"*, see [Supported regions](README.md#-supported-regions) first: adding a
-region needs that region's app credentials, which is not a code change.
+If setup stops with *"This Geely account is served by a regional backend this
+integration has no credentials for"*, see [Supported
+regions](README.md#-supported-regions) first: adding a region needs that
+region's app credentials, which is not a code change.
 
 ## Development
 
@@ -53,9 +54,11 @@ code.
   match. Migrations must never delete anything a user could have history on.
 - Bump `version` in `manifest.json` and cut a matching GitHub release, or HACS
   has nothing to offer users as an update.
-- CI runs [hassfest](https://developers.home-assistant.io/blog/2020/04/16/hassfest)
-  and [HACS validation](https://hacs.xyz/docs/publish/action) on every push -
-  keep both green.
+- CI runs the test suite under coverage, [hassfest](https://developers.home-assistant.io/blog/2020/04/16/hassfest)
+  and [HACS validation](https://hacs.xyz/docs/publish/action) on pull requests
+  and on pushes to main - keep all three green. The suite fails below 100%
+  coverage of the integration's Python code, so new code needs tests that
+  reach it.
 
 ### Things that are easy to get wrong
 

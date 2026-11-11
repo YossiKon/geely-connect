@@ -630,30 +630,23 @@ views:
             heading: Airing out
             heading_style: title
             icon: mdi:car-door
-          # Every entity in this section is DISABLED BY DEFAULT.
-          # Enable them first: Settings -> Devices & Services -> Geely
-          # Connect -> your car -> click the entity -> gear -> Enable.
-          # Until then they show as "unavailable".
           - type: tile
             entity: switch.my_geely_ex5_window_ventilation
             name: Window ventilation
             icon: mdi:weather-windy
             grid_options: {columns: 12}
-          # Disabled by default - enable on the device page first.
           - type: tile
             entity: cover.my_geely_ex5_all_windows
             name: Windows
             features:
               - type: cover-open-close
             grid_options: {columns: 4}
-          # Disabled by default - enable on the device page first.
           - type: tile
             entity: cover.my_geely_ex5_sunroof
             name: Sunroof
             features:
               - type: cover-open-close
             grid_options: {columns: 4}
-          # Disabled by default - enable on the device page first.
           - type: tile
             entity: cover.my_geely_ex5_sunshade
             name: Sunshade

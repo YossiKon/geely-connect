@@ -4,9 +4,10 @@ These are **not** dashboard cards. They go in the Home Assistant **companion
 app's Template widget**, which puts a live line of text on your phone's home
 screen.
 
-Everything in [`cards/`](../cards/) is Lovelace YAML and belongs on a dashboard.
-Pasting that YAML into a Template widget shows you the YAML itself as text -
-the widget field takes a **Jinja template**, nothing else.
+The cards this integration installs (`custom:geely-card` and its siblings) and
+the YAML under [`dashboards/`](../dashboards/) belong on a dashboard. Pasting
+dashboard YAML into a Template widget shows you the YAML itself as text - the
+widget field takes a **Jinja template**, nothing else.
 
 ## Adding one
 
@@ -31,9 +32,9 @@ these two:
 
 The most capable option, and a single icon on your home screen.
 
-1. Put [`cards/widget-control.yaml`](../cards/widget-control.yaml) on a
-   dashboard view of its own - lock with LOCK/UNLOCK buttons, rapid warming and
-   cooling, battery, and full status, all interactive.
+1. Put the built-in **Geely Card** (`type: custom:geely-card`) on a dashboard
+   view of its own - lock and unlock, rapid warming and cooling, battery, and
+   full status, all interactive.
 2. In the companion app: **Settings → Companion app → Manage shortcuts** → add a
    shortcut pointing at that view's path.
 3. The shortcut appears on your home screen. One tap opens straight into the

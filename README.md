@@ -1003,8 +1003,9 @@ that is the car's own program, not something the request asks for. If a future
 ## 🔒 Security
 
 Security was a first-class goal of this build. Every connection is validated
-against the public CAs. The two Geely control gateways that use Geely's own
-private CA - `apis.ecloudeu.com` and `apis.ecloudus.com` - are each verified
+against the public CAs. The four Geely control gateways that use Geely's own
+private CA - `apis.ecloudeu.com`, `apis.ecloudus.com`, `apis.ecloudkr.com` and
+the UAE gateway `tsp-geely-apis-uae.xcloudsvc.com` - are each verified
 against a public-key pin that ships with the integration, so they are checked
 from the very first connection and a man-in-the-middle is refused rather than
 trusted. No other host may use that fallback, and a host that has validated
@@ -1012,7 +1013,7 @@ publicly once can never be pushed onto it. Credentials are stored with owner-onl
 and in the diagnostics report, and all traffic goes only to Geely's own servers
 - no telemetry, no third parties.
 
-If Geely ever rotates that gateway's key you will see a `GeelyTLSPinError`
+If Geely ever rotates one of these gateways' keys you will see a `GeelyTLSPinError`
 naming the host and the key it presented. That is the pin doing its job - it
 cannot tell a legitimate rotation from an attacker, and neither can you from
 the error alone. So:
@@ -1038,7 +1039,7 @@ like a credential path rather than a convenience:
 
 | | How this integration handles it |
 |---|---|
-| **Certificate validation** | Strict public-CA validation with hostname checking on every connection. The private-CA fallback is allowlisted to two known gateways, requires a private-CA verify code, and is permanently disabled for any host that has ever validated publicly - so a bad certificate cannot force a downgrade |
+| **Certificate validation** | Strict public-CA validation with hostname checking on every connection. The private-CA fallback is allowlisted to the four known gateways, requires a private-CA verify code, and is permanently disabled for any host that has ever validated publicly - so a bad certificate cannot force a downgrade |
 | **Server identity** | SPKI public-key pins ship with the integration and are remembered on disk, so a swapped server key is caught across restarts, before any credential is sent |
 | **Logs & diagnostics** | Tokens, certificates and the captcha secret are masked; VIN, user ID, e-mail and device IDs are reduced to their last four characters. Masking matches key *names* and also the `{key, value}` parameter shape, where the field name is itself a value and a name-only pass sees nothing - the same blind spot that let the VIN out through a scheduled-charging field once. The diagnostics download runs a second, independent pass and scrubs the VIN from free-text error messages, so a bug report is safe to attach |
 | **Request building** | The VIN, user ID and server-supplied headers are rejected if they contain CR/LF, so a hostile backend value cannot smuggle a second request onto the authenticated socket |
@@ -1100,7 +1101,7 @@ only fair to state that plainly:
 
 - **No per-device mTLS certificate and no SPKI pins.** Connections are validated
   against the public CAs with hostname checking on, but the private-CA pinning
-  that protects the two legacy control gateways does not apply here — those
+  that protects the legacy control gateways does not apply here — those
   hosts have not had their leaf keys captured.
 - **It stores your Geely *account* password**, not a device key. The new
   platform has no OTP-only login, and the session it issues lasts ~2 days; the
