@@ -685,6 +685,31 @@ def test_a_renamed_trip_average_is_not_mistaken_for_the_live_speed():
     assert got["banner"] is False, got
 
 
+def test_a_renamed_park_brake_still_lifts_the_driving_lock():
+    """The driving lock reads the park brake, and a renamed entity is found only
+    through the suffix list, which did not name it: a car on its brake with
+    remote climate running read as driving once the engine ran, and every
+    control locked (#72)."""
+    script = """() => {
+        const el = document.createElement("geely-card");
+        document.body.appendChild(el);
+        el.setConfig({});
+        const hass = window.mkHass({ speed: "0", engine: "Running",
+                                     climate: "heat_cool" });
+        const eid = "binary_sensor.my_ex5_park_brake_engaged";
+        hass.states[eid] = { entity_id: eid, state: "on", attributes: {} };
+        hass.entities[eid] = { platform: "geely_connect", device_id: "d" };
+        el.hass = hass;
+        return {
+            resolved: el._eid("binary_sensor", "park_brake_engaged"),
+            driving: el._isDriving(),
+        };
+    }"""
+    got = _evaluate(script)
+    assert got == {"resolved": "binary_sensor.my_ex5_park_brake_engaged",
+                   "driving": False}, got
+
+
 # ------------------------------- a car with a tank is a different car to read
 
 def _energy_probe():
@@ -1546,6 +1571,17 @@ def test_no_travel_mode_is_imposed_unless_it_is_asked_for():
     assert "travelmode=walking" in walk["Maps"], walk
     assert "dirflg=w" in walk["Apple Maps"], walk
     assert walk["HERE"].endswith("?m=w"), walk
+
+
+def test_a_travel_mode_cannot_add_parameters_to_the_maps_link():
+    """nav_travel comes from the dashboard's YAML and went into the Google link
+    as typed, so `walking&destination=0,0` was a second destination."""
+    got = dict(_mount("geely-card", _nav_probe(),
+                      cfg={"nav": ["maps"],
+                           "nav_travel": "walking&destination=0,0"},
+                      at=[1.5, 2.5]))
+    assert got["Maps"].endswith(
+        "&travelmode=walking%26destination%3D0%2C0"), got
 
 
 def test_an_unknown_app_name_is_skipped_rather_than_breaking_the_card():

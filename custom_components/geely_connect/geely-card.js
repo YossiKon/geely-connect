@@ -36,6 +36,10 @@
     "seat_heat_passenger", "seat_vent_passenger", "seat_heat_driver",
     "seat_vent_driver", "sunshade", "all_windows", "g_clean", "parking_comfort",
     "steering_wheel_heat",
+    // Read for the driving lock, so a renamed one has to resolve as well: left
+    // unresolved, a car on its park brake read as driving the moment the engine
+    // ran, and every control locked during remote climate (#72).
+    "park_brake_engaged",
     "tire_rear_left", "door_rear_left", "combined_range", "charge_complete",
     "charge_voltage", "electric_range", "charge_current", "door_passenger",
     "charger_plug", "total_mileage", "refresh_data", "unlock_trunk",
@@ -105,7 +109,7 @@
     maps: {
       label: "Maps",
       url: (at, mode) => "https://www.google.com/maps/dir/?api=1&destination=" + at
-        + (mode ? "&travelmode=" + mode : ""),
+        + (mode ? "&travelmode=" + encodeURIComponent(mode) : ""),
       locate: (at) => "https://www.google.com/maps/search/?api=1&query=" + at,
     },
     waze: {
@@ -284,6 +288,7 @@
       "tooltip.trunk_release": "Unlocks the {word} latch - it does not open the {word} electrically. Lift it by hand, or use the key fob, within a few seconds before it re-locks itself.",
       "tooltip.warmer": "Warmer",
       "tooltip.wheel_heat": "Steering wheel heating on / off. Confirmed on a real car; the reading is slow, so the button holds its state for a moment.",
+      "tooltip.windows_menu": "Open or close the windows",
       "topview.closed": "Closed",
       "topview.open": "Open",
       "topview.unknown": "—",
@@ -393,6 +398,7 @@
       "tooltip.trunk_release": "ปลดล็อกสลัก{word} - ไม่ได้เปิด{word}ด้วยไฟฟ้า ยกขึ้นด้วยมือ หรือใช้กุญแจรีโมท ภายในไม่กี่วินาทีก่อนที่จะล็อกกลับเอง",
       "tooltip.warmer": "อุ่นขึ้น",
       "tooltip.wheel_heat": "เปิด / ปิดพวงมาลัยไฟฟ้า ยืนยันแล้วบนรถจริง การอ่านค่าช้า ปุ่มจึงค้างสถานะไว้สักครู่",
+      "tooltip.windows_menu": "เปิดหรือปิดกระจก",
       "topview.closed": "ปิด",
       "topview.open": "เปิด",
       "topview.unknown": "—",
@@ -502,6 +508,7 @@
       "tooltip.trunk_release": "Sblocca il fermo {word} - non lo apre elettricamente. Sollevalo a mano, o usa il telecomando, entro pochi secondi prima che si blocchi di nuovo da solo.",
       "tooltip.warmer": "Più caldo",
       "tooltip.wheel_heat": "Riscaldamento volante on / off. Confermato su un'auto reale; la lettura è lenta, quindi il pulsante mantiene lo stato per un momento.",
+      "tooltip.windows_menu": "Apri o chiudi i finestrini",
       "topview.closed": "Chiuso",
       "topview.open": "Aperto",
       "topview.unknown": "—",
@@ -611,6 +618,7 @@
       "tooltip.trunk_release": "Отключва багажника - не го отваря електрически. Повдигнете го ръчно или използвайте ключа до няколко секунди, преди да се заключи отново.",
       "tooltip.warmer": "По-топло",
       "tooltip.wheel_heat": "Отопление на волана вкл. / изкл. Потвърдено на реална кола; показанието се обновява бавно, затова бутонът задържа състоянието си за момент.",
+      "tooltip.windows_menu": "Отваряне или затваряне на прозорците",
       "topview.closed": "Затворено",
       "topview.open": "Отворено",
       "topview.unknown": "—",

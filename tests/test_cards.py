@@ -182,6 +182,26 @@ def test_the_card_file_holds_no_optional_chaining_or_nullish_coalescing():
         assert not lines, f"{name} on line(s) {lines} of geely-card.js"
 
 
+def test_every_key_the_card_looks_up_is_in_the_english_dictionary():
+    """_t() falls back to the English it is handed at the call site, so a key
+    missing from STR.en reads fine in English and stays English in every other
+    language, with nothing to say so - the windows chip's tooltip was one. The
+    per-language check only compares the dictionaries with each other, so it
+    cannot see a key that none of them has. Keys built at run time are not
+    literals and are left out."""
+    import re
+
+    src = open(os.path.join(PKG, "geely-card.js"), encoding="utf-8").read()
+    body = src[src.index("const STR"):]
+    start = body.index("\n    en: {")
+    english = set(re.findall(r'\n      "([^"]+)":',
+                             body[start:body.index("\n    },", start)]))
+    looked_up = set(re.findall(r'_t\(\s*"([^"]+)"', src))   # a call may wrap
+    assert len(english) > 50 and len(looked_up) > 50, (len(english), len(looked_up))
+    missing = sorted(looked_up - english)
+    assert not missing, f"looked up but not in STR.en: {missing}"
+
+
 # ----------------------------------------------------- lovelace resources ---
 # A card delivered only through an extra-module URL is not awaited by
 # Lovelace: if its class is not defined when the picker asks, the frontend's
