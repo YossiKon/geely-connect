@@ -117,36 +117,43 @@ def test_every_blueprint_loads_the_way_home_assistant_loads_it():
                   schema=BLUEPRINT_SCHEMA)
 
 
-def test_a_template_free_blueprint_validates_after_substitution():
-    """What a user actually ends up with. Only inputs without a default are
-    filled in, so this is the one-field-and-save case - and it is what catches a
-    step that parses as YAML and then fails Home Assistant's schema."""
-    loader = _loader()
-    from homeassistant.components.automation.config import (
-        PLATFORM_SCHEMA as AUTOMATION_SCHEMA)
+def _substituted(loader, path):
+    """A blueprint as a user ends up with it: `(domain, config)` once the
+    inputs are filled in. Only inputs without a default are given a value, so
+    this is the one-field-and-save case."""
     from homeassistant.components.blueprint.models import (
         Blueprint, BlueprintInputs)
     from homeassistant.components.blueprint.schemas import BLUEPRINT_SCHEMA
+
+    data = loader.load_yaml(path)
+    domain = data["blueprint"]["domain"]
+    bp = Blueprint(data, expected_domain=domain, path=path,
+                   schema=BLUEPRINT_SCHEMA)
+    given = {}
+    for name, spec in (data["blueprint"].get("input") or {}).items():
+        if spec and "default" in spec:
+            continue
+        sel = (spec or {}).get("selector") or {}
+        ent = sel.get("entity") or {}
+        value = f"{ent.get('domain') or 'sensor'}.geely_thing"
+        given[name] = [value] if ent.get("multiple") else value
+    inputs = BlueprintInputs(bp, {"use_blueprint": {"path": path,
+                                                    "input": given}})
+    inputs.validate()
+    return domain, inputs.async_substitute()
+
+
+def test_a_template_free_blueprint_validates_after_substitution():
+    """What a user actually ends up with - and what catches a step that parses
+    as YAML and then fails Home Assistant's schema."""
+    loader = _loader()
+    from homeassistant.components.automation.config import (
+        PLATFORM_SCHEMA as AUTOMATION_SCHEMA)
     from homeassistant.components.script.config import SCRIPT_ENTITY_SCHEMA
 
     checked = []
     for path in _blueprints():
-        data = loader.load_yaml(path)
-        domain = data["blueprint"]["domain"]
-        bp = Blueprint(data, expected_domain=domain, path=path,
-                       schema=BLUEPRINT_SCHEMA)
-        given = {}
-        for name, spec in (data["blueprint"].get("input") or {}).items():
-            if spec and "default" in spec:
-                continue
-            sel = (spec or {}).get("selector") or {}
-            ent = sel.get("entity") or {}
-            value = f"{ent.get('domain') or 'sensor'}.geely_thing"
-            given[name] = [value] if ent.get("multiple") else value
-        inputs = BlueprintInputs(bp, {"use_blueprint": {"path": path,
-                                                        "input": given}})
-        inputs.validate()
-        config = inputs.async_substitute()
+        domain, config = _substituted(loader, path)
         if "{{" in str(config):
             continue          # needs a live hass; see the module docstring
         (SCRIPT_ENTITY_SCHEMA if domain == "script" else AUTOMATION_SCHEMA)(config)
@@ -155,6 +162,158 @@ def test_a_template_free_blueprint_validates_after_substitution():
         "the seat follow-up script is the blueprint this test exists for; if it "
         f"stopped being template-free, validate it another way. checked={checked}"
     )
+
+
+# ------------------------------------------- where a blueprint's names live ---
+# Two blueprints shipped broken for everyone who imported them, in ways the
+# validation above cannot see because both are templated. The departure one
+# gave its template trigger names from `variables:`, which are rendered only
+# once a trigger has fired - a trigger sees `trigger_variables:` - so the
+# trigger failed on every evaluation. The unlocked-when-away one put
+# `variables:` inside a template condition and beside a `choose`, where
+# neither schema has the key, and Home Assistant refused the automation.
+
+# Besides the top of a config and a trigger, Home Assistant takes `variables`
+# as an action step of its own, which carries no keys but these.
+_VARIABLES_STEP_KEYS = {"variables", "alias", "enabled", "continue_on_error",
+                        "note"}
+# A service call's payload belongs to what is called: script.turn_on takes
+# `variables` there, and no schema of the caller's is involved.
+_PAYLOAD_KEYS = {"data", "data_template", "target"}
+
+
+class _AnyName(dict):
+    """Every filter and test exists. Home Assistant adds its own, and the
+    compile step find_undeclared_variables runs refuses a name it does not
+    know - so a plain environment raises on `| as_timestamp`."""
+
+    def __contains__(self, key):
+        return True
+
+    def __getitem__(self, key):
+        return dict.get(self, key) or (lambda *a, **k: None)
+
+    def get(self, key, default=None):
+        return self[key]
+
+
+def _triggers(config):
+    found = config.get("triggers") or config.get("trigger") or []
+    return found if isinstance(found, list) else [found]
+
+
+def _is_trigger(node):
+    return isinstance(node.get("platform") or node.get("trigger"), str)
+
+
+def _misplaced_variables(config):
+    bad = []
+
+    def walk(node, where):
+        if isinstance(node, dict):
+            if ("variables" in node and node is not config
+                    and not _is_trigger(node)
+                    and set(node) - _VARIABLES_STEP_KEYS):
+                bad.append(where)
+            for key, value in node.items():
+                if key != "variables" and key not in _PAYLOAD_KEYS:
+                    walk(value, f"{where}/{key}")
+        elif isinstance(node, list):
+            for i, item in enumerate(node):
+                walk(item, f"{where}[{i}]")
+
+    walk(config, "")
+    return bad
+
+
+def _names_read(node):
+    from jinja2 import Environment, meta
+    env = Environment(extensions=["jinja2.ext.loopcontrols", "jinja2.ext.do"])
+    env.filters, env.tests = _AnyName(env.filters), _AnyName(env.tests)
+    names = set()
+
+    def walk(value):
+        if isinstance(value, str) and ("{{" in value or "{%" in value):
+            names.update(meta.find_undeclared_variables(env.parse(value)))
+        elif isinstance(value, dict):
+            for item in value.values():
+                walk(item)
+        elif isinstance(value, list):
+            for item in value:
+                walk(item)
+
+    walk(node)
+    return names
+
+
+def _names_triggers_cannot_see(config):
+    """What a trigger reads that is rendered only after a trigger has fired:
+    the config's `variables`, unless `trigger_variables` defines the name as
+    well (Home Assistant merges the two), and the trigger's own `variables`."""
+    late = (set(config.get("variables") or {})
+            - set(config.get("trigger_variables") or {}))
+    found = set()
+    for trigger in _triggers(config):
+        if not isinstance(trigger, dict):
+            continue
+        own = set(trigger.get("variables") or {})
+        read = _names_read({k: v for k, v in trigger.items() if k != "variables"})
+        found |= read & (late | own)
+    return found
+
+
+def test_a_trigger_reads_no_name_it_cannot_see():
+    loader = _loader()
+    offenders, templated = [], 0
+    for path in _blueprints():
+        _domain, config = _substituted(loader, path)
+        templated += bool(_names_read(_triggers(config)))
+        late = _names_triggers_cannot_see(config)
+        if late:
+            offenders.append(f"{os.path.basename(path)}: {sorted(late)}")
+    assert not offenders, (
+        "a trigger template reads names rendered only after a trigger has "
+        "fired - those belong in `trigger_variables:`:\n  " + "\n  ".join(offenders))
+    assert templated >= 1, "no templated trigger found - has the layout changed?"
+
+
+def test_variables_sit_only_where_home_assistant_takes_them():
+    loader = _loader()
+    offenders, examined = [], 0
+    for path in _blueprints():
+        _domain, config = _substituted(loader, path)
+        examined += 1
+        offenders += [f"{os.path.basename(path)}: {where}"
+                      for where in _misplaced_variables(config)]
+    assert not offenders, (
+        "`variables` where the schema has no such key:\n  " + "\n  ".join(offenders))
+    assert examined >= 8, f"only {examined} blueprints examined"
+
+
+def test_the_variables_checks_catch_the_shapes_that_shipped():
+    """Guards the two checks above rather than the YAML: the two faults that
+    shipped are found, and the shapes Home Assistant does take are not."""
+    assert _names_triggers_cannot_see({
+        "variables": {"lead": 15, "both": 1},
+        "trigger_variables": {"both": 1},
+        "trigger": [
+            {"platform": "template",
+             "value_template": "{% set ts = 1 %}{{ ts < lead * both }}"},
+            {"platform": "template", "variables": {"own": 2},
+             "value_template": "{{ x | as_timestamp > own }}"}],
+    }) == {"lead", "own"}
+    assert _misplaced_variables({
+        "variables": {"top": 1},
+        "trigger": [{"platform": "state", "variables": {"x": 1}}],
+        "condition": [{"condition": "template", "value_template": "{{ x }}",
+                       "variables": {"x": 1}}],
+        "action": [{"variables": {"y": 2}, "note": "kept"},
+                   {"choose": [], "variables": {"y": 2}},
+                   {"action": "script.turn_on",
+                    "data": {"entity_id": "script.s", "variables": {"z": 3}}},
+                   {"wait_for_trigger": [{"trigger": "state",
+                                          "variables": {"w": 4}}]}],
+    }) == ["/condition[0]", "/action[1]"]
 
 
 # -------------------------------------------------------------- automations ---

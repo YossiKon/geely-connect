@@ -21,6 +21,11 @@ blueprint:
       name: Notify service
       default: notify.notify
       selector: { text: {} }
+# Here, at the top: a condition and a `choose` have no `variables` key, and with
+# one on each Home Assistant refused the whole automation as invalid.
+variables:
+  car_tracker: !input car_tracker
+  auto_lock: !input auto_lock
 trigger:
   - platform: state
     entity_id: !input lock_entity
@@ -30,8 +35,6 @@ trigger:
 condition:
   - condition: template
     value_template: "{{ not is_state(car_tracker, 'home') }}"
-    variables:
-      car_tracker: !input car_tracker
 action:
   - choose:
       - conditions: "{{ auto_lock }}"
@@ -43,6 +46,4 @@ action:
     default:
       - service: !input notify_target
         data: { title: "🔓 Geely - unlocked away", message: "Your car is unlocked and not at home." }
-    variables:
-      auto_lock: !input auto_lock
 mode: single

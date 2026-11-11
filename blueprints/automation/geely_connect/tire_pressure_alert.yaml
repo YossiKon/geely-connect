@@ -1,17 +1,21 @@
 blueprint:
   name: Geely Connect - Tire pressure out of range
-  description: Alert when any tire pressure goes below/above safe limits.
+  description: >-
+    Alert when a tire's pressure goes below or above safe limits. The limits are
+    in psi, so pick a sensor that shows psi (the integration's pressure unit
+    option sets it). A reading of 0 is a tyre sensor that has gone to sleep on a
+    parked car, not a flat tyre, and is ignored.
   domain: automation
   input:
     tire_sensor:
       name: Tire pressure sensor
       selector: { entity: { domain: sensor, device_class: pressure } }
     low_limit:
-      name: Low limit
+      name: Low limit (psi)
       default: 32
       selector: { number: { min: 10, max: 60, step: 0.5 } }
     high_limit:
-      name: High limit
+      name: High limit (psi)
       default: 42
       selector: { number: { min: 20, max: 80, step: 0.5 } }
     notify_target:
@@ -19,8 +23,11 @@ blueprint:
       default: notify.notify
       selector: { text: {} }
 trigger:
+  # above: 0 keeps the sleeping sensor's 0 out: without it every parked night
+  # read as a tyre gone flat.
   - platform: numeric_state
     entity_id: !input tire_sensor
+    above: 0
     below: !input low_limit
   - platform: numeric_state
     entity_id: !input tire_sensor

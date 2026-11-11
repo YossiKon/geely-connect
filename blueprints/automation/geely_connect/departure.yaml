@@ -29,7 +29,10 @@ blueprint:
       default: 22
       selector:
         number: { min: 15.5, max: 28.5, step: 0.5, unit_of_measurement: "°C" }
-variables:
+# trigger_variables, not variables: a trigger only ever sees the former. Plain
+# `variables` are rendered once a trigger has fired, so the template below found
+# neither name and failed on every evaluation - the climate never started.
+trigger_variables:
   departure_entity: !input departure_datetime
   lead: !input lead_minutes
 trigger:
