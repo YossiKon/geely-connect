@@ -96,9 +96,10 @@ set_scheduled_trip:
     time. The request is the app's own, captured on a real EX5. The car's
     current schedule is read first and sent back unchanged apart from what you
     set here, so the departure is never invented; if the car has no schedule
-    and you give no departure, nothing is sent. Not yet confirmed to move a
-    real car - judge it by the Battery Temperature Maintenance sensor and the
-    app's Scheduled trip screen, never by the response.
+    and you give no departure, nothing is sent. Confirmed on a Starray EM-i in
+    both directions (#4); start arms a one-off trip and cannot re-arm a
+    weekday schedule set in the app. Judge it by the app's Scheduled trip
+    screen, never by the response.
   fields:
     command:
       name: Command
@@ -143,7 +144,7 @@ fire_control:
         text:
     command:
       name: Command
-      description: HTTP command verb sent to the gateway.
+      description: The command field of the request body, start or stop.
       required: false
       default: start
       example: start
