@@ -168,6 +168,48 @@ def test_a_200_wrapped_auth_error_triggers_a_silent_renewal():
         _restore_idaas()
 
 
+def test_callers_that_find_the_session_dead_together_sign_in_once():
+    """The renewal ran unlocked. A poll and a command that found the HF token
+    expired together each ran the full password login: each one signs the
+    phone app out, and on this one-session backend the second could end the
+    session the first had just made."""
+    import threading
+    import time
+    _patch_idaas()
+    try:
+        a, c = _make_adapter(password="hunter2", hf_expiry=1)    # expired
+        logins, sent, errors = [], [], []
+        together = threading.Barrier(4)
+
+        def _login_tsp(token_value):
+            logins.append(token_value)
+            time.sleep(0.05)
+            c.hf_token = f"mock-hf-{len(logins)}"
+
+        def _status(vin, user_id=None):
+            sent.append(c.hf_token)
+            return {"code": "1000", "data": {}}
+
+        c.login_tsp, c.vehicle_status_resp = _login_tsp, _status
+
+        def poll():
+            try:
+                together.wait(timeout=5)
+                a.vehicle_status()
+            except Exception as e:  # noqa: BLE001 - collected and asserted below
+                errors.append(e)
+
+        ts = [threading.Thread(target=poll) for _ in range(4)]
+        [t.start() for t in ts]
+        [t.join() for t in ts]
+        assert not errors, errors
+        assert len(logins) == 1, f"{len(logins)} password logins"
+        assert sent == ["mock-hf-1"] * 4, sent
+        assert a.take_renewed_session() is not None, "the renewal is still saved"
+    finally:
+        _restore_idaas()
+
+
 def test_the_single_session_eviction_now_counts_as_an_auth_error():
     """The adapter's own docstring names `079021 The account is currently logged
     in elsewhere` as the error a renewal exists to recover from - and none of

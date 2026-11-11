@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 import time
 from typing import Any
 
@@ -338,6 +339,10 @@ class ZeekrAdapter(CommandTrail):
         # Set when a silent HF renewal happened; the coordinator persists the
         # new tokens + expiry into the config entry after the next poll.
         self.hf_dirty = False
+        # One renewal at a time, and a count of them, so callers that found
+        # the session dead together sign in once between them (_renew_hf).
+        self._renew_lock = threading.Lock()
+        self._renewals = 0
 
     @property
     def hf_expiry(self) -> int:
@@ -361,7 +366,7 @@ class ZeekrAdapter(CommandTrail):
 
     # ---- helpers ----------------------------------------------------------
 
-    def _renew_hf(self) -> None:
+    def _renew_hf(self, seen: int | None = None) -> None:
         """The app's silent renewal, mirrored: password -> IDaaS tokenValue ->
         tspCode -> both sessions re-minted.
 
@@ -373,15 +378,25 @@ class ZeekrAdapter(CommandTrail):
         is currently logged in elsewhere` permanently, because nothing
         ever replaces it. login_tsp re-mints the snc session and calls
         login_hf itself, so one call recovers both.
+
+        `seen` is the renewal count the caller's session came from. A caller
+        that waited behind another's renewal finds the count moved and uses
+        that session: a poll and a command that found the session dead
+        together each signed in, every password login signs the phone app
+        out, and the second could end the session the first had just made.
         """
-        if not self._password:
-            raise ZeekrAuthError(
-                "no stored password for HF renewal - reauthenticate")
-        token_value = ZeekrIdaas(country=self._country_code, profile=self._client.profile).login_by_email_password(
-            self._email, self._password)
-        self._client.login_tsp(token_value)
-        self._hf_expiry_ts = int(time.time()) + self._client.hf_expires_in
-        self.hf_dirty = True
+        with self._renew_lock:
+            if seen is not None and seen != self._renewals:
+                return
+            if not self._password:
+                raise ZeekrAuthError(
+                    "no stored password for HF renewal - reauthenticate")
+            token_value = ZeekrIdaas(country=self._country_code, profile=self._client.profile).login_by_email_password(
+                self._email, self._password)
+            self._client.login_tsp(token_value)
+            self._hf_expiry_ts = int(time.time()) + self._client.hf_expires_in
+            self.hf_dirty = True
+            self._renewals += 1
 
     def _hf_expired(self) -> bool:
         if not self._client.hf_token:
@@ -394,15 +409,17 @@ class ZeekrAdapter(CommandTrail):
         renewal from the stored password when near expiry), and on an
         auth-looking failure renews once and retries. A renewal failure or a
         second auth-y failure raises GeelyAuthError -> the HA reauth flow."""
+        seen = self._renewals
         try:
             if self._hf_expired():
-                self._renew_hf()
+                self._renew_hf(seen)
+                seen = self._renewals
             return fn(*args)
         except (ZeekrAuthError, ZeekrApiError) as exc:
             if isinstance(exc, ZeekrApiError) and not _looks_authy(str(exc)):
                 raise
             try:
-                self._renew_hf()
+                self._renew_hf(seen)
                 return fn(*args)
             except (ZeekrAuthError, ZeekrApiError) as exc2:
                 # A non-authy failure on the retried call is a transient
