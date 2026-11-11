@@ -208,6 +208,13 @@ def test_the_report_lists_the_card_resource_when_lovelace_has_one():
     assert cards["lovelace_resources"] == ["/geely_connect/geely-card.js?v=1.2.3"]
     assert cards["registered"] is True
 
+    # The shape cards.py also reads, a dict: the report listed nothing there,
+    # which reads as a card that was never registered.
+    Hass.data = {**Hass.data, "lovelace": {"resources": _Res()}}
+    cards = asyncio.run(
+        diag.async_get_config_entry_diagnostics(Hass(), Entry()))["cards"]
+    assert cards["lovelace_resources"] == ["/geely_connect/geely-card.js?v=1.2.3"]
+
 
 def test_a_resource_list_that_will_not_be_read_does_not_break_the_report():
     if not have_homeassistant():
@@ -372,6 +379,38 @@ def test_a_client_without_the_endpoint_is_not_asked_for_it():
     if not have_homeassistant():
         skip("homeassistant not installed")
     assert _report()["charge_server"] == {}
+
+
+def test_an_adapter_that_does_not_serve_the_endpoint_is_not_asked_either():
+    """The EM adapter carries charge_server_get and says it does not serve
+    it; asked anyway, every slot came back as a NotImplementedError row, seven
+    of what read like failures in every Geely EM report."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    asked = []
+    diag = load("diagnostics")
+
+    class Api:
+        command_trail: list = []
+        serves_charge_server = False
+
+        def charge_server_get(self, slot):
+            asked.append(slot)
+            raise NotImplementedError("not mapped on the new platform")
+
+    class Entry:
+        entry_id = "e1"
+        data = {"vin": FAKE_VIN}
+        options: dict = {}
+
+    class Hass:
+        data = {"geely_connect": {"e1": {"api": Api()}}}
+
+        async def async_add_executor_job(self, fn, *args):
+            return fn(*args)
+
+    got = asyncio.run(diag.async_get_config_entry_diagnostics(Hass(), Entry()))
+    assert got["charge_server"] == {} and asked == [], (got["charge_server"], asked)
 
 
 def test_every_schedule_slot_is_read_and_redacted():

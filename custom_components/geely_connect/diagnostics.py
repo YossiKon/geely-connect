@@ -21,6 +21,7 @@ from .const import (
     DOMAIN,
     PLATFORM_ZEEKR,
 )
+from .helpers import api_serves
 
 # Home Assistant's async_redact_data matches key names exactly, so this list
 # holds the spellings that appear in the config entry and in GPS payloads.
@@ -166,12 +167,13 @@ async def _charge_server(hass: HomeAssistant, api: Any,
     error is the finding - so nothing here raises, and a slot that times out
     does not cost the report the slots already read.
 
-    The EM (Zeekr) platform has no such endpoint; its client simply does not
-    carry the method, which is also what an entry that failed setup before
-    building a client looks like from here.
+    The EM (Zeekr) platform has no such endpoint. Its adapter carries the
+    method and says it does not serve it - asked anyway, every slot came
+    back as a NotImplementedError row that read like seven failures. An
+    entry that failed setup before building a client has no method at all.
     """
     get = getattr(api, "charge_server_get", None)
-    if get is None:
+    if get is None or not api_serves(api, "charge_server"):
         return {}
 
     out: dict[str, Any] = {}
@@ -196,8 +198,8 @@ def _vehicle_token(entry: ConfigEntry, api: Any) -> dict[str, Any] | None:
     """Where the new platform's vehicle token is set, as three booleans, and
     whether the start-up probe found the car turned away.
 
-    Not "pasted" or "derived": the options form pre-fills from the entry data,
-    so a token in the options may be a derived one saved back. `in_use` is
+    Not "pasted" or "derived": the options form used to pre-fill from the
+    entry data, so a token in the options may be a derived one saved back. `in_use` is
     what the running client sends, None when setup never built one. With no
     token, `car_refused` True is the probe's verdict that the new gateway
     turns the car away (079001; on the cars seen so far such a car has no
@@ -251,7 +253,13 @@ def _card_status(hass: HomeAssistant) -> dict[str, Any]:
     from . import cards
 
     path = os.path.join(os.path.dirname(__file__), "geely-card.js")
-    resources = getattr(hass.data.get("lovelace"), "resources", None)
+    # Both shapes Lovelace has stored itself in, as cards.py reads it: on a
+    # release that keeps a dict here the list came back empty, which reads
+    # as "not registered" in exactly the report this block exists for.
+    lovelace = hass.data.get("lovelace")
+    resources = getattr(lovelace, "resources", None)
+    if resources is None and isinstance(lovelace, dict):
+        resources = lovelace.get("resources")
     listed = []
     if resources is not None and hasattr(resources, "async_items"):
         try:
