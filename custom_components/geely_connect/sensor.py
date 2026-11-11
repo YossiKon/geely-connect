@@ -1620,7 +1620,10 @@ def _engine_running(data: dict) -> bool | None:
         return None
     mapped = _ENGINE_STATE_MAP.get(raw)
     if mapped is None and isinstance(raw, str):
-        mapped = _ENGINE_STATE_MAP.get(raw.strip().lower())
+        # The new platform spells it engine-running / engine-off. The poller's
+        # driving test reads the hyphen the same way; here it did not, so on a
+        # Geely EM entry the trip sensors never saw a drive start or end.
+        mapped = _ENGINE_STATE_MAP.get(raw.strip().lower().replace("-", "_"))
     if mapped is None:
         return None
     return mapped == "Running"

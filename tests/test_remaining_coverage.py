@@ -341,6 +341,29 @@ def test_engine_running_normalises_the_firmware_spellings():
     assert s._engine_running({}) is None
 
 
+def test_the_new_platforms_hyphenated_engine_state_drives_the_trip_sensors():
+    """The new platform spells it engine-running / engine-off, as its captured
+    status read does. The poller already read the hyphen; the trip sensors did
+    not, so on a Geely EM entry Last Trip never filled and Trip In Progress
+    read 0 through every drive."""
+    _ha()
+    s = load("sensor")
+
+    def status(raw, km):
+        return {"vehicleStatus": {
+            "basicVehicleStatus": {"engineStatus": raw},
+            "additionalVehicleStatus": {
+                "maintenanceStatus": {"odometer": str(km)}}}}
+
+    assert s._engine_running(status("engine-running", 0)) is True
+    assert s._engine_running(status("Engine-Off", 0)) is False
+    coord = _Coord(status("engine-running", 1000.0))
+    trip = s.GeelyTripInProgressSensor(coord, FAKE_VIN, "Geely (0000)")
+    assert trip.native_value == 0.0            # the drive starts here
+    coord.data = status("engine-running", 1012.5)
+    assert trip.native_value == 12.5
+
+
 def _restorable(cls_name, data, last_state=None, last_sensor=None):
     """Build a Restore sensor whose HA-side restore plumbing is stubbed out."""
     s = load("sensor")
