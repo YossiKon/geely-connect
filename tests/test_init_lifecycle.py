@@ -9,6 +9,7 @@ import asyncio
 import functools
 import importlib
 import importlib.util
+import json
 import os
 import sys
 import tempfile
@@ -1533,6 +1534,84 @@ def test_the_services_register_once_but_a_missing_one_is_still_added():
     partial = _Hass()
     partial.services.registered["fire_control"] = object()
     assert _register(partial), "a service that is missing must still be added"
+
+
+# ------------------------------------------- services.yaml against the code ---
+# services.yaml is what Developer Tools builds its form from, and nothing tied
+# it to the schemas the handlers are registered with. A field in one and not the
+# other is either missing from the form or refused when the form sends it, and
+# an example the schema rejects teaches a call that cannot work.
+
+def _registered_schemas(m):
+    hass = _Hass()
+    found = {}
+    with _Patched(m, async_register_admin_service=lambda h, d, n, f, schema=None:
+                  found.update({n: schema})):
+        m._register_debug_service(hass)
+    return found
+
+
+def _services_yaml():
+    import yaml
+    with open(os.path.join(PKG, "services.yaml"), encoding="utf-8") as fh:
+        return yaml.safe_load(fh)
+
+
+def test_services_yaml_and_the_registered_schemas_name_the_same_fields():
+    m = _mod()
+    import voluptuous as vol
+    schemas, described = _registered_schemas(m), _services_yaml()
+    assert set(described) == set(schemas)
+    for name, schema in schemas.items():
+        fields = described[name]["fields"]
+        keys = {str(k): k for k in schema.schema}
+        assert set(fields) == set(keys), (name, set(fields) ^ set(keys))
+        for field, key in keys.items():
+            spec = fields[field]
+            assert bool(spec.get("required")) == isinstance(key, vol.Required), (
+                name, field)
+            if "default" in spec:
+                assert key.default is not vol.UNDEFINED, (name, field)
+                assert spec["default"] == key.default(), (name, field)
+            else:
+                assert key.default is vol.UNDEFINED, (name, field)
+
+
+def test_every_example_and_option_in_services_yaml_is_one_the_schema_accepts():
+    m = _mod()
+    import voluptuous as vol
+    schemas, described = _registered_schemas(m), _services_yaml()
+    examples = options = 0
+    for name, schema in schemas.items():
+        validators = {str(k): v for k, v in schema.schema.items()}
+        for field, spec in described[name]["fields"].items():
+            accepts = vol.Schema({field: validators[field]})
+            # What a drop-down offers is a value the form is going to send.
+            for option in (spec["selector"].get("select") or {}).get("options", ()):
+                accepts({field: option})
+                options += 1
+            if "example" not in spec:
+                continue
+            example = spec["example"]
+            if "object" in spec["selector"]:
+                example = json.loads(example)       # the form takes these as JSON
+            accepts({field: example})
+            examples += 1
+    assert examples >= 8 and options >= 7, "not found - has the layout changed?"
+
+
+def test_the_seat_examples_are_the_positions_the_presets_send():
+    """The heated-seat field explained 11 and 19 and then showed "front-left" as
+    its example: the name the capability list gives a seat, which this body has
+    never carried. A probe copied from it asks for a seat the car does not have,
+    and the gateway answers Success all the same."""
+    _mod()                                  # PyYAML arrives with Home Assistant
+    fields = _services_yaml()["fire_rapid"]["fields"]
+    for field in ("heat_seats", "vent_seats"):
+        assert json.loads(fields[field]["example"]) == ["11", "19"], field
+    with open(os.path.join(PKG, "climate.py"), encoding="utf-8") as fh:
+        source = "".join(fh.read().split())   # a reflowed line is no change
+    assert '["11","19"]' in source, "the presets no longer send these"
 
 
 # ---------------------------------------------------- options, unload, remove ---

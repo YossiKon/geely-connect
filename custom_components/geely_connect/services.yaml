@@ -32,7 +32,7 @@ fire_rapid:
         service, so these are the values the climate presets send.
       required: false
       default: []
-      example: '["front-left", "front-right"]'
+      example: '["11", "19"]'
       selector:
         object:
     vent_seats:
@@ -69,7 +69,8 @@ fire_rapid:
         for controls that have no capture yet. The steering-wheel hunt (#4)
         ended here - the real field turned out to be "sw", found by capture
         after every guessed name ("bw", "steelWheelHeating") was accepted
-        and did nothing.
+        and did nothing. bizType and command are refused: bizType 4 and 6 on
+        this endpoint write the scheduled-trip and scheduled-charging slots.
       required: false
       default: {}
       example: '{"sw": "true"}'
