@@ -710,6 +710,136 @@ def test_a_renamed_park_brake_still_lifts_the_driving_lock():
                    "driving": False}, got
 
 
+
+# ------------------------------------- no reading is not good news, nor "on"
+
+def test_only_an_unlocked_car_reads_unlocked():
+    """Every lock state but locked read as Unlocked, in the warning colour on
+    the compact card: an outage (unavailable), no reading (unknown), and the
+    forty seconds of locking after a Lock tap. The rest is now shown the way
+    Home Assistant words it."""
+    got = _evaluate(r"""() => {
+        const out = {};
+        for (const state of ["locked", "unlocked", "unavailable", "locking"]) {
+            for (const tag of ["geely-card-compact", "geely-card-strip",
+                               "geely-card-mini"]) {
+                const el = document.createElement(tag);
+                document.body.appendChild(el);
+                el.setConfig({});
+                const hass = window.mkHass({});
+                hass.states["lock.car_doors"].state = state;
+                el.hass = hass;
+                const root = el.shadowRoot;
+                out[`${tag}:${state}`] = {
+                    text: root.textContent.replace(/\s+/g, " "),
+                    amber: [...root.querySelectorAll(".chip.warn")]
+                        .map((c) => c.textContent.trim()),
+                };
+                el.remove();
+            }
+        }
+        return out;
+    }""")
+    for tag in ("geely-card-compact", "geely-card-strip", "geely-card-mini"):
+        assert "Unlocked" in got[f"{tag}:unlocked"]["text"], (tag, got)
+        for state in ("locked", "unavailable", "locking"):
+            assert "Unlocked" not in got[f"{tag}:{state}"]["text"], (tag, state, got)
+        assert "unavailable" in got[f"{tag}:unavailable"]["text"], (tag, got)
+    assert got["geely-card-compact:unlocked"]["amber"] == ["Unlocked"], got
+    for state in ("locked", "unavailable", "locking"):
+        assert got[f"geely-card-compact:{state}"]["amber"] == [], (state, got)
+
+
+def test_an_unavailable_climate_is_neither_on_nor_lit():
+    """In an outage the compact card said Climate on and the full card lit its
+    Climate button, and a tap asked to turn off a climate nobody could read."""
+    got = _evaluate(r"""() => {
+        const out = {};
+        for (const tag of ["geely-card-compact", "geely-card"]) {
+            const el = document.createElement(tag);
+            document.body.appendChild(el);
+            el.setConfig({});
+            el.hass = window.mkHass({ climate: "unavailable" });
+            const btn = el.shadowRoot.querySelector('button[data-act="climate"]');
+            out[tag] = { text: el.shadowRoot.textContent,
+                         lit: !!btn && btn.classList.contains("on") };
+            el.remove();
+        }
+        return out;
+    }""")
+    assert "Climate on" not in got["geely-card-compact"]["text"], got
+    assert got["geely-card"]["lit"] is False, got
+
+
+def test_the_top_view_tells_no_reading_from_closed_or_open():
+    """In an outage every door, the hood and the trunk read Closed on the top
+    view, and a sunroof whose status the car marks invalid - the cover then
+    stays unknown - blinked amber as Open. No reading is a dash now, and an
+    unread roof is left off the drawing."""
+    got = _evaluate(r"""() => {
+        const el = document.createElement("geely-card-top");
+        document.body.appendChild(el);
+        el.setConfig({});
+        const hass = window.mkHass({ covers: { sunroof: "unknown" } });
+        for (const id of Object.keys(hass.states)) {
+            if (/^binary_sensor\.car_(door_|hood|trunk)/.test(id)) {
+                hass.states[id].state = "unavailable";
+            }
+        }
+        el.hass = hass;
+        return {
+            blinking: el.shadowRoot.querySelectorAll(".tv-stat.open").length,
+            words: [...el.shadowRoot.querySelectorAll("text")]
+                .map((t) => t.textContent.trim()),
+        };
+    }""")
+    assert got["blinking"] == 0, got
+    assert "Closed" not in got["words"] and "SUNROOF" not in got["words"], got
+
+
+def test_an_unreadable_connection_is_not_shown_as_online():
+    got = _evaluate(r"""() => {
+        const out = {};
+        for (const state of ["on", "off", "unavailable"]) {
+            const el = document.createElement("geely-card-compact");
+            document.body.appendChild(el);
+            el.setConfig({});
+            const hass = window.mkHass({});
+            hass.states["binary_sensor.car_connected"] =
+                { entity_id: "binary_sensor.car_connected", state, attributes: {} };
+            el.hass = hass;
+            out[state] = !!el.shadowRoot.querySelector(".dot.off");
+            el.remove();
+        }
+        return out;
+    }""")
+    assert got == {"on": False, "off": True, "unavailable": True}, got
+
+
+def test_an_open_pop_up_follows_what_its_full_card_draws():
+    """The pop-up's full card was fed only when the compact card re-rendered,
+    and the compact card does not watch the seats: with the pop-up open a seat
+    stayed Off on screen after Low was sent, so the next tap sent Low again
+    and Medium and High were out of reach."""
+    got = _evaluate(r"""() => {
+        const el = document.createElement("geely-card-compact");
+        document.body.appendChild(el);
+        el.setConfig({});
+        el.hass = window.mkHass({ seats: { heatDriver: "Off" } });
+        el.shadowRoot.querySelector(".carwrap.expandable").click();
+        const inner = document.querySelector("dialog.geely-expand geely-card");
+        el.hass = window.mkHass({ seats: { heatDriver: "Low" } });
+        const btn = inner.shadowRoot.querySelector('[data-act="seat_heat_driver"]');
+        return {
+            open: document.querySelector("dialog.geely-expand").open,
+            seat: inner._hass.states["select.car_seat_heat_driver"].state,
+            drawn: btn ? btn.textContent.replace(/\s+/g, " ").trim() : "",
+        };
+    }""")
+    assert got["open"] is True and got["seat"] == "Low", got
+    assert "Low" in got["drawn"], got
+
+
 # ------------------------------- a car with a tank is a different car to read
 
 def _energy_probe():

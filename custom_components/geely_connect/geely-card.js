@@ -1439,6 +1439,15 @@
 
     set hass(hass) {
       this._hass = hass;
+      // An open pop-up is a full card of its own and draws entities this one
+      // never watches - seats, covers, most switches - so it is fed every update,
+      // before the check below can skip this card's own render. Fed only on a
+      // re-render here it froze while open: a seat stayed Off on screen after
+      // Low was sent, and the next tap sent Low again. Its own check keeps an
+      // unchanged update cheap.
+      if (this._expandCard && this._expandDialog && this._expandDialog.open) {
+        try { this._expandCard.hass = hass; } catch (err) { /* its own failure */ }
+      }
       // Let go of a dialled-in temperature once the entity reports it, so the
       // card stops preferring a value that is no longer pending.
       if (this._pendingTemp != null) {
@@ -1465,10 +1474,6 @@
         this._render();
         this._wirePhoto();
         this._wireExpand();
-        // A dialog left open must not freeze at the values it had when it opened.
-        if (this._expandCard && this._expandDialog && this._expandDialog.open) {
-          this._expandCard.hass = this._hass;
-        }
       } catch (err) {
         this.shadowRoot.innerHTML = `<style>${BASE_CSS}</style>
           <div class="shell"><p class="micro">Geely Card</p>
@@ -1786,10 +1791,25 @@
       const raw = eng ? String(eng.state).trim().toLowerCase() : "";
       if (!DRIVING_STATES.has(raw)) return false;
       const brake = this._st("binary_sensor.park_brake_engaged");
-      const climate = this._st("climate.climate");
-      const preClimate = !!climate &&
-        !["off", "unavailable", "unknown"].includes(climate.state);
+      const preClimate = this._climateOn(this._st("climate.climate"));
       return !(brake && brake.state === "on" && preClimate);
+    }
+
+    /* On is anything but off - and an entity the cloud has lost (unavailable)
+     * or never read (unknown) is not on: in an outage the cards said "Climate
+     * on" and lit the climate button, and a tap asked to turn it off. */
+    _climateOn(c) {
+      return !!c && !["off", "unavailable", "unknown"].includes(c.state);
+    }
+
+    /* The parked status line's last word. Unlocked only when the car says so:
+     * any other state - an outage, no reading yet, the "locking" a Lock tap
+     * shows for forty seconds - is put the way Home Assistant words it. */
+    _lockLine(s) {
+      if (!s.locked) return this._t("chip.parked", "Parked");
+      if (s.locked.state === "locked") return this._t("chip.locked", "Locked");
+      if (s.locked.state === "unlocked") return this._t("chip.unlocked", "Unlocked");
+      return this._fmt(s.locked);
     }
 
     /* The banner every card shows while the car is moving. Rendered by each
@@ -1814,8 +1834,7 @@
         case "unlock": this._guarded("unlock", () => this._call("lock", "unlock", "doors")); break;
         case "trunk": this._guarded("trunk", () => this._call("button", "press", "unlock_trunk")); break;
         case "climate": {
-          const c = this._st("climate.climate");
-          const on = c && c.state !== "off";
+          const on = this._climateOn(this._st("climate.climate"));
           this._call("climate", on ? "turn_off" : "turn_on", "climate");
           break;
         }
@@ -2019,7 +2038,7 @@
       const c = this._st("climate.climate");
       if (!c) return "";
       const a = c.attributes || {};
-      const on = c.state !== "off";
+      const on = this._climateOn(c);
       const target = this._pendingTemp != null ? this._pendingTemp
         : Number(a.temperature);
       const preset = a.preset_mode;
@@ -2247,7 +2266,7 @@
             const c = this._st("climate.climate");
             if (!c) break;
             out.push(this._actBtn("climate", this._t("action.climate", "Climate"), "climate",
-              { on: c.state !== "off" && c.state !== "unavailable" }));
+              { on: this._climateOn(c) }));
             break;
           }
           case "refresh":
@@ -2650,7 +2669,7 @@
       // reading; the mini carried the reading and no percentages. Each
       // head row was missing the half the other one had.
       const inTemp = NUM(this._st("sensor.interior_temperature"));
-      const climateOn = s.climate && s.climate.state !== "off";
+      const climateOn = this._climateOn(s.climate);
       const defrost = this._st("switch.defrost");
       const online = this._st("binary_sensor.connected");
 
@@ -2704,8 +2723,13 @@
         // same contradiction as #25 on its bigger siblings.
         driving && `<span class="chip warn">${esc(drivingWord)}</span>`,
         showParked && !driving && `<span class="chip">${esc(parkedWord)}</span>`,
-        s.locked && `<span class="chip ${s.locked.state === "locked" ? "" : "warn"}">
-            ${esc(s.locked.state === "locked" ? this._t("chip.locked", "Locked") : this._t("chip.unlocked", "Unlocked"))}</span>`,
+        // Unlocked in the warning colour only when the car says unlocked: an
+        // outage (unavailable), no reading (unknown) and the forty seconds of
+        // "locking" after a tap all read as an amber Unlocked here.
+        s.locked && `<span class="chip ${s.locked.state === "unlocked" ? "warn" : ""}">
+            ${esc(s.locked.state === "locked" ? this._t("chip.locked", "Locked")
+              : s.locked.state === "unlocked" ? this._t("chip.unlocked", "Unlocked")
+              : this._fmt(s.locked))}</span>`,
         s.charging && `<span class="chip on">${iconFilled("bolt")} ${countdown ? esc(readyChip) : (power != null ? power.toFixed(1) + " kW" : esc(chargingWord))}</span>`,
         !s.charging && s.conn && s.conn.state === "Plugged in" && `<span class="chip">${esc(this._t("chip.plugged_in", "Plugged in"))}</span>`,
         climateOn && `<span class="chip on">${esc(this._t("chip.climate_on", "Climate on"))}</span>`,
@@ -2748,7 +2772,7 @@
           ${this._drivingNotice()}
           <div class="head">
             <div class="title">
-              ${hideName ? "" : `<i class="dot ${online && online.state === "off" ? "off" : ""}"></i>${esc(this._title())}`}
+              ${hideName ? "" : `<i class="dot ${online && (online.state === "off" || !OK(online)) ? "off" : ""}"></i>${esc(this._title())}`}
             </div>
             <span class="micro">${[
               battSize ? "" : this._levels(s, batt),
@@ -2810,7 +2834,7 @@
       const split = this._rangeSplit(s);
       const driving = this._isDriving();
       const range = OK(s.range) ? Math.round(NUM(s.range)) : "—";
-      const climateOn = s.climate && s.climate.state !== "off";
+      const climateOn = this._climateOn(s.climate);
       const defrost = this._st("switch.defrost");
       const vent = this._st("switch.window_ventilation");
       const online = this._st("binary_sensor.connected");
@@ -2901,7 +2925,7 @@
           <div class="head">
             <div>
               <div class="title">
-                ${this._config.hide_name ? "" : `<i class="dot ${online && online.state === "off" ? "off" : ""}"></i>${esc(this._title())}`}
+                ${this._config.hide_name ? "" : `<i class="dot ${online && (online.state === "off" || !OK(online)) ? "off" : ""}"></i>${esc(this._title())}`}
               </div>
               <div class="status ${s.charging ? "charging" : ""}">${esc(statusLine)}</div>
             </div>
@@ -3089,7 +3113,6 @@
       const batt = s.battery == null ? "—" : Math.round(s.battery);
       const split = this._rangeSplit(s);
       const power = NUM(this._st("sensor.charging_power"));
-      const locked = s.locked && s.locked.state === "locked";
       const online = this._st("binary_sensor.connected");
       // Driving outranks everything else on this line. These two cards are one
       // row tall by design, so the banner the larger cards show would double
@@ -3102,9 +3125,7 @@
         ? this._t("status.charging_line", "Charging{power}",
             { power: power != null ? " · " + power.toFixed(1) + " kW" : "" })
         : s.doorsOpen.length ? this._t("chip.n_open", "{count} open", { count: s.doorsOpen.length })
-        : locked ? this._t("chip.locked", "Locked")
-        : s.locked ? this._t("chip.unlocked", "Unlocked")
-        : this._t("chip.parked", "Parked");
+        : this._lockLine(s);
 
       this.shadowRoot.innerHTML = `<style>${BASE_CSS}
         .shell { padding: 12px 16px 10px; }
@@ -3132,7 +3153,7 @@
           <div class="rowline">
             <div class="left">
               <div class="topline">
-                <i class="dot ${online && online.state === "off" ? "off" : ""}"></i>
+                <i class="dot ${online && (online.state === "off" || !OK(online)) ? "off" : ""}"></i>
                 <span class="num rng ${OK(s.range) ? "" : "unavail"}">${range}<span class="u">${esc(UNIT(s.range) || "km")}</span></span>
                 <span class="pct">${this._levels(s, batt)}</span>
               </div>
@@ -3177,7 +3198,6 @@
       const range = OK(s.range) ? Math.round(NUM(s.range)) : "—";
       const temp = NUM(this._st("sensor.interior_temperature"));
       const power = NUM(this._st("sensor.charging_power"));
-      const locked = s.locked && s.locked.state === "locked";
       const preset = this._preset();
       const online = this._st("binary_sensor.connected");
       // Driving outranks everything else on this line. These two cards are one
@@ -3191,9 +3211,7 @@
         ? this._t("status.charging_line", "Charging{power}",
             { power: power != null ? " · " + power.toFixed(1) + " kW" : "" })
         : s.doorsOpen.length ? this._t("chip.n_open", "{count} open", { count: s.doorsOpen.length })
-        : locked ? this._t("chip.locked", "Locked")
-        : s.locked ? this._t("chip.unlocked", "Unlocked")
-        : this._t("chip.parked", "Parked");
+        : this._lockLine(s);
 
       this.shadowRoot.innerHTML = `<style>${BASE_CSS}
         .shell { padding: 14px 16px 12px; }
@@ -3219,7 +3237,7 @@
         <div class="shell">
           <div class="head">
             <div class="title">
-              <i class="dot ${online && online.state === "off" ? "off" : ""}"></i>
+              <i class="dot ${online && (online.state === "off" || !OK(online)) ? "off" : ""}"></i>
               <em>${this._config.hide_name ? "" : esc(this._title())}</em>
             </div>
             <span class="temp">${[
@@ -3272,7 +3290,7 @@
       const split = this._rangeSplit(s);
       const driving = this._isDriving();
       const range = OK(s.range) ? Math.round(NUM(s.range)) : "—";
-      const climateOn = s.climate && s.climate.state !== "off";
+      const climateOn = this._climateOn(s.climate);
       const defrost = this._st("switch.defrost");
       const vent = this._st("switch.window_ventilation");
       const online = this._st("binary_sensor.connected");
@@ -3291,9 +3309,12 @@
       // number that is miles (#37).
       const speedUnit = UNIT(this._st("sensor.speed")) || "km/h";
 
+      // Unavailable or unknown is "—", not Closed: in an outage every door,
+      // the hood and the trunk read Closed, and a sunroof whose status the car
+      // marks invalid - the cover then stays unknown - blinked amber as Open.
       const isOpen = (suffix) => {
         const st = this._st(`binary_sensor.${suffix}`);
-        return st ? st.state === "on" : null;
+        return st && OK(st) ? st.state === "on" : null;
       };
       const sunroofSt = this._st("cover.sunroof");
       const tire = (suffix) => this._tire(suffix);
@@ -3338,7 +3359,8 @@
         hood: isOpen("hood"),
         trunk: isOpen("trunk"),
         bootWord: this._bootWord(true),
-        sunroof: sunroofSt ? sunroofSt.state !== "closed" : null,
+        sunroof: sunroofSt && OK(sunroofSt)
+          ? sunroofSt.state === "open" || sunroofSt.state === "opening" : null,
         words: {
           hood: this._t("label.hood", "Hood").toUpperCase(),
           sunroof: this._t("label.sunroof", "Sunroof").toUpperCase(),
@@ -3388,7 +3410,7 @@
           <div class="head">
             <div>
               <div class="title">
-                ${this._config.hide_name ? "" : `<i class="dot ${online && online.state === "off" ? "off" : ""}"></i>${esc(this._title())}`}
+                ${this._config.hide_name ? "" : `<i class="dot ${online && (online.state === "off" || !OK(online)) ? "off" : ""}"></i>${esc(this._title())}`}
               </div>
               <div class="status ${s.charging ? "charging" : ""}">${esc(statusLine)}</div>
             </div>
