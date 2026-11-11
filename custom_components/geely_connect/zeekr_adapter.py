@@ -46,7 +46,7 @@ _LOGGER = logging.getLogger(__name__)
 
 _AUTH_HINTS = (
     "token", "auth", "login", "session", "expired", "unauthor",
-    "sign in", "401", "403", "credential",
+    "sign in", "credential",
     # The single-session eviction the docstring on _renew_hf describes. Its
     # text is "logged in elsewhere", which none of the hints above matched, so
     # the one error a renewal exists to recover from was the one it never
@@ -54,10 +54,18 @@ _AUTH_HINTS = (
     "079021", "logged in elsewhere",
 )
 
+# 401 and 403 as a status or a code, not as three digits anywhere: matched
+# loosely, a millisecond timestamp or a request id in a 5xx body read as a
+# dead session, and the renewal it set off is a password login that signs the
+# phone app out. The transports word a status "HTTP 401:" / "HF HTTP 401:"
+# and a refusal inside a 200 "code=401 ...", and the body an error quotes
+# comes as a Python repr, 'code': '401'.
+_AUTH_STATUS = re.compile(r"\bhttp\s+40[13]\b|\bcode\W{0,4}40[13]\b")
+
 
 def _looks_authy(text: str) -> bool:
     low = text.lower()
-    return any(h in low for h in _AUTH_HINTS)
+    return any(h in low for h in _AUTH_HINTS) or bool(_AUTH_STATUS.search(low))
 
 
 _CODE_IN_TEXT = re.compile(r"code=(\S+)")

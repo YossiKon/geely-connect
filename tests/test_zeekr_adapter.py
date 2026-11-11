@@ -218,6 +218,21 @@ def test_the_single_session_eviction_now_counts_as_an_auth_error():
     assert not ad._looks_authy("HTTP 400: 079025 Decrypt X-VIN failed")
 
 
+def test_a_401_or_403_counts_only_as_a_status_or_a_code():
+    """Matched as three digits anywhere, a millisecond timestamp or a request
+    id in a server error read as a dead session, and the renewal that set off
+    is a password login that signs the phone app out."""
+    for authy in ("HTTP 401: {}", "HF HTTP 403: nope", "code=401 message=None",
+                  # the body an error quotes, as _safe_detail writes it
+                  "HTTP 500: {'code': '401', 'msg': 'x'}",
+                  "HTTP 500: {'code': 403}"):
+        assert ad._looks_authy(authy), authy
+    for busy in ('HTTP 500: {"timestamp": 1731401234567, "msg": "busy"}',
+                 "HTTP 502: request a4031f gateway timeout",
+                 "code=8401 message=None"):
+        assert not ad._looks_authy(busy), busy
+
+
 def test_probe_x_vin_renews_a_dead_session_and_retries():
     """The client's probe raises on a session-shaped failure precisely so this
     wrapper gets its turn: one renewal, then the probe again with the fresh
