@@ -490,3 +490,18 @@ def test_a_zeekr_entry_gets_the_x_vin_field_and_strips_it_on_save():
         "poll_mode": "normal", "pressure_unit": "psi",
         const.CONF_ZEEKR_ENC_VIN: "  TOKEN==  "}))
     assert saved["data"][const.CONF_ZEEKR_ENC_VIN] == "TOKEN=="
+
+    # Not only at the ends. A token copied from a wrapped line carries the
+    # break, and a one-line field can turn it into a space in the middle -
+    # which was saved and sent as it stood.
+    for pasted in ("TOK EN==", "TOK\nEN==", " TOK\r\n  EN==\t"):
+        saved = asyncio.run(opts.async_step_init({
+            "poll_mode": "normal", "pressure_unit": "psi",
+            const.CONF_ZEEKR_ENC_VIN: pasted}))
+        assert saved["data"][const.CONF_ZEEKR_ENC_VIN] == "TOKEN==", repr(pasted)
+    # An emptied field still clears the token.
+    for emptied in ("", "   ", None):
+        saved = asyncio.run(opts.async_step_init({
+            "poll_mode": "normal", "pressure_unit": "psi",
+            const.CONF_ZEEKR_ENC_VIN: emptied}))
+        assert saved["data"][const.CONF_ZEEKR_ENC_VIN] == "", repr(emptied)

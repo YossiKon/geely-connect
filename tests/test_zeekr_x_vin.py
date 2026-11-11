@@ -96,6 +96,24 @@ def test_probe_needs_a_session_and_a_vin():
     assert client.probe_x_vin("") == ""
 
 
+def test_a_token_loses_its_whitespace_where_the_client_keeps_it():
+    """Base64 has no whitespace, and a token copied out of a wrapped line has
+    some. Whoever sets it - the entry at start, a probe, a test - the client
+    keeps, sends and lets the trail scrub one and the same clean string."""
+    assert zc.clean_x_vin("  AAAA\r\n BBBB\tCC==\n") == "AAAABBBBCC=="
+    assert zc.clean_x_vin(None) == "" and zc.clean_x_vin(" \n") == ""
+    client = zc.ZeekrClient(email="a@b.c", password="")
+    assert client.enc_vin == ""
+    client.enc_vin = "AAAA\nBBBB CC=="
+    assert client.enc_vin == "AAAABBBBCC=="
+    client.enc_vin = None
+    assert client.enc_vin == ""
+    # What the derivation produces is left exactly as it was derived.
+    for key, iv, _note in zc._X_VIN_MATERIAL:
+        derived = zc.derive_x_vin(FAKE_VIN, key, iv)
+        assert zc.clean_x_vin(derived) == derived
+
+
 # --------------------------------------------------- #84: say what happened
 
 class _Logs(logging.Handler):

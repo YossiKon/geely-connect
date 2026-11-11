@@ -183,6 +183,18 @@ def derive_x_vin(vin: str, key: bytes, iv: bytes) -> str:
     enc = Cipher(algorithms.AES(key), modes.CBC(iv)).encryptor()
     return base64.b64encode(enc.update(pt) + enc.finalize()).decode("ascii")
 
+
+def clean_x_vin(value: str | None) -> str:
+    """An x-vin with every whitespace character taken out.
+
+    The token is Base64, so none belongs in it, and one copied from a wrapped
+    line arrives with some. A space where the line broke went out inside the
+    header, in a token that never had one, and so did a break followed by an
+    indent, folded. A bare break never left this machine: http.client refuses
+    the header with an error that quotes the whole value - the token - and
+    that text reached the log as the reason the poll failed."""
+    return "".join(str(value or "").split())
+
 # Per-install device identity for HF requests: the app derives one per
 # device, so a shared static value would let the vendor correlate every HA
 # install as a single device. Regenerated per process; not part of any
@@ -722,7 +734,7 @@ class ZeekrClient:
         self.hf_device_id = uuid.uuid4().hex
         # Opaque per-vehicle token the new gateway wants in `x-vin`; see
         # CONF_ZEEKR_ENC_VIN. Empty = new-platform vehicle calls unused.
-        self.enc_vin: str = ""
+        self.enc_vin = ""
         # The last probe's verdict when it found no token: True when the
         # gateway turned the car away (079001) rather than the token.
         self.car_refused: bool = False
@@ -745,6 +757,17 @@ class ZeekrClient:
     @gateway.setter
     def gateway(self, value: str) -> None:
         self._gateway = value.rstrip("/")
+
+    @property
+    def enc_vin(self) -> str:
+        return self._enc_vin
+
+    @enc_vin.setter
+    def enc_vin(self, value: str | None) -> None:
+        # Cleaned where it is stored rather than where the header is built:
+        # the entry may hold a value saved before the options form cleaned
+        # it, and the command trail scrubs the token by this same string.
+        self._enc_vin = clean_x_vin(value)
 
     def _hf_request(self, method: str, path: str, **kwargs) -> dict:
         profile = self.profile

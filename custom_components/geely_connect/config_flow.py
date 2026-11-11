@@ -83,6 +83,7 @@ from .zeekr_client import (
     ZeekrAuthError,
     ZeekrClient,
     ZeekrIdaas,
+    clean_x_vin,
     vehicle_nickname,
     vehicle_vin,
 )
@@ -908,14 +909,16 @@ class GeelyIntlOptionsFlow(config_entries.OptionsFlow):
         current = {**entry.data, **entry.options}
 
         if user_input is not None:
+            # A token pasted from a wrapped line carries the break, or a space
+            # where the break was; neither is part of it.
+            if CONF_ZEEKR_ENC_VIN in user_input:
+                user_input[CONF_ZEEKR_ENC_VIN] = clean_x_vin(
+                    user_input[CONF_ZEEKR_ENC_VIN])
             # Changing the pressure unit has to reach entities that already
             # exist: Home Assistant only reads suggested_unit_of_measurement
             # when an entity is first registered, so afterwards the display
             # unit lives in the registry and nothing the integration reports
             # will move it.
-            if CONF_ZEEKR_ENC_VIN in user_input:
-                user_input[CONF_ZEEKR_ENC_VIN] = (
-                    user_input[CONF_ZEEKR_ENC_VIN] or "").strip()
             new_unit = user_input.get(CONF_PRESSURE_UNIT)
             if new_unit and new_unit != current.get(CONF_PRESSURE_UNIT):
                 _apply_pressure_unit(self.hass, entry, new_unit)

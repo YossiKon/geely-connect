@@ -129,6 +129,26 @@ def test_status_read_matches_the_captured_request():
     assert resp["data"]["basicVehicleStatus"]["engineStatus"] == "engine-off"
 
 
+def test_a_token_pasted_across_a_line_break_still_reads_the_car():
+    """A token copied from a wrapped line carries the break. http.client
+    refuses a header value with a bare one in it and quotes the value in its
+    error, so the read failed for good and the line in the log that said why
+    was the token itself. A space in the same place, or a break followed by an
+    indent, went out as it stood, inside a token that never had one."""
+    seen: list[dict] = []
+    srv = _start_gateway(seen)
+    try:
+        for pasted in ("ENC-VIN-\nTOKEN==", "ENC-VIN- TOKEN==",
+                       " ENC-VIN-\r\nTOKEN==\n"):
+            c = _client(srv)
+            c.enc_vin = pasted
+            c.vehicle_status_new_resp()
+            assert seen[-1]["x_vin"] == "ENC-VIN-TOKEN==", repr(pasted)
+            assert seen[-1]["signature_ok"], repr(pasted)
+    finally:
+        srv.shutdown()
+
+
 def test_status_read_needs_the_vehicle_token():
     seen: list[dict] = []
     srv = _start_gateway(seen)

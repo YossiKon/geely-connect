@@ -875,6 +875,23 @@ def test_neither_the_vin_nor_the_vehicle_token_reaches_the_trail():
     assert f"...{FAKE_VIN[-4:]}" in note["message"], "the tail keeps it readable"
 
 
+def test_a_stored_token_with_a_line_break_is_clean_by_the_time_it_is_used():
+    """The options form takes the whitespace out now, but an entry can hold a
+    token saved before it did, and the adapter is built from the entry at
+    every start. So it comes out here as well, and the trail scrubs by the
+    string that is actually sent."""
+    token = "c2VjcmV0LXZlaGljbGUtdG9rZW4tdmFsdWU="
+    a = ad.ZeekrAdapter(
+        email="user@example.com", vin=FAKE_VIN, user_id="mock-uid",
+        access_token="mock-at", refresh_token="mock-rt",
+        gateway="https://unused.invalid",
+        enc_vin=f" {token[:20]}\n{token[20:]} ")
+    assert a.enc_vin == token and a._client.enc_vin == token
+    assert token not in a._note_text(f"079025 bad x-vin {token}")
+    a.adopt_enc_vin("DERIVED-\nXVIN==")
+    assert a.enc_vin == "DERIVED-XVIN=="
+
+
 def test_a_refused_rapid_climate_without_a_token_keeps_its_code():
     """The charge-server write a tokenless car's rapid climate goes out on
     answers a busy car the same way, and is a refusal like the token route's."""
