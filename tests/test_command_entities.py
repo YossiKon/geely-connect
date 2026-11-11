@@ -819,6 +819,7 @@ def test_hhmm_parse_and_format():
     assert t._parse_hhmm("0705") is None      # no colon
     assert t._parse_hhmm("xx:yy") is None     # not numbers
     assert t._parse_hhmm("25:00") is None     # not a valid hour
+    assert t._parse_hhmm(2300) is None        # a number, not a time string
     assert t._fmt_hhmm(dtime(7, 5)) == "07:05"
     assert t._fmt_hhmm(dtime(23, 59)) == "23:59"
 

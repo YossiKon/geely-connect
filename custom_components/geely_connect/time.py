@@ -48,7 +48,9 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def _parse_hhmm(s: str | None) -> dtime | None:
-    if not s or ":" not in s:
+    # A number where the slot holds a time would raise TypeError inside
+    # native_value, on every state write.
+    if not isinstance(s, str) or ":" not in s:
         return None
     try:
         h, m = s.split(":", 1)

@@ -121,7 +121,9 @@ class Verdict:
 
 def declared(power_type: str | None) -> Propulsion:
     """Map the server's `powerType` string onto a propulsion kind."""
-    s = (power_type or "").strip().lower()
+    # str(): the entry stores the value as the server sent it, and a number
+    # there would raise on .strip() at every setup.
+    s = str(power_type or "").strip().lower()
     if not s:
         return Propulsion.UNKNOWN
     # Whole-token acronyms first: "PHEV", "EV / 混动", "BEV".
@@ -211,7 +213,7 @@ def classify(power_type: str | None, status: dict[str, Any] | None) -> Verdict:
     has_plug = _observed_plug(status)
     seen = _observed(has_tank, has_plug)
     said = declared(power_type)
-    raw = (power_type or "").strip()
+    raw = str(power_type or "").strip()
 
     if said is Propulsion.UNKNOWN:
         # No usable declaration: an entry created before the refresh carried

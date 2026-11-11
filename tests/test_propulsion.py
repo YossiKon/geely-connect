@@ -36,6 +36,16 @@ def _status(fuel=True, plug=True, config=True):
 
 # ------------------------------------------------------------- declared ---
 
+def test_a_number_for_power_type_is_unknown_rather_than_a_failed_setup():
+    """The entry stores powerType as the server sent it, and classify runs at
+    every setup with nothing around it - it promises never to raise, and a
+    number there would have raised on .strip()."""
+    p = _mod()
+    assert p.declared(2) is p.Propulsion.UNKNOWN
+    verdict = p.classify(2, _status())
+    assert verdict.source == "observed" and verdict.declared_raw == "2", verdict
+
+
 def test_the_wordings_the_server_actually_uses():
     p = _mod()
     assert p.declared("\u6df7\u52a8") is p.Propulsion.HYBRID          # hybrid, AU account
