@@ -183,6 +183,50 @@ def test_concurrent_callers_trigger_exactly_one_jwt_refresh():
     assert set(got) == {"fresh"}
 
 
+def test_callers_that_meet_the_same_1402_refresh_once_between_them():
+    """The 1402 recovery refreshed outside the lock. A poll and a command that
+    both met it each opened a session, and Geely keeps one per account: the
+    second refresh killed the first, the caller retrying with the first token
+    met 1402 again, and that reads as a dead login - a re-authentication on
+    good credentials."""
+    a = _api_with("stale", int(time.time()) + 3600)
+    a.control_host = "control.invalid"
+    a.client_id = a.vehicle_series = a.vehicle_model = a.vin = "x"
+    refreshes, live = [], {}
+    together = threading.Barrier(4)
+
+    def refresh():
+        refreshes.append(1)
+        time.sleep(0.05)
+        live["token"] = f"fresh-{len(refreshes)}"   # only the newest lives
+        a._jwt, a._jwt_exp = live["token"], int(time.time()) + 7200
+
+    def send(host, method, path, body, extra_headers=None):
+        sent = extra_headers["Authorization"]
+        if sent == "stale":
+            together.wait(timeout=5)        # all four are refused together
+        if sent != live.get("token"):
+            return 200, b'{"code": 1402}'
+        return 200, b'{"code": 1000, "data": {}}'
+
+    a.refresh_jwt = refresh
+    a._mtls_send = send
+    got, errors = [], []
+
+    def call():
+        try:
+            got.append(a._authed_apis_call("GET", "/status", b""))
+        except Exception as e:  # noqa: BLE001 - collected and asserted below
+            errors.append(e)
+
+    ts = [threading.Thread(target=call) for _ in range(4)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert not errors, errors
+    assert len(refreshes) == 1, f"{len(refreshes)} refreshes"
+    assert [j["code"] for j in got] == [1000] * 4, got
+
+
 def test_a_valid_token_is_reused_without_refreshing():
     a = _api_with("cached", int(time.time()) + 3600)
     a.refresh_jwt = lambda: (_ for _ in ()).throw(AssertionError("refreshed needlessly"))

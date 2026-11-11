@@ -1161,21 +1161,26 @@ class GeelyApi(CommandTrail):
         most commonly because another client like the iOS app just logged
         in), auto-refresh the JWT once and retry. Only escalates to
         GeelyAuthError when the cidpsso token itself has been revoked."""
+        headers = self._headers_with_jwt()
         status, resp = self._mtls_send(
-            self.control_host, method, path, body,
-            extra_headers=self._headers_with_jwt(),
+            self.control_host, method, path, body, extra_headers=headers,
         )
         j = json.loads(resp)
         if j.get("code") in {1402, "1402"}:
             _LOGGER.info("JWT invalidated mid-call (likely another client "
                          "logged in); refreshing and retrying once")
-            self._jwt = None
-            self._jwt_exp = 0
-            try:
-                self.refresh_jwt()
-            except GeelyAuthError:
-                # cidpsso token also dead - needs reauth
-                raise
+            # Under the same lock as _ensure_jwt, and only while the cached
+            # token is still the one this call was refused with. A poll and a
+            # command that met the same 1402 each refreshed: the second
+            # session killed the first, the caller retrying with the first
+            # token met 1402 again, and that reads as a dead login - a
+            # re-authentication on good credentials. A GeelyAuthError from the
+            # refresh still means the cidpsso token is dead too.
+            with self._jwt_lock:
+                if self._jwt == headers["Authorization"]:
+                    self._jwt = None
+                    self._jwt_exp = 0
+                    self.refresh_jwt()
             status, resp = self._mtls_send(
                 self.control_host, method, path, body,
                 extra_headers=self._headers_with_jwt(),
