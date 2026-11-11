@@ -5,7 +5,8 @@ of them corresponds to something that actually leaked at some point.
 """
 import json
 
-from conftest import FAKE_VIN, load
+from conftest import FAKE_VIN, have_homeassistant, load
+from run import skip
 
 api = load("api")
 
@@ -195,3 +196,82 @@ def test_a_pair_shaped_dict_with_extra_fields_is_still_handled():
     depend on the dict holding exactly two items."""
     got = api.redact({"key": "sessionId", "value": TOKEN, "note": "probe"})
     assert got["value"] == "***redacted***" and got["note"] == "probe"
+
+
+# ----------------------------------------------- the two passes, key by key ---
+# A report runs two passes over the entry so that neither has to be the one
+# that is right. That holds only while EACH of them, alone, masks every
+# sensitive key an entry stores, and nothing checked it: the two lists were
+# compared by eye, which is how cert_path and key_path sat on the literal list
+# alone until the first pass was found letting them through.
+
+# Every key a config entry stores, sorted by whether a report may show it. A
+# new CONF_* constant fails the first test below until it is put on one side,
+# and one put on the hiding side fails the next two until both passes mask it.
+_A_REPORT_MAY_SHOW = {
+    "country_code", "region", "platform", "zeekr_region",
+    "zeekr_hf_expiry",        # a timestamp, kept readable on purpose
+    "store_password",         # the yes/no choice, not the password
+    "vehicle_nickname", "vehicle_series", "vehicle_model_code",
+    "vehicle_color", "vehicle_power_type",
+    "pressure_unit", "language", "poll_mode", "full_exposure",
+    "battery_capacity_kwh", "exterior_temp_offset",
+}
+_A_REPORT_MUST_HIDE = {
+    "email", "user_id", "vin", "device_id", "device_idfa", "device_idfv",
+    "cert_path", "key_path", "cidpsso_token",
+    "zeekr_access_token", "zeekr_refresh_token", "zeekr_hf_token",
+    "zeekr_password", "zeekr_enc_vin",
+}
+# The report's literal list also drops coordinates, which redact() has never
+# masked; they are left out of the comparison between the two.
+_COORDINATE_KEYS = {"latitude", "longitude", "lat", "lon", "lng"}
+_MARK = "MARK0123456789abcdef"
+
+
+def test_every_config_entry_key_is_sorted_into_show_or_hide():
+    const = load("const")
+    stored = {v for k, v in vars(const).items()
+              if k.startswith("CONF_") and isinstance(v, str)}
+    assert not _A_REPORT_MAY_SHOW & _A_REPORT_MUST_HIDE
+    unsorted = stored - _A_REPORT_MAY_SHOW - _A_REPORT_MUST_HIDE
+    assert not unsorted, (
+        f"{sorted(unsorted)}: decide whether a diagnostics report may show it; "
+        "if not, add it to api._SECRET_KEYS (or _IDENTIFYING_KEYS) AND to "
+        "diagnostics._REDACT")
+    gone = (_A_REPORT_MAY_SHOW | _A_REPORT_MUST_HIDE) - stored
+    assert not gone, f"{sorted(gone)} is no longer a config key; drop it here"
+
+
+def test_the_first_pass_alone_masks_every_sensitive_entry_key():
+    out = api.redact({k: _MARK for k in _A_REPORT_MUST_HIDE})
+    for k in sorted(_A_REPORT_MUST_HIDE):
+        assert _MARK not in str(out[k]), f"redact() lets {k} through"
+    # ...and nothing a report is meant to show is eaten along the way.
+    shown = {k: _MARK for k in _A_REPORT_MAY_SHOW}
+    assert api.redact(shown) == shown
+
+
+def test_the_literal_list_alone_masks_every_sensitive_entry_key():
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    diag = load("diagnostics")
+    out = diag.async_redact_data({k: _MARK for k in _A_REPORT_MUST_HIDE},
+                                 diag._REDACT)
+    for k in sorted(_A_REPORT_MUST_HIDE):
+        assert _MARK not in str(out[k]), f"diagnostics._REDACT lets {k} through"
+    assert not _A_REPORT_MAY_SHOW & diag._REDACT
+
+
+def test_whatever_the_literal_list_names_the_first_pass_masks_as_well():
+    """The literal list matches exact spellings, so a key on it alone is one
+    capital letter away from a leak. Everything it names, coordinates aside,
+    must also be on the normalised lists."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    diag = load("diagnostics")
+    assert _COORDINATE_KEYS <= diag._REDACT
+    names = diag._REDACT - _COORDINATE_KEYS
+    out = api.redact({k: _MARK for k in names})
+    for k in sorted(names):
+        assert _MARK not in str(out[k]), f"{k} is on diagnostics._REDACT only"
