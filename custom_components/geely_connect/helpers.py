@@ -420,7 +420,19 @@ def schedule_refresh(hass: HomeAssistant, coordinator, *delays: float,
         if after is not None:
             after()
 
-    hass.async_create_task(_run())
+    # Tied to the config entry, which is what cancels it on an unload - the
+    # cancellation the docstring counts on. Left on hass the wait outlived a
+    # reload: the coordinator that had shut down ignored its refreshes, so
+    # `after` judged a rapid cycle on data frozen at the unload and could say
+    # the car had not started while the new entry showed it running; and a
+    # restart inside the wait drew Home Assistant's "task was still running"
+    # warning.
+    entry = getattr(coordinator, "config_entry", None)
+    if entry is not None:
+        entry.async_create_background_task(
+            hass, _run(), f"{DOMAIN} post-command refresh")
+    else:
+        hass.async_create_task(_run())
 
 
 @contextmanager

@@ -137,6 +137,37 @@ def test_cancellation_skips_the_after_hook():
     assert seen == []
 
 
+def test_the_wait_is_a_background_task_of_the_config_entry():
+    """Left on hass, the wait outlived a reload. The coordinator that had shut
+    down ignored its refreshes, and `after` went on to judge a rapid cycle on
+    data frozen at the unload: a "has not reported starting" notice read off
+    data the new entry had already moved past. The entry is what cancels a
+    task when it unloads."""
+    _ha()
+    h = load("helpers")
+
+    class _Entry:
+        def __init__(self):
+            self.bound = []
+
+        def async_create_background_task(self, hass, coro, name):
+            self.bound.append((hass, coro, name))
+
+    class _Hass:
+        def async_create_task(self, coro):
+            coro.close()
+            raise AssertionError("left on hass, where an unload cannot cancel it")
+
+    c, hass, seen = _Coord(), _Hass(), []
+    c.config_entry = _Entry()
+    h.schedule_refresh(hass, c, 0, after=lambda: seen.append("after"))
+    (bound_to, coro, name), = c.config_entry.bound
+    assert bound_to is hass and name.startswith("geely_connect ")
+    # The task itself is the one the other tests here drive.
+    asyncio.run(coro)
+    assert c.refreshes == 1 and seen == ["after"]
+
+
 def test_control_errors_become_toasts_with_the_server_message():
     _ha()
     h = load("helpers")
