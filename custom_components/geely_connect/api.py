@@ -261,6 +261,21 @@ def redact(obj: Any):
     return obj
 
 
+def _lifetime(value: Any, default: int) -> int:
+    """A token lifetime in seconds from a login reply, or `default`.
+
+    Read raw, a null or a non-numeric `expiresIn` raised after the new token
+    was stored and before its expiry was, so the next call refreshed again:
+    a new session, and the phone app signed out, on every call. A lifetime
+    no longer than the minute _ensure_jwt renews early by would do the same,
+    expiring on arrival."""
+    try:
+        seconds = int(value)
+    except (TypeError, ValueError, OverflowError):   # OverflowError: Infinity
+        return default
+    return seconds if seconds > 60 else default
+
+
 def _is_auth_failure(resp: dict) -> bool:
     return resp.get("code") in _AUTH_FAILURE_CODES
 
@@ -1076,7 +1091,7 @@ class GeelyApi(CommandTrail):
             d = self._apac_session_exchange()
             self._jwt = d["accessToken"]
             self._jwt_uid = d.get("userId") or self.user_id
-            self._jwt_exp = int(time.time()) + int(d.get("expiresIn", 7200))
+            self._jwt_exp = int(time.time()) + _lifetime(d.get("expiresIn"), 7200)
             return d
         # The code must be minted by the SAME regional backend that will
         # exchange it - the rule the APAC path already documents. A Brazilian
@@ -1116,7 +1131,7 @@ class GeelyApi(CommandTrail):
         d = j["data"]
         self._jwt = d["accessToken"]
         self._jwt_uid = d["userId"]
-        self._jwt_exp = int(time.time()) + int(d.get("expiresIn", 7200))
+        self._jwt_exp = int(time.time()) + _lifetime(d.get("expiresIn"), 7200)
         return d
 
     def _ensure_jwt(self) -> str:

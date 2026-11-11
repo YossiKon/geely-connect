@@ -1074,6 +1074,31 @@ def test_apac_refresh_uses_the_apac_exchange_and_its_defaults():
     assert before + 7199 <= a._jwt_exp <= int(time.time()) + 7200
 
 
+def test_a_null_or_garbled_lifetime_falls_back_instead_of_refreshing_forever():
+    """`expiresIn` was read raw. A null or non-numeric one raised after the
+    new token was stored and before its expiry was, so every later call saw an
+    expired token and refreshed again - a new session, and the phone app
+    signed out, each time."""
+    # 60 s or less is the minute _ensure_jwt renews early by: such a token
+    # would expire on arrival and refresh on every call just the same.
+    for lifetime, expected in ((None, 7200), ("soon", 7200), ("3600", 3600),
+                               (0, 7200), (True, 7200), (60, 7200),
+                               (float("inf"), 7200)):     # JSON's Infinity
+        a = _client()
+        a._get_access_code = lambda host="m-lcmsam-eu.geely.com": "AC-EU"
+        _scripted_mtls(a, [{"code": 1000, "data": {
+            "accessToken": "JWT-1", "userId": "uid-9", "expiresIn": lifetime}}])
+        before = int(time.time())
+        a.refresh_jwt()
+        assert before + expected - 1 <= a._jwt_exp <= int(time.time()) + expected, (
+            lifetime, a._jwt_exp - before)
+    k = _client(control_host="apis.ecloudkr.com")
+    k._apac_session_exchange = lambda: {"accessToken": "JWT-KR", "expiresIn": None}
+    before = int(time.time())
+    k.refresh_jwt()
+    assert before + 7199 <= k._jwt_exp <= int(time.time()) + 7200
+
+
 # -------------------------------------------------------- _authed_apis_call ---
 
 def test_a_live_jwt_is_attached_to_every_authed_call():

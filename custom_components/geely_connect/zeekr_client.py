@@ -930,7 +930,16 @@ class ZeekrClient:
         if not hf_token:
             raise ZeekrAuthError(f"HF exchange returned no accessToken: {str(redact(resp))[:200]}")
         self.hf_token = hf_token
-        self.hf_expires_in = data.get("expiresIn", 172800)
+        # Read raw, a null or a non-numeric lifetime broke the adapter's
+        # arithmetic after both sessions had been re-minted and before the
+        # expiry was saved, so the next poll renewed again - a password
+        # login, and the phone app signed out, on every poll. A lifetime no
+        # longer than the hour the adapter renews early by would do the same.
+        try:
+            seconds = int(data.get("expiresIn") or 0)
+        except (TypeError, ValueError, OverflowError):   # OverflowError: Infinity
+            seconds = 0
+        self.hf_expires_in = seconds if seconds > 3600 else 172800
 
     # ---- vehicle (old-platform endpoints, HF JWT) ---------------------------
     # The new app's vehicle data rides the OLD platform (api.ecloudkr.com)

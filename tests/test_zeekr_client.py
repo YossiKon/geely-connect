@@ -480,6 +480,34 @@ def test_idaas_methods_roundtrip():
         _stop_mock(srv, tmp)
 
 
+def test_a_null_or_garbled_hf_lifetime_falls_back_to_two_days():
+    """The HF lifetime was stored raw, and the adapter adds it to the clock
+    after both sessions are re-minted: a null there raised before the expiry
+    was saved, so the next poll ran the password login again."""
+    class _Idaas:
+        def __init__(self, country="AU", profile=None):
+            pass
+
+        def tsp_code(self, token_value, client_id=None):
+            return {"code": "c2"}
+
+    original = zc.ZeekrIdaas
+    zc.ZeekrIdaas = _Idaas
+    try:
+        # An hour or less is what the adapter renews early by.
+        for lifetime, expected in ((None, 172800), ("soon", 172800),
+                                   ("7200", 7200), ("3600", 172800),
+                                   (True, 172800), (-5, 172800),
+                                   (float("inf"), 172800)):
+            c = zc.ZeekrClient("user@example.com", "pw")
+            c._hf_request = lambda *a, **k: {
+                "data": {"accessToken": "hf", "expiresIn": lifetime}}
+            c.login_hf("tv")
+            assert c.hf_expires_in == expected, (lifetime, c.hf_expires_in)
+    finally:
+        zc.ZeekrIdaas = original
+
+
 def test_login_tsp_and_login_hf_use_the_idaas_leg():
     """login_tsp / login_hf construct ZeekrIdaas internally; point the class
     at the mock gateway for the duration of the test."""
