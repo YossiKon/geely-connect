@@ -635,6 +635,36 @@ def test_rapid_climate_without_a_token_sends_the_captured_charge_server_body():
         ("rapid_climate", "accepted"), ("rapid_climate", "accepted")]
 
 
+def test_rapid_ignores_names_exactly_what_each_route_leaves_out():
+    """fire_rapid repeats this to the owner in its log line, so it is checked
+    against the two bodies themselves and not against the docstring: every
+    argument named is absent from what goes out, and every other one is there."""
+    a, c = _make_adapter()
+    sent = {}
+    c.charge_server_post = lambda vin, body: sent.update(old=body) or {"code": "1000"}
+    c.set_smart_temp_new = lambda setting: (
+        sent.update(new=setting) or {"code": "000000"})
+    probe = dict(ac=True, temp="28.5", heat_seats=["11"], vent_seats=["19"],
+                 vlt=True, level="2", extra={"probe": "x"})
+
+    assert a.rapid_ignores() == frozenset({"vlt", "extra"})
+    a.rapid_climate(**probe)
+    old = sent["old"]
+    assert "probe" not in old and "vlt" not in old
+    assert old["temp"] == "28.5" and old["ac"] == "true"
+    assert old["heat"] == [{"pos": "11", "level": "2"}]
+    assert old["ventilation"] == [{"pos": "19", "level": "2"}]
+
+    c.enc_vin = "opaque-token"
+    assert a.rapid_ignores() == frozenset({"vent_seats", "vlt", "extra"})
+    a.rapid_climate(**probe)
+    new = sent["new"]
+    assert "probe" not in new and "vlt" not in new
+    assert '"19"' not in json.dumps(new), "the ventilated seat went out after all"
+    assert new["temp"] == "28.5" and new["ac"] == "true"
+    assert new["heat"] == [{"level": "2", "pos": "11"}]
+
+
 def test_a_safe_command_is_translated_and_its_code_rewritten():
     """control() on the new platform runs the request through the translator
     and rewrites the gateway's 000000 to the 1000 the coordinator expects."""

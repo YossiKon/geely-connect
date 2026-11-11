@@ -1280,19 +1280,30 @@ def _register_debug_service(hass: HomeAssistant) -> None:
                 "fire_rapid: 'extra' cannot override bizType or command - on "
                 "this endpoint 4 and 6 write the scheduled-trip and "
                 "scheduled-charging slots")
+        asked = {
+            "ac": call.data.get("ac", True),
+            "temp": call.data["temp"],
+            "heat_seats": heat,
+            "vent_seats": vent,
+            "vlt": call.data.get("window_vent", False),
+            "level": level,
+            "extra": extra,
+        }
         resp = await _send(entry_id, "fire_rapid", functools.partial(
-            bundle["api"].rapid_climate,
-            ac=call.data.get("ac", True),
-            temp=call.data["temp"],
-            heat_seats=heat,
-            vent_seats=vent,
-            vlt=call.data.get("window_vent", False),
-            level=level,
-            extra=extra,
-        ))
+            bundle["api"].rapid_climate, **asked))
+        # An entry on the new platform sends the app's captured body and
+        # nothing more, on either of its routes. This line listed what such an
+        # entry left out as if it had gone, and a probe of `extra` that probed
+        # nothing read as a car that ignored the field.
+        ignored = getattr(bundle["api"], "rapid_ignores", frozenset)()
+        unsent = sorted({"vlt": "window_vent"}.get(k, k)
+                        for k in ignored if asked.get(k))
         _LOGGER.warning(
-            "fire_rapid temp=%s heat=%s vent=%s level=%s extra=%s → response=%s",
-            call.data["temp"], heat, vent, level, redact(extra), redact(resp),
+            "fire_rapid temp=%s heat=%s vent=%s level=%s extra=%s%s → response=%s",
+            call.data["temp"], heat, vent, level, redact(extra),
+            (" [NOT sent - this entry's body is the app's captured one: %s]"
+             % ", ".join(unsent)) if unsent else "",
+            redact(resp),
         )
         _read_back(bundle)
 

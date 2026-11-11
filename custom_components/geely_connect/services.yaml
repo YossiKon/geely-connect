@@ -9,6 +9,10 @@ fire_rapid:
     so do NOT read the response to decide whether a probe worked. Fire it,
     wait, then read the seat entities (or climateStatus drvVentSts /
     passVentSts / drvHeatSts / passHeatingSts) and see whether they moved.
+    An entry on the new Geely EM platform sends the app's own captured body
+    instead: extra and window_vent are never part of it, nor vent_seats once
+    the car has a vehicle token (x-vin). The log line names whatever was left
+    out.
   fields:
     temp:
       name: Target temperature

@@ -1396,6 +1396,49 @@ def test_fire_rapid_forwards_extra_fields_and_a_chosen_level():
     assert kw["heat_seats"] == ["11", "19"]
 
 
+def test_fire_rapid_says_what_a_new_platform_entry_left_out_of_the_body():
+    """An entry on the new platform sends the app's captured body and nothing
+    more. The log line is what an owner reads and pastes into an issue, and it
+    listed `extra` as sent: a probe that probed nothing read as a car that
+    ignored the field."""
+    m = _mod()
+    import logging
+
+    class _Lines(logging.Handler):
+        def __init__(self):
+            super().__init__(level=logging.WARNING)
+            self.seen = []
+
+        def emit(self, record):
+            self.seen.append(record.getMessage())
+
+    class _NewPlatform(_FakeApi):
+        def rapid_ignores(self):
+            return frozenset({"vent_seats", "vlt", "extra"})
+
+    def fire(api, data):
+        lines = _Lines()
+        m._LOGGER.addHandler(lines)
+        try:
+            _, run = _service(m, {"e1": {"vin": FAKE_VIN, "api": api}}, data,
+                              name="fire_rapid")
+            run()
+        finally:
+            m._LOGGER.removeHandler(lines)
+        line, = [s for s in lines.seen if s.startswith("fire_rapid ")]
+        return line
+
+    probe = {"temp": "28.5", "heat_seats": ["11"], "vent_seats": ["19"],
+             "window_vent": True, "extra": {"sw": "true"}}
+    line = fire(_NewPlatform(), probe)
+    assert "NOT sent" in line and "extra, vent_seats, window_vent" in line, line
+    # Only what was asked for and then dropped is named...
+    line = fire(_NewPlatform(), {"temp": "28.5", "heat_seats": ["11"]})
+    assert "NOT sent" not in line, line
+    # ...and an entry whose client applies every field says nothing.
+    assert "NOT sent" not in fire(_FakeApi(), probe)
+
+
 def test_fire_rapid_refuses_an_extra_that_moves_the_body_to_another_slot():
     """rapid_climate applies `extra` last, so without this check the comment
     that bizType is pinned was only a comment: bizType 4 and 6 on the same

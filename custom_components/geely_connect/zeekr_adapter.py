@@ -665,6 +665,17 @@ class ZeekrAdapter(CommandTrail):
              "ventilation": setting.get("ventilation"), "sw": setting["sw"]},
             send)
 
+    def rapid_ignores(self) -> frozenset[str]:
+        """The rapid_climate arguments this entry's route leaves out of the body.
+
+        Both routes send the app's captured body and nothing more, which the
+        fire_rapid probe has to be able to say: its log line listed `extra` as
+        sent, and a probe that probed nothing read as a car ignoring the field.
+        """
+        if self._client.enc_vin:
+            return frozenset({"vent_seats", "vlt", "extra"})
+        return frozenset({"vlt", "extra"})
+
     def fetch_capabilities(self) -> list[dict]:
         """The catalogue, in the shape capabilities.py parses.
 
