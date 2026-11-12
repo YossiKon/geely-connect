@@ -1197,12 +1197,15 @@ entities are created only for a car with a tank, so a battery-electric EX5 gets
 88 entities and a PHEV gets 101. That's a decision made once at startup from your
 account's `powerType` plus the car's own telemetry - there is no option to set.
 
-A car on the new Geely EM platform gets a few fewer. Its schedule and
-secondary-status endpoints are not mapped yet, so *Scheduled Charging* (the
+A car on the new Geely EM platform gets a few fewer. Its secondary-status
+endpoint is not mapped yet. With a vehicle token its schedules are read and
+written through the new gateway's charge service, so *Scheduled Charging* (the
 switch and its two times), *Battery Temperature Maintenance* and the two
-*Scheduled Trip* sensors are left out
-rather than built to read unknown - and with a vehicle token, so is *Parking
-Comfort*, whose command is not mapped on that route either. Without a token
+*Scheduled Trip* sensors are built; the gateway stores a new charging window
+only while the schedule is on, so a time change with it off is refused rather
+than lost. Without a token those five are left out rather than built to read
+unknown - and with a token, *Parking Comfort* is left out, its command not
+being mapped on that route. Without a token
 its switch is there, because the command goes out the old way, but it reads
 unknown: the state it shows lives in the secondary status.
 

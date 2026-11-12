@@ -261,6 +261,14 @@ def _translate_command(service_id: str, command: str,
         # through; the integration already builds the right value.
         return "RHL", command, list(parameters or [])
 
+    if service_id == "RCS":                          # charging start / stop
+        # Captured 2026-11-13: the app sends only the rcs.* flag (restart on
+        # start, terminate on stop) - the legacy `operation` entry is dropped.
+        # Goes out on the charge-manage route, not remote-control (see
+        # ZeekrAdapter._send_control).
+        return "RCS", command, [q for q in (parameters or [])
+                                if str(q.get("key", "")).startswith("rcs.")]
+
     if service_id == "RWS_2":                        # windows / sunshade
         # serviceId RWS (no _2); target passes through (window / ventilate /
         # sunshade); start = open/down, stop = close/up - mirroring the door
@@ -571,12 +579,17 @@ class ZeekrAdapter(CommandTrail):
         }
         return self._authed(self._client.control_resp, self.vin, body)
 
-    # The two secondary endpoints below are not mapped on this platform, on
-    # either route. Said here as well as by raising, so the platforms leave
-    # out the entities that live only on them and the poll stops asking -
-    # see helpers.api_serves (#88).
+    # The state block is not mapped on this platform, on either route. Said
+    # here as well as by raising, so the platforms leave out the entities that
+    # live only on it and the poll stops asking - see helpers.api_serves (#88).
     serves_state = False
-    serves_charge_server = False
+
+    @property
+    def serves_charge_server(self) -> bool:
+        """The schedules: served on the new gateway's charge-manage service
+        (capture-verified 2026-11-13) when the car has an x-vin; the
+        charge-server route without one is still unmapped."""
+        return bool(self._client.enc_vin)
 
     def can_send(self, service_id: str) -> bool:
         """Whether control() would send this serviceId rather than refuse it.
@@ -593,14 +606,74 @@ class ZeekrAdapter(CommandTrail):
         )
 
     def charge_server_get(self, biz_type: str) -> dict:
-        raise NotImplementedError(
-            "new-platform charge-server GET not mapped yet"
-        )
+        """The legacy charge-server slot read, answered from charge-manage.
 
-    def scheduled_charging_set(self, **kwargs: Any) -> dict:
+        Slots 2 / 6 (the charging schedule) come from getChargingPlan and are
+        handed back in the bizType-6 shape the switch and time entities read
+        (bcCycleActive / rbcStartTime / rbcEndTime / rbcTarget). Slot 4 (the
+        Scheduled trip) is getLatestTravelPlan, whose fields already match."""
+        if not self._client.enc_vin:
+            raise NotImplementedError(
+                "new-platform charge-server GET not mapped yet")
+        if str(biz_type) in ("2", "6"):
+            resp = self._authed(self._client.charging_plan_new)
+            plan = resp.get("data") if isinstance(resp, dict) else None
+            plan = plan if isinstance(plan, dict) else {}
+            data = {
+                "bcCycleActive": "true" if plan.get("bcCycleActive") in (True, "true", "1", 1) else "false",
+                "bcTempActive": "true" if plan.get("bcTempActive") in (True, "true", "1", 1) else "false",
+                "rbcStartTime": plan.get("startTime") or "",
+                "rbcEndTime": plan.get("endTime") or "",
+                "rbcTarget": str(plan.get("target") or "2"),
+                "timerId": plan.get("timerId"),
+            }
+            return {"code": 1000, "data": data}
+        if str(biz_type) == "4":
+            resp = self._authed(self._client.travel_plan_new)
+            data = resp.get("data") if isinstance(resp, dict) else None
+            return {"code": 1000, "data": data if isinstance(data, dict) else {}}
         raise NotImplementedError(
-            "new-platform charge-server write not mapped yet"
-        )
+            f"new-platform charge-server bizType {biz_type} not mapped yet")
+
+    def scheduled_charging_set(self, *, command: str, start_time: str = "",
+                               end_time: str = "", rbc_target: str = "2",
+                               **_: Any) -> dict:
+        """Scheduled charging on/off and window, via setChargingPlan.
+
+        The gateway stores a window only with `start` - one sent with `stop`
+        is acknowledged and dropped (verified 2026-11-13). So `stop` goes out
+        as the app sends it, without times, and a window that differs from
+        the car's while the schedule is off is refused rather than lost."""
+        if not self._client.enc_vin:
+            raise NotImplementedError(
+                "new-platform charge-server write not mapped yet")
+        if command != "start":
+            if start_time and end_time:
+                # Only a car that holds a window can tell a change from the
+                # switch's own defaults (switch.py falls back to 23:00-07:00
+                # when the read is empty) - so an empty one never blocks off.
+                held = self.charge_server_get("2")["data"]
+                window = (held["rbcStartTime"], held["rbcEndTime"])
+                if all(window) and window != (start_time, end_time):
+                    raise GeelyControlError(
+                        "unsupported",
+                        "the car only takes a new charging window while "
+                        "Scheduled Charging is on - switch it on first")
+            start_time = end_time = ""
+        return self._recorded(
+            f"scheduled_charging {command}",
+            {"start": start_time, "end": end_time, "target": rbc_target},
+            lambda: self._ok_1000(self._authed(
+                lambda: self._client.set_charging_plan_new(
+                    command=command, start_time=start_time,
+                    end_time=end_time, target=rbc_target))))
+
+    @staticmethod
+    def _ok_1000(resp: Any) -> Any:
+        """The new gateway's 000000 is the integration's 1000."""
+        if isinstance(resp, dict) and str(resp.get("code")) in ("000000", "0"):
+            return {**resp, "code": 1000}
+        return resp
 
     def rapid_climate(self, *, ac: bool, temp: str,
                       heat_seats: list[str] | None = None,
@@ -789,6 +862,14 @@ class ZeekrAdapter(CommandTrail):
                 # Which endpoint a command went out is otherwise invisible: both
                 # routes surface the same code=... string, so this is the only
                 # way to tell a new-platform send from a legacy one from a log.
+                if new_id == "RCS":
+                    _LOGGER.debug(
+                        "control %s/%s -> NEW route POST /ms-charge-manage/"
+                        "api/v1.0/charge/control (x-vin header)",
+                        service_id, command)
+                    resp = self._authed(self._client.charge_control_new,
+                                        new_cmd, new_params)
+                    return self._ok_1000(resp)
                 _LOGGER.debug(
                     "control %s/%s -> NEW route POST /ms-remote-control/"
                     "v1.0/remoteControl/control (x-vin header)",
