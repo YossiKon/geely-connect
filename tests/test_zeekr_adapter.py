@@ -1124,7 +1124,9 @@ def test_a_079001_on_charge_manage_renews_nothing_and_stops_the_reads():
         except zc.ZeekrApiError as e:
             assert str(e).startswith("code=079001"), e
         assert read.n == 1 and logins == [], "a 079001 must not renew"
-        assert a.serves_charge_server is False, "the poll must stop asking"
+        assert a.reads_charge_server is False, "the poll must stop asking"
+        assert a.serves_charge_server is True, \
+            "setup purges by this - a refusal must not remove the entities"
         # A write refused the same way keeps its code and renews nothing.
         _refusing(c, "set_charging_plan_new", refused)
         try:
@@ -1154,7 +1156,40 @@ def test_a_079001_on_charge_manage_renews_nothing_and_stops_the_reads():
                                                "endTime": "05:00"}}
         c2.charging_plan_new = plan
         assert a2.charge_server_get("6")["data"]["rbcStartTime"] == "23:00"
-        assert n["calls"] == 2 and a2.serves_charge_server is True
+        assert n["calls"] == 2 and a2.reads_charge_server is True
+    finally:
+        _restore_idaas()
+
+
+def test_a_charge_read_that_ends_in_an_auth_error_costs_one_login():
+    """A 401 or 403 that is not 079001 renews once; if that still ends in
+    GeelyAuthError the reads stop for the session, so each poll does not
+    spend another password login (#114, second review). The entities stay."""
+    _patch_idaas()
+    try:
+        a, c = _make_adapter(password="hunter2")
+        c.enc_vin = "opaque-token"
+        logins = []
+        c.login_tsp = lambda tv: logins.append(tv)
+        read = _refusing(c, "charging_plan_new", "HTTP 403: forbidden")
+        try:
+            a.charge_server_get("6")
+            assert False
+        except ad.GeelyAuthError:
+            pass
+        assert read.n == 2 and len(logins) == 1, (read.n, logins)
+        assert a.reads_charge_server is False
+        assert a.serves_charge_server is True
+        # The same when the renewal itself fails.
+        b, cb = _make_adapter(password="wrong-password")
+        cb.enc_vin = "opaque-token"
+        _refusing(cb, "charging_plan_new", "token expired")
+        try:
+            b.charge_server_get("6")
+            assert False
+        except ad.GeelyAuthError:
+            pass
+        assert b.reads_charge_server is False and b.serves_charge_server is True
     finally:
         _restore_idaas()
 

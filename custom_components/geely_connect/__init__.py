@@ -83,8 +83,9 @@ from .const import (
     LOCAL_KEY_REGIONS,
     region_config,
 )
-from .helpers import (api_can_send, api_serves, password_decrypt,
-                      vehicle_metadata, schedule_refresh, speed_is_stale)
+from .helpers import (api_can_send, api_reads_charge_server, api_serves,
+                      password_decrypt, vehicle_metadata, schedule_refresh,
+                      speed_is_stale)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -252,7 +253,7 @@ def _purge_obsolete_entities(hass: HomeAssistant, entry: ConfigEntry) -> int:
 async def _read_slot_2_now(hass: HomeAssistant, api: Any, coordinator: Any,
                            success_codes: set) -> None:
     """One read of charge-server slot 2 into the coordinator's data (#72)."""
-    if not api_serves(api, "charge_server") or not isinstance(coordinator.data, dict):
+    if not api_reads_charge_server(api) or not isinstance(coordinator.data, dict):
         return
     try:
         sc = await hass.async_add_executor_job(api.charge_server_get, "2")
@@ -936,7 +937,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     _LOGGER.error("vehicle state fetch: TLS pin check failed: %s", e)
                 except Exception as e:  # noqa: BLE001
                     _LOGGER.debug("vehicle_status_state non-fatal failure: %s", e)
-            if api_serves(api, "charge_server"):
+            if api_reads_charge_server(api):
                 try:
                     sc = await _call_with_retry(api.charge_server_get,
                                                 poll_state["charge_slot"])
@@ -956,7 +957,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             # Refresh press, not on every poll of a charging car - a plugged-in
             # E2 reports the charging code all day (#72), and that fast path
             # exists for the state block and the charging schedule, which move.
-            if (api_serves(api, "charge_server") and poll_state["read_trip"]
+            if (api_reads_charge_server(api) and poll_state["read_trip"]
                     and (forced or (cyc - 1) % _SECONDARY_EVERY == 0)):
                 try:
                     st = await _call_with_retry(api.charge_server_get, "4")

@@ -251,6 +251,15 @@ def api_serves(api: Any, endpoint: str) -> bool:
     return bool(getattr(api, f"serves_{endpoint}", True))
 
 
+def api_reads_charge_server(api: Any) -> bool:
+    """Whether the poll should read the schedules now: the api serves them,
+    and has not stopped reading them for this session (the new platform does
+    after a refusal). Kept apart from api_serves, which also decides which
+    entities exist - a refusal must not remove them (#114)."""
+    return (api_serves(api, "charge_server")
+            and bool(getattr(api, "reads_charge_server", True)))
+
+
 def api_can_send(api: Any, service_id: str) -> bool:
     """Whether a control with this serviceId would go out at all.
 

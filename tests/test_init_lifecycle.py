@@ -632,6 +632,30 @@ def test_an_api_without_the_secondary_endpoints_is_not_asked_for_them():
     assert "_scheduled_trip" not in coord.data
 
 
+def test_a_session_that_stopped_reading_the_schedules_keeps_their_entities():
+    """After a refusal the poll stops reading the schedules, but the entities
+    stay: setup purges by serves_charge_server, which a refusal leaves alone,
+    so a 079001 at startup does not take their names and areas (#114)."""
+    m = _mod()
+
+    def refused(api):
+        api.reads_charge_server = False
+    ok, hass, _, api, coord, _ = _setup(m, api_tweak=refused)
+    hass.data["geely_connect"]["e1"]["poll_state"]["force_secondary"] = True
+    asyncio.run(coord.refresh())
+    assert ok and "status" in api.calls
+    assert "charge6" not in api.calls and "charge4" not in api.calls, api.calls
+    assert "_scheduled_charging" not in coord.data
+    reg = _EntityRegistry([])
+    with _Patched(m, er=_er_module(reg, per_entry=_unserved_registry())):
+        m._purge_unserved_entities(
+            object(), types.SimpleNamespace(entry_id="e1"),
+            types.SimpleNamespace(serves_charge_server=True,
+                                  reads_charge_server=False))
+    assert not any(r.startswith(("time.", "switch.sched")) for r in reg.removed), \
+        reg.removed
+
+
 def test_a_refresh_press_is_spent_where_there_is_no_state_block_to_wait_for():
     """The flag waits for `_state` so a failed fetch does not swallow the press.
     On an api with no state block that wait never ended, and the flag also wakes
@@ -2085,6 +2109,9 @@ def test_the_slot_2_read_at_setup_leaves_the_data_alone_when_it_fails():
     served = types.SimpleNamespace(serves_charge_server=False,
                                    charge_server_get=lambda biz: 1 / 0)
     assert run(served, dict(keep)) == keep
+    stopped = types.SimpleNamespace(reads_charge_server=False,
+                                    charge_server_get=lambda biz: 1 / 0)
+    assert run(stopped, dict(keep)) == keep
     assert run(types.SimpleNamespace(charge_server_get=lambda biz: 1 / 0), None) is None
 
 

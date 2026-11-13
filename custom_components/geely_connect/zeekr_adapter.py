@@ -594,10 +594,21 @@ class ZeekrAdapter(CommandTrail):
     @property
     def serves_charge_server(self) -> bool:
         """The schedules: served on the new gateway's charge-manage service
-        (capture-verified 2026-11-13) when the car has an x-vin, until that
-        service has refused this car once - see _authed_charge. The
-        charge-server route without a token is still unmapped."""
-        return bool(self._client.enc_vin) and not self._charge_refused
+        (capture-verified 2026-11-13) when the car has an x-vin. The
+        charge-server route without a token is still unmapped.
+
+        Tied to the token alone: setup purges the schedule entities by this
+        (_purge_unserved_entities), right after a first refresh that reads
+        the schedule, and a 079001 has come and gone on the same token between
+        starts - one refusal must not take the entities' names and areas."""
+        return bool(self._client.enc_vin)
+
+    @property
+    def reads_charge_server(self) -> bool:
+        """Whether the poll still reads the schedules this session: false
+        once charge-manage has refused this car, or a read of it has ended in
+        a failed renewal - see _authed_charge."""
+        return not self._charge_refused
 
     # The scheduled trip's write has not been captured on this route, so the
     # service stops before it reads (helpers.api_serves).
@@ -635,8 +646,13 @@ class ZeekrAdapter(CommandTrail):
         The client reads 079001 as a refusal of the car, not of the token
         (zeekr_client._car_refused), and only one EX2 has answered this
         service so far. So a 079001 here renews nothing; it is raised as a
-        refusal, and serves_charge_server goes false for this session so the
-        poll stops asking. Any other auth-looking failure renews as before.
+        refusal, and reads_charge_server goes false for this session so the
+        poll stops asking. Any other auth-looking failure renews as before,
+        once: if that still ends in GeelyAuthError the same flag is set, so a
+        401 or 403 that is not 079001 costs one login, not one per read. That
+        error also comes when the renewal itself fails, which the reauth flow
+        handles; a restart or a reauth starts a new session with the flag
+        clear.
 
         The 079001 is taken out inside the call, before _authed sees it -
         caught after, the renewal would already have happened. It comes back
@@ -653,12 +669,15 @@ class ZeekrAdapter(CommandTrail):
         except _ChargeRefused as exc:
             self._note_charge_refused(exc)
             raise ZeekrApiError(f"code=079001 message={exc}") from exc
+        except GeelyAuthError as exc:
+            self._note_charge_refused(exc)
+            raise
 
     def _note_charge_refused(self, exc: Exception) -> None:
         if not self._charge_refused:
             _LOGGER.warning(
                 "The charging service refused this car (%s): its schedule "
-                "is not read again until Home Assistant restarts", exc)
+                "is not read again this session", exc)
         self._charge_refused = True
 
     def charge_server_get(self, biz_type: str) -> dict:
