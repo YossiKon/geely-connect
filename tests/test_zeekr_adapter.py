@@ -1078,30 +1078,119 @@ def test_the_schedule_write_carries_command_window_and_target():
                               "end_time": "05:00", "target": "2"})], sent
 
 
-def test_off_goes_out_without_a_window_and_a_new_window_while_off_is_refused():
-    """The gateway keeps the old window when one arrives with `stop`
-    (verified live 2026-11-13), so stop is sent as the app sends it."""
+def test_off_always_goes_out_bare_and_reads_nothing_first():
+    """The service drops a window sent with `stop` (verified live), and the
+    switch's `stop` carries only what HA last read - so it goes out as the app
+    sends it, whatever window it was handed, with no read beforehand (#114
+    review, 2 and 6: the refusal belongs to the caller)."""
     a, c, sent = _xvin_adapter()
-    c.charging_plan_new = lambda: {"code": "000000", "data": {
-        "startTime": "23:00", "endTime": "05:00", "bcCycleActive": False}}
-    # The switch turning off re-sends the held window: goes out bare.
-    a.scheduled_charging_set(command="stop", start_time="23:00", end_time="05:00")
-    assert sent[-1] == ("plan", {"command": "stop", "start_time": "",
-                                 "end_time": "", "target": "2"}), sent
-    # A time entity changing the window while off: refused, nothing sent.
-    n = len(sent)
+    c.charging_plan_new = lambda: (_ for _ in ()).throw(
+        AssertionError("stop must not read the plan first"))
+    for window in (("23:00", "05:00"), ("22:30", "05:00"), ("", "")):
+        a.scheduled_charging_set(command="stop", start_time=window[0],
+                                 end_time=window[1])
+        assert sent[-1] == ("plan", {"command": "stop", "start_time": "",
+                                     "end_time": "", "target": "2"}), sent
+    assert a.stores_window_only_with_start is True
+    b, _ = _make_adapter()
+    assert b.stores_window_only_with_start is False
+
+
+def _refusing(c, attr, text):
+    def boom(*_a, **_k):
+        boom.n += 1
+        raise zc.ZeekrApiError(text)
+    boom.n = 0
+    setattr(c, attr, boom)
+    return boom
+
+
+def test_a_079001_on_charge_manage_renews_nothing_and_stops_the_reads():
+    """079001 comes as HTTP 401, which _authed alone would take for a dead
+    session and answer with a password login - signing the phone app out on
+    every poll that reads the schedule (#114 review, 1)."""
+    _patch_idaas()
     try:
-        a.scheduled_charging_set(command="stop", start_time="22:30", end_time="05:00")
-        assert False, "a new window with stop would be silently dropped"
-    except ad.GeelyControlError:
+        a, c = _make_adapter(password="hunter2")
+        c.enc_vin = "opaque-token"
+        logins = []
+        c.login_tsp = lambda tv: logins.append(tv)
+        refused = 'HTTP 401: {"code":"079001","msg":"[SDK]not authorized"}'
+        read = _refusing(c, "charging_plan_new", refused)
+        assert a.serves_charge_server is True
+        try:
+            a.charge_server_get("6")
+            assert False, "a refused read is not a schedule"
+        except zc.ZeekrApiError as e:
+            assert str(e).startswith("code=079001"), e
+        assert read.n == 1 and logins == [], "a 079001 must not renew"
+        assert a.serves_charge_server is False, "the poll must stop asking"
+        # A write refused the same way keeps its code and renews nothing.
+        _refusing(c, "set_charging_plan_new", refused)
+        try:
+            a.scheduled_charging_set(command="start", start_time="23:00",
+                                     end_time="05:00")
+            assert False
+        except ad.GeelyControlError as e:
+            assert e.code == "079001", e.code
+        _refusing(c, "charge_control_new", refused)
+        try:
+            a.control("RCS", [{"key": "rcs.terminate", "value": "1"}], "stop")
+            assert False
+        except ad.GeelyControlError as e:
+            assert e.code == "079001", e.code
+        assert logins == []
+        # A real dead session on the same route still renews once.
+        a2, c2 = _make_adapter(password="hunter2")
+        c2.enc_vin = "opaque-token"
+        n = {"calls": 0}
+
+        def plan():
+            n["calls"] += 1
+            if n["calls"] == 1:
+                raise zc.ZeekrApiError(
+                    "code=079021 message=The account is currently logged in elsewhere")
+            return {"code": "000000", "data": {"startTime": "23:00",
+                                               "endTime": "05:00"}}
+        c2.charging_plan_new = plan
+        assert a2.charge_server_get("6")["data"]["rbcStartTime"] == "23:00"
+        assert n["calls"] == 2 and a2.serves_charge_server is True
+    finally:
+        _restore_idaas()
+
+
+def test_a_non_success_answer_is_handed_back_as_it_came():
+    """Translated into an empty schedule it would replace the good copy, and
+    the next On would write the switch's default window (#114 review, 3)."""
+    a, c, _ = _xvin_adapter()
+    bad = {"code": "037005", "msg": "execution failed", "data": None}
+    c.charging_plan_new = lambda: bad
+    c.travel_plan_new = lambda: bad
+    assert a.charge_server_get("6") is bad
+    assert a.charge_server_get("4") is bad
+
+
+def test_a_refused_schedule_write_is_a_control_error_with_its_code():
+    """As control() and rapid_climate raise it, so the trail keeps the code
+    and the switch shows a refusal rather than a traceback (#114 review, 5)."""
+    a, c, _ = _xvin_adapter()
+    _refusing(c, "set_charging_plan_new", "code=037000 message=parameter is incorrect")
+    try:
+        a.scheduled_charging_set(command="start", start_time="23:00", end_time="05:00")
+        assert False
+    except ad.GeelyControlError as e:
+        assert e.code == "037000", e.code
+
+
+def test_the_scheduled_trip_is_read_but_not_written_on_this_route():
+    """#114 review, 4: the service stops before its read, as before."""
+    a, _, _ = _xvin_adapter()
+    assert a.serves_trip_write is False
+    try:
+        a.scheduled_trip_set(command="stop")
+        assert False
+    except NotImplementedError:
         pass
-    assert len(sent) == n
-    # A car holding no window: the switch's defaults must not block off.
-    c.charging_plan_new = lambda: {"code": "000000", "data": {
-        "startTime": None, "endTime": None}}
-    a.scheduled_charging_set(command="stop", start_time="23:00", end_time="07:00")
-    a.scheduled_charging_set(command="stop")
-    assert [s[1]["command"] for s in sent[n:]] == ["stop", "stop"]
 
 
 def test_the_client_builds_the_captured_charging_bodies():

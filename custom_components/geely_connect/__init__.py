@@ -1340,6 +1340,12 @@ def _register_debug_service(hass: HomeAssistant) -> None:
             raise ServiceValidationError(
                 "this car declares its scheduled trip in the 1.0 scheme, whose "
                 "request has not been captured; nothing was sent")
+        # A platform that reads the trip but cannot write it stops here, before
+        # the read, as it did when it could do neither.
+        if not api_serves(api, "trip_write"):
+            raise ServiceValidationError(
+                "the scheduled trip is not mapped on this platform yet; "
+                "nothing was sent")
         try:
             resp = await hass.async_add_executor_job(api.charge_server_get, "4")
         except NotImplementedError as e:

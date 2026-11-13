@@ -1186,6 +1186,25 @@ def test_scheduled_trip_start_with_a_departure_sends_it_in_ha_time():
     assert (kw["ac"], kw["bw"], kw["bwl"]) == ("true", "0", "1")
 
 
+def test_scheduled_trip_stops_before_reading_where_it_cannot_be_written():
+    """A new-platform car reads its trip but has no captured write: the
+    service refuses before the read, where it used to end in an
+    AttributeError after it (#114 review, 4)."""
+    m = _mod()
+    from homeassistant.exceptions import ServiceValidationError
+    api = _FakeApi()
+    api.serves_trip_write = False
+    _, run = _service(m, {"e1": {"vin": FAKE_VIN, "api": api}},
+                      {"command": "stop"}, name="set_scheduled_trip")
+    try:
+        run()
+    except ServiceValidationError as e:
+        assert "not mapped" in str(e), e
+    else:
+        raise AssertionError("the service went on")
+    assert api.calls == [], "nothing may be read or sent"
+
+
 def test_scheduled_trip_refuses_to_invent_a_departure():
     """A car with no trip set and a call with no departure: nothing is sent,
     and the error says why. Defaults for ac/bw/bwl apply only once there IS a
