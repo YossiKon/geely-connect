@@ -243,7 +243,12 @@ everything else.
 ### 🚙 The built-in cards - zero setup
 
 The integration ships **five custom cards** and registers them by itself - no
-HACS frontend package, no resource to add, nothing to copy. Open any
+HACS frontend package, no resource to add, nothing to copy. A page that was
+already open when you set the integration up needs one hard refresh first
+(Ctrl+F5, Cmd+Shift+R in Chrome or Firefox on a Mac, or *Reset frontend
+cache* in the companion app): it reads the dashboard resources only when it
+loads
+([#115](https://github.com/YossiKon/geely-connect/issues/115)). Then open any
 dashboard, **Add card**, and search "Geely":
 
 > 🌐 **The cards speak your language.** Every label follows Home Assistant's
@@ -383,7 +388,10 @@ actually running in *your* browser, and reports the registration timeline.
 If a card sticks on a spinner or looks outdated after an update, a
 screenshot of that tile is the whole bug report. (Old cards after an update
 usually mean a cached copy: update, **restart Home Assistant**, then hard
-refresh - or *Reset frontend cache* in the companion app.)
+refresh - or *Reset frontend cache* in the companion app.) No Geely entry in
+the picker at all, not even this one, means the card script has not run in
+that page yet: the same hard refresh usually brings the entries up, and if
+it doesn't, the Home Assistant log says why.
 
 > The YAML card and view files that used to live in `cards/` and `views/`
 > are gone - the built-in cards replace them and stay current on their own.
