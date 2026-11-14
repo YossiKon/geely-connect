@@ -73,7 +73,8 @@ from .const import (
     CONF_VIN,
     DOMAIN,
 )
-from .helpers import PasswordKeyError, password_encrypt, vehicle_metadata
+from .helpers import (LEGACY_CERT_PATHS, PasswordKeyError, legacy_material_dirs,
+                      password_encrypt, vehicle_metadata)
 from .region_keys import LocalRegionKeysError, load_region_backend
 from .zeekr_regions import (
     RegionKeysError, ZeekrRegion, load_region_profile,
@@ -163,7 +164,7 @@ def _zeekr_login_password(email: str, password: str, country: str,
 class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Geely (international)."""
 
-    VERSION = 6
+    VERSION = 7
 
     def __init__(self) -> None:
         self._email: str | None = None
@@ -797,6 +798,14 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
                 return self.async_abort(reason="reauth_account_mismatch")
             new_data = dict(entry.data)
+            # Keep the original validated location before replacing the VIN
+            # and dropping legacy credentials. A renamed car cannot recover
+            # its old directory from the new VIN during eventual removal.
+            directories = await self.hass.async_add_executor_job(
+                legacy_material_dirs, self.hass, entry.data)
+            if directories:
+                new_data[LEGACY_CERT_PATHS] = [
+                    os.path.join(directory, "cert.pem") for directory in directories]
             new_data[CONF_PLATFORM] = PLATFORM_ZEEKR
             new_data[CONF_ZEEKR_REGION] = self._zeekr_region
             new_data[CONF_ZEEKR_ACCESS_TOKEN] = tokens[0]

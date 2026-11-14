@@ -1,4 +1,4 @@
-"""Config-entry migration, v1 through v6.
+"""Config-entry migration, v1 through v7.
 
 Every existing install runs this exactly once on upgrade, and a mistake here
 is not recoverable by the user - it either strands the entry on an old version
@@ -66,23 +66,25 @@ def _migrate(entry):
     m = _mod()
     hass = _Hass()
     calls = []
-    orig = (m._reenable_integration_disabled_entities, m._purge_raw_exposure_entities)
+    orig = (m._reenable_integration_disabled_entities, m._purge_raw_exposure_entities,
+            m._purge_obsolete_entities)
     m._reenable_integration_disabled_entities = lambda h, e: calls.append("reenable")
-    m._purge_raw_exposure_entities = lambda h, e: calls.append("purge")
+    m._purge_raw_exposure_entities = lambda h, e: calls.append("retain_raw")
+    m._purge_obsolete_entities = lambda h, e: calls.append("rename")
     try:
         ok = asyncio.run(m.async_migrate_entry(hass, entry))
     finally:
         (m._reenable_integration_disabled_entities,
-         m._purge_raw_exposure_entities) = orig
+         m._purge_raw_exposure_entities, m._purge_obsolete_entities) = orig
     return ok, hass, calls
 
 
 def test_every_old_version_reaches_the_current_one():
-    for v in (1, 2, 3, 4, 5):
+    for v in (1, 2, 3, 4, 5, 6):
         entry = _Entry(v)
         ok, hass, _ = _migrate(entry)
         assert ok is True, f"v{v} migration returned {ok}"
-        assert entry.version == 6, f"v{v} ended on v{entry.version}"
+        assert entry.version == 7, f"v{v} ended on v{entry.version}"
 
 
 def test_a_v1_entry_gains_an_install_fingerprint():
@@ -120,7 +122,7 @@ def test_migration_preserves_everything_already_in_the_entry():
 
 
 def test_an_already_current_entry_is_left_completely_alone():
-    entry = _Entry(6, {"vin": FAKE_VIN})
+    entry = _Entry(7, {"vin": FAKE_VIN})
     ok, hass, calls = _migrate(entry)
     assert ok is True
     assert hass.updated is None, "rewrote an entry that needed no migration"
@@ -129,17 +131,18 @@ def test_an_already_current_entry_is_left_completely_alone():
 
 def test_a_future_version_is_not_downgraded():
     """If a user rolls back the integration, do not rewrite their entry."""
-    entry = _Entry(7, {"vin": FAKE_VIN})
+    entry = _Entry(8, {"vin": FAKE_VIN})
     ok, hass, _ = _migrate(entry)
-    assert ok is True and entry.version == 7
+    assert ok is True and entry.version == 8
     assert hass.updated is None
 
 
-def test_the_registry_cleanup_runs_for_every_upgrade_path():
-    for v in (1, 2, 3, 4, 5):
+def test_registry_renames_run_for_every_upgrade_without_repeating_old_reenable():
+    for v in (1, 2, 3, 4, 5, 6):
         _, _, calls = _migrate(_Entry(v))
-        assert "reenable" in calls, f"v{v} skipped re-enabling entities"
-        assert "purge" in calls, f"v{v} skipped the raw-exposure purge"
+        assert "rename" in calls, f"v{v} skipped identity-preserving renames"
+        assert ("reenable" in calls) == (v < 6)
+        assert ("retain_raw" in calls) == (v < 6)
 
 
 def test_migration_is_idempotent():
@@ -149,7 +152,7 @@ def test_migration_is_idempotent():
     first = dict(entry.data)
     _migrate(entry)
     assert entry.data == first
-    assert entry.version == 6
+    assert entry.version == 7
 
 
 def test_the_flow_version_and_the_migration_target_agree():
