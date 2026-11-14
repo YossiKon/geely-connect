@@ -104,7 +104,7 @@ _MEASUREMENT_KEYS = {
     # Resettable by the driver. Measurement rather than a total: without a
     # last_reset HA would fold the reset into the sum as a negative delta, and
     # total_mileage below already provides the cumulative distance statistic.
-    "trip_meter",
+    "trip_meter", "trip_meter_2", "discharge_current", "discharge_voltage",
     # Hybrid-only. Fuel level and both consumption averages are instantaneous
     # readings; the engine ones are state, not counters.
     "fuel_level", "fuel_level_pct", "fuel_consumption", "fuel_consumption_trip",
@@ -843,7 +843,11 @@ class GeelyLastUpdatedSensor(CoordinatorEntity, SensorEntity):
             identifiers={(DOMAIN, vin)}, manufacturer="Geely", name=device_name)
 
     def _stamp(self) -> None:
-        if self.coordinator.last_update_success:
+        # A normal coordinator return can be the failure-grace snapshot.
+        # Only the status GET records successful contact, never a listener.
+        if hasattr(self.coordinator, "geely_last_successful_contact"):
+            self._ts = self.coordinator.geely_last_successful_contact
+        elif self.coordinator.last_update_success:
             self._ts = _dt_util.utcnow()
 
     async def async_added_to_hass(self) -> None:

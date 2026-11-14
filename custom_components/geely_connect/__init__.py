@@ -727,9 +727,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         assert last_exc is not None
         raise last_exc
 
-    # Closure state: tolerate up to N consecutive failures before marking
-    # entities unavailable. With SCAN_INTERVAL_SECONDS=90 and N=2 we need
-    # ~3min of sustained failure before HA reports unavailable.
+    # Retain general entity availability for two failed polls. Contact outcome
+    # and age are independent of this grace, including at Eco's long interval.
     _FAILURE_TOLERANCE = 2
     fail_state = {"consecutive": 0}
     # Efficient-polling state: cycle counter, idle streak, last-change signature.
@@ -770,6 +769,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             pass
 
     async def _async_update():
+        coordinator.geely_status_success = False
         poll_state["cycle"] += 1
         cyc = poll_state["cycle"]
         prev = coordinator.data if coordinator is not None else None
@@ -796,18 +796,34 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # so no car loses coverage by this change. It also carries the very
         # first cycle, when there is no previous snapshot to compare.
         timer_due = (not have_proof) and ((cyc - 1) % _POSITION_EVERY == 0)
-        # One press, one wake. The press itself can stay pending - it waits for
-        # the state block, so a failed fetch does not swallow it - but each poll
-        # it waits through used to wake the car again. A car whose state block
-        # never arrived was woken on every poll until a restart (#88), and each
-        # wake spends the 12 V battery a parked car lives on (#95).
+        # A pending Refresh press must not refill the wake budget on every
+        # poll while it waits for the state block (#88). Failed acquisitions
+        # may retry within the separate bounded budget below.
         force_wake = forced and not poll_state.get("force_woke", False)
-        woke = was_driving or force_wake or moved or timer_due
+        # Retry an unsatisfied acquisition at most three times for this
+        # parked odometer, after 2 then 4 poll cycles. New movement or an
+        # explicit refresh gets a fresh budget; stale driving flags do not.
+        if (prev_odo != poll_state.get("position_target") or force_wake
+                or (prev_odo is None and timer_due)):
+            poll_state.update(position_target=prev_odo, position_tries=0,
+                              position_next=0)
+        wanted = (was_driving or force_wake or moved or timer_due
+                  or poll_state.get("position_pending", False))
+        woke = (wanted and poll_state.get("position_tries", 0) < 3
+                and cyc >= poll_state.get("position_next", 0))
+        position_accepted = False
         if force_wake:
             poll_state["force_woke"] = True
         if woke:
+            tries = poll_state.get("position_tries", 0) + 1
+            poll_state.update(position_tries=tries, position_next=cyc + 2 ** tries,
+                              position_pending=True)
             try:
-                await _call_with_retry(api.request_position_refresh)
+                position_resp = await hass.async_add_executor_job(api.request_position_refresh)
+                geely_api._check_position_resp(
+                    position_resp,
+                    new_platform=d.get(CONF_PLATFORM, DEFAULT_PLATFORM) == PLATFORM_ZEEKR)
+                position_accepted = True
             except GeelyAuthError as e:
                 raise ConfigEntryAuthFailed(str(e)) from e
             except GeelyTLSPinError as e:
@@ -841,6 +857,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if not isinstance(data, dict):
             _LOGGER.debug("vehicle_status returned non-dict data: top-level=%r", redact(resp))
             data = {}
+        coordinator.geely_status_success = True
+        coordinator.geely_last_successful_contact = dt_util.utcnow()
 
         # The zeekr adapter renews the old-platform HF JWT silently from the
         # stored password; persist the refreshed token + expiry so the next
@@ -1010,10 +1028,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Anchor the suppressor to the reading this cycle's fix belongs to, and
         # only once the fresh payload is in hand - reading it from `prev` would
         # anchor to the cycle before and re-fire for one extra wake.
-        if woke:
+        if position_accepted:
             odo_now = _odometer(data)
             if odo_now is not None:
                 poll_state["fix_odo"] = odo_now
+            poll_state.update(position_pending=False, position_tries=0,
+                              position_next=0)
 
         _follow_interval(data)
         return data
@@ -1027,6 +1047,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # None means "never schedule an update yourself" - manual mode.
         update_interval=None if _MANUAL else timedelta(seconds=profile["base"]),
     )
+    coordinator.geely_status_success = False
+    coordinator.geely_last_successful_contact = None
     await coordinator.async_config_entry_first_refresh()
 
     # Fetch the per-vehicle capability catalog once at setup. Used by
