@@ -452,6 +452,10 @@ class _ConfigEntries:
         self.forwarded = None
         self.reloaded = []
         self.unload_ok = True
+        self.entries = []
+
+    def async_entries(self, domain=None):
+        return list(self.entries)
 
     async def async_forward_entry_setups(self, entry, platforms):
         self.forwarded = list(platforms)
@@ -1782,6 +1786,39 @@ def test_removal_finds_the_key_directory_of_an_entry_that_moved_platforms():
                 asyncio.run(m.async_remove_entry(hass, types.SimpleNamespace(
                     entry_id="e2", data={"vin": vin})))
         assert os.listdir(os.path.join(root, ".storage", "geely_connect")) == []
+
+
+def test_removal_keeps_a_key_directory_another_entry_still_uses():
+    """Two entries on one car - which a re-authentication in an earlier
+    version could leave behind - share the VIN-named directory. Removing the
+    one that moved platforms used to delete it under its sibling, which then
+    could not reach the car until it was set up again."""
+    m = _mod()
+    with tempfile.TemporaryDirectory() as root:
+        hass = _Hass()
+        hass.config = types.SimpleNamespace(
+            path=lambda *p: os.path.join(root, *p))
+        vin_dir = os.path.join(root, ".storage", "geely_connect", FAKE_VIN)
+        os.makedirs(vin_dir)
+        open(os.path.join(vin_dir, "key.pem"), "w").write("KEY")
+        moved = types.SimpleNamespace(
+            entry_id="e1", data={"vin": FAKE_VIN, "platform": "zeekr"})
+        unrelated = types.SimpleNamespace(entry_id="e9", data={"vin": "OTHERVIN01"})
+        # The sibling by its VIN, and by its certificate path alone.
+        for sibling in (
+                types.SimpleNamespace(entry_id="e2", data={"vin": FAKE_VIN}),
+                types.SimpleNamespace(entry_id="e3", data={
+                    "vin": "OTHERVIN02",
+                    "cert_path": os.path.join(vin_dir, "cert.pem")})):
+            hass.config_entries.entries = [moved, unrelated, sibling]
+            with _Patched(m, ir=_ir_module()):
+                asyncio.run(m.async_remove_entry(hass, moved))
+            assert os.path.exists(os.path.join(vin_dir, "key.pem")), sibling.entry_id
+        # With only unrelated entries left, the directory goes as before.
+        hass.config_entries.entries = [moved, unrelated]
+        with _Patched(m, ir=_ir_module()):
+            asyncio.run(m.async_remove_entry(hass, moved))
+        assert not os.path.exists(vin_dir)
 
 
 def test_a_probe_polls_afterwards_so_its_effect_becomes_visible():

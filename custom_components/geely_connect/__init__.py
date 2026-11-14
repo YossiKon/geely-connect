@@ -1453,6 +1453,20 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
         _LOGGER.warning("refusing to remove %s: outside the integration's storage",
                         geely_api.mask_path(vin_dir))
         return
+    # Never another entry's material. Two entries on one car - which a
+    # re-authentication in an earlier version could leave behind - share the
+    # VIN-named directory, and removing one must not cut the other off.
+    target = os.path.abspath(vin_dir)
+    for other in hass.config_entries.async_entries(DOMAIN):
+        if other.entry_id == entry.entry_id:
+            continue
+        other_cert = other.data.get(CONF_CERT_PATH)
+        if (other.data.get(CONF_VIN) == os.path.basename(target)
+                or (other_cert
+                    and os.path.abspath(os.path.dirname(other_cert)) == target)):
+            _LOGGER.info("keeping %s: another entry still uses it",
+                         geely_api.mask_path(vin_dir))
+            return
     try:
         await hass.async_add_executor_job(
             functools.partial(shutil.rmtree, vin_dir, ignore_errors=True)
