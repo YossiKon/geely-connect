@@ -57,6 +57,9 @@ window.mkHass = (opts) => {
     put(`sensor.${P}_interior_temperature`, "21.4", { unit_of_measurement: "°C" });
   }
   put(`lock.${P}_doors`, "locked");
+  put(`button.${P}_refresh_data`, "unknown");
+  put(`button.${P}_find_car`, "unknown");
+  put(`button.${P}_unlock_trunk`, "unknown");
   put(`binary_sensor.${P}_door_driver`, opts.driverDoor || "off");
   put(`binary_sensor.${P}_door_passenger`, "off");
   put(`binary_sensor.${P}_door_rear_left`, "off");
@@ -122,6 +125,11 @@ window.mkHass = (opts) => {
   put(`sensor.${P}_engine_state`, opts.engine || "Off");
   if (opts.parkBrake !== undefined) {
     put(`binary_sensor.${P}_park_brake_engaged`, opts.parkBrake);
+  }
+  // Real Geely entities have registry ownership. Command tests must model
+  // that ownership instead of relying on a same-name, unregistered target.
+  for (const id of Object.keys(S)) {
+    if (!E[id]) E[id] = { platform: "geely_connect", device_id: "d" };
   }
   const served = [];
   return { states: S, entities: E, devices: { d: { name: "Geely EX5" } },
@@ -668,6 +676,7 @@ def test_a_renamed_trip_average_is_not_mistaken_for_the_live_speed():
         // The owner renamed the live speed sensor away; the trip average, which
         // still reads 47 km/h from this morning's drive, is all that is left.
         delete hass.states["sensor.car_speed"];
+        delete hass.entities["sensor.car_speed"];
         hass.states["sensor.car_average_speed"] =
           { entity_id: "sensor.car_average_speed", state: "47", attributes: {} };
         hass.entities["sensor.car_average_speed"] =
@@ -974,6 +983,7 @@ def test_a_renamed_entity_on_the_same_car_still_resolves_beside_a_second_car():
         const hass = window.mkHass({{}});
         {_second_car_with_a_tank()}
         delete hass.states["sensor.car_speed"];
+        delete hass.entities["sensor.car_speed"];
         hass.states["sensor.my_e2_speed"] =
           {{ entity_id: "sensor.my_e2_speed", state: "0", attributes: {{}} }};
         hass.entities["sensor.my_e2_speed"] = {{ platform: "geely_connect", device_id: "d" }};

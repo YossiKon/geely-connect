@@ -58,6 +58,16 @@
     "charging", "climate", "battery", "trunk", "doors", "speed", "hood",
   ].sort((a, b) => b.length - a.length);
 
+  // Registry migrations preserve these historical entity IDs and their
+  // history. Resolve their finite old spellings on the selected device.
+  const LEGACY_SUFFIXES = {
+    sensor: { odometer: "total_mileage" },
+    binary_sensor: {
+      driver_door_open: "door_driver", passenger_door_open: "door_passenger",
+      rear_left_door_open: "door_rear_left", rear_right_door_open: "door_rear_right",
+    },
+  };
+
   /* Markets that drive on the left put the driver's door on the RIGHT of a
    * top-down drawing. The car's own door sensors are role-named (driver /
    * passenger), so the top view must know which side the role sits on. */
@@ -1395,14 +1405,39 @@
       this._armed = null;          // suffix of the armed destructive action
       this._armedTimer = null;
       this._sig = "";
+      this._generation = 0;
+      this._detached = false;
+      this._inFlight = false;
+    }
+
+    connectedCallback() {
+      this._detached = false;
+      if (this._hass) this._safeRender();
+    }
+
+    _cancelDeferred() {
+      this._generation += 1;
+      clearTimeout(this._tempTimer);
+      this._tempTimer = null;
+      this._pendingTemp = null;
+      clearTimeout(this._holdTimer);
+      this._holdUntil = 0;
+      clearTimeout(this._armedTimer);
+      this._armed = null;
+      if (this._cancelRetry) this._cancelRetry();
+      // A service request already sent cannot be cancelled here. Its own
+      // settlement releases _inFlight, even if this card is reattached first.
     }
 
     disconnectedCallback() {
-      // A pending arm-timeout must not fire a render on a removed card.
-      clearTimeout(this._armedTimer);
-      this._armed = null;
+      this._detached = true;
+      this._cancelDeferred();
       // A charging countdown must not keep re-rendering a removed card.
       this._ensureMinuteTick(false);
+      this._closeDialogs();
+    }
+
+    _closeDialogs() {
       // The expand dialog lives in document.body, so it will not be removed
       // with the card's own DOM - take it with us.
       if (this._expandDialog) {
@@ -1410,6 +1445,11 @@
         this._expandDialog.remove();
         this._expandDialog = null;
         this._expandCard = null;
+      }
+      if (this._windowsDialog) {
+        this._windowsDialog.close();
+        this._windowsDialog.remove();
+        this._windowsDialog = null;
       }
     }
 
@@ -1426,7 +1466,11 @@
     }
 
     setConfig(config) {
+      this._cancelDeferred();
+      this._closeDialogs();
       this._config = config || {};
+      this._boundDevice = null;
+      this._mapFor = null;
       // YAML hands over a bare number for `prefix: 2024`; _title() and the
       // entity ids need a string.
       this._prefix = this._config.prefix ? String(this._config.prefix) : null;
@@ -1439,6 +1483,7 @@
 
     set hass(hass) {
       this._hass = hass;
+      this._mapFor = null;
       // An open pop-up is a full card of its own and draws entities this one
       // never watches - seats, covers, most switches - so it is fed every update,
       // before the check below can skip this card's own render. Fed only on a
@@ -1471,6 +1516,10 @@
      * forever - fail visibly instead. */
     _safeRender() {
       try {
+        if (this._hass && this._prefix && !this._vehicleDevice()) {
+          this._missing();
+          return;
+        }
         this._render();
         this._wirePhoto();
         this._wireExpand();
@@ -1526,30 +1575,36 @@
      * is not always a rename: a battery-only car has no fuel or combined-range
      * sensors at all, and a map over every Geely entity in the registry would
      * hand its card the hybrid's next to it - a fuel bar and a "combined
-     * range" the car cannot have (#102). Only when no registered entity carries
-     * the prefix (every id renamed) is the whole platform consulted. */
-    _eid(domain, suffix) {
-      const strict = `${domain}.${this._prefix}_${suffix}`;
-      if (this._hass.states[strict]) return strict;
-      if (this._mapFor !== this._hass.entities || this._mapPrefix !== this._prefix) {
-        this._mapFor = this._hass.entities;
+     * range" the car cannot have (#102). If the prefix no longer identifies
+     * exactly one device, no cross-device fallback is safe. */
+    _vehicleDevice() {
+      const ents = (this._hass && this._hass.entities) || {};
+      if (this._mapFor !== ents || this._mapPrefix !== this._prefix) {
+        this._mapFor = ents;
         this._mapPrefix = this._prefix;
         this._map = {};
-        const ents = this._hass.entities || {};
         const head = `${this._prefix}_`;
-        let device = (ents[`sensor.${head}battery`] || {}).device_id;
-        if (!device) {
-          for (const id in ents) {
-            if (ents[id].platform !== "geely_connect") continue;
-            if ((id.split(".")[1] || "").startsWith(head) && ents[id].device_id) {
-              device = ents[id].device_id;
-              break;
-            }
+        const devices = new Set();
+        for (const id in ents) {
+          if (ents[id].platform !== "geely_connect" || !ents[id].device_id) continue;
+          const object = id.split(".")[1] || "";
+          // An exact known suffix avoids prefix "car" matching "car_two".
+          const domain = id.split(".")[0];
+          const suffix = [...SUFFIXES, ...Object.keys(LEGACY_SUFFIXES[domain] || {})]
+            .find((s) => object === head + s);
+          if (suffix && object === head + suffix) {
+            devices.add(ents[id].device_id);
           }
         }
+        const device = devices.size === 1 ? devices.values().next().value : null;
+        // Keep the initial device identity until explicit reconfiguration.
+        // A registry rename must not silently replace the selected vehicle.
+        if (!this._boundDevice && device) this._boundDevice = device;
+        this._device = device === this._boundDevice ? device : null;
+        if (!this._device) return null;
         for (const id in ents) {
           if (ents[id].platform !== "geely_connect") continue;
-          if (device && ents[id].device_id !== device) continue;
+          if (ents[id].device_id !== this._device) continue;
           const [dom, object] = id.split(".");
           for (const s of SUFFIXES) {
             if (object === s || object.endsWith("_" + s)) {
@@ -1559,8 +1614,36 @@
             }
           }
         }
+        // Current names take precedence when an owner has both identities.
+        for (const id in ents) {
+          const entry = ents[id];
+          if (entry.platform !== "geely_connect" || entry.device_id !== this._device) continue;
+          const [domain, object] = id.split(".");
+          for (const [old, current] of Object.entries(LEGACY_SUFFIXES[domain] || {})) {
+            const key = `${domain}.${current}`;
+            if ((object === old || object.endsWith("_" + old)) && !(key in this._map)) {
+              this._map[key] = id;
+            }
+          }
+        }
       }
-      return this._map[`${domain}.${suffix}`] || strict;
+      return this._device;
+    }
+
+    _eid(domain, suffix) {
+      if (!this._vehicleDevice()) return null;
+      const strict = `${domain}.${this._prefix}_${suffix}`;
+      const entry = (this._hass.entities || {})[strict];
+      if (this._hass.states[strict] && (!entry ||
+          (entry.platform === "geely_connect" && entry.device_id === this._device))) return strict;
+      return this._map[`${domain}.${suffix}`] || (!entry ? strict : null);
+    }
+
+    _commandEid(domain, suffix) {
+      const entity = this._eid(domain, suffix);
+      const entry = ((this._hass && this._hass.entities) || {})[entity];
+      return entity && this._hass.states[entity] && entry &&
+        entry.platform === "geely_connect" && entry.device_id === this._device ? entity : null;
     }
 
     _st(entity) {
@@ -1595,7 +1678,7 @@
           }
           return st.state;
         })
-        .join("|") + `|${this._armed || ""}|${this._pendingTemp}`
+        .join("|") + `|${this._vehicleDevice() || ""}|${this._armed || ""}|${this._pendingTemp}`
         + `|${this._waiting() ? "wait" : ""}|${this._lang(hass)}`;
     }
 
@@ -1620,7 +1703,7 @@
     }
 
     _waiting() {
-      return this._holdUntil != null && Date.now() < this._holdUntil;
+      return this._inFlight || (this._holdUntil != null && Date.now() < this._holdUntil);
     }
 
     /* Does this rejection mean "the car is still busy" rather than "no"? */
@@ -1630,14 +1713,24 @@
     }
 
     _call(domain, service, entitySuffix, data = {}) {
+      this._mapFor = null;
+      const device = this._vehicleDevice();
+      const entity = this._commandEid(domain, entitySuffix);
+      const generation = this._generation;
       // notifyOnError false: Home Assistant would otherwise raise its own
       // "Failed to perform the action" toast before we get a chance to see
       // whether the car simply wanted another moment. We surface the failures
       // that matter ourselves, in _send.
-      return this._send(() => this._hass.callService(
-        domain, service,
-        { entity_id: this._eid(domain, entitySuffix), ...data },
-        undefined, false));
+      return this._send(() => {
+        // Re-evaluate on a busy retry as well: never retarget a queued command
+        // after registry/config changes, or act on newly reported motion.
+        this._mapFor = null;
+        if (!device || !entity || this._detached || generation !== this._generation ||
+            this._vehicleDevice() !== device || this._commandEid(domain, entitySuffix) !== entity ||
+            (!(domain === "button" && entitySuffix === "refresh_data") && this._isDriving())) return false;
+        return this._hass.callService(domain, service,
+          { ...data, entity_id: entity }, undefined, false);
+      });
     }
 
     /* Write the stepper's number without rebuilding the card. */
@@ -1691,8 +1784,8 @@
      *
      * There is no way to know when the car has finished: the gateway
      * acknowledges receipt, not execution, and nothing in the payload reports
-     * a command completing. So this is a timer, not a status - held for
-     * `cooldown` after the call resolves, with the controls visibly waiting.
+     * a command completing. The request gate lasts until promise settlement;
+     * the additional `cooldown` timer is not physical completion evidence.
      *
      * A command the car refused *because it was busy* is retried once, after
      * twice the wait. That is not the double-fire this project reverted in
@@ -1700,43 +1793,69 @@
      * running, whereas this one never ran at all, and a retry is the only way
      * it happens.
      */
-    _send(fire, retried = false) {
-      if (this._waiting()) return Promise.resolve();
+    _send(fire) {
+      if (this._detached || this._waiting()) return Promise.resolve(false);
       const hold = this._cooldownMs();
+      const generation = this._generation;
+      const active = () => !this._detached && generation === this._generation;
       const release = () => {
+        this._inFlight = false;
+        if (!active()) {
+          // Reconnect/reconfiguration rendered the still-pending gate. The
+          // old request must release that DOM too, without an obsolete timer.
+          if (!this._detached) this._applyGate();
+          return;
+        }
         this._holdUntil = Date.now() + hold;
         clearTimeout(this._holdTimer);
-        this._holdTimer = setTimeout(() => {
+        if (hold) this._holdTimer = setTimeout(() => {
           this._holdUntil = 0;
           this._applyGate();
         }, hold);
+        this._applyGate();
       };
-      this._holdUntil = Date.now() + hold;
+      this._inFlight = true;
       this._applyGate();
-      // Fired now rather than on a microtask: a command should leave the moment
-      // the button is pressed, and only its *result* is handled asynchronously.
-      let sent;
-      try {
-        sent = fire();
-      } catch (err) {
+      const failed = (err, retried) => {
+        if (!retried && active() && this._isBusyError(err)) {
+          // Keep ownership while waiting to retry. Teardown cancels the timer
+          // AND settles this promise, rather than leaving a removed card alive.
+          return new Promise((resolve) => {
+            const timer = setTimeout(() => {
+              this._cancelRetry = null;
+              resolve(attempt(true));
+            }, hold * 2);
+            this._cancelRetry = () => {
+              clearTimeout(timer);
+              this._cancelRetry = null;
+              release();
+              resolve(false);
+            };
+          });
+        }
         release();
-        throw err;
-      }
-      return Promise.resolve(sent)
-        .then(release, (err) => {
+        if (active()) this._toast(`${(err && (err.message || err.error)) || "command failed"}`);
+        return Promise.reject(err);
+      };
+      const attempt = (retried) => {
+        let sent;
+        try { sent = fire(); } catch (err) { return failed(err, retried); }
+        // Synchronous adapters have already completed; cooldown: 0 still
+        // allows consecutive calls. Real HA promises keep _inFlight held.
+        if (!sent || typeof sent.then !== "function") {
           release();
-          if (!retried && this._isBusyError(err)) {
-            // Retried quietly: the car was busy, the command never ran, and a
-            // toast for something that is about to work on its own is noise.
-            this._holdUntil = 0;
-            return new Promise((r) => setTimeout(r, hold * 2))
-              .then(() => this._send(fire, true));
-          }
-          // Anything else is the car saying no, or saying no twice. Hiding that
-          // would leave the owner believing a command worked.
-          this._toast(`${(err && (err.message || err.error)) || "command failed"}`);
-          throw err;
-        });
+          return Promise.resolve(sent);
+        }
+        return Promise.resolve(sent).then((value) => {
+          release();
+          return value;
+        }, (err) => failed(err, retried));
+      };
+      const result = attempt(false);
+      // Click handlers are fire-and-forget. Observe their rejection while
+      // preserving the rejected result for callers such as the stepper.
+      result.catch(() => {});
+      return result;
     }
 
     /* Destructive actions arm on the first tap and fire on the second. */
@@ -1828,7 +1947,8 @@
       // reaches this method another way would still fire a command the car is
       // going to refuse. Refresh is a read, and live data is exactly what is
       // wanted mid-drive, so it stays.
-      if (key !== "refresh" && this._isDriving()) return;
+      if (this._detached || this._waiting() || !this._vehicleDevice() ||
+          (key !== "refresh" && this._isDriving())) return;
       switch (key) {
         case "lock": this._call("lock", "lock", "doors"); break;
         case "unlock": this._guarded("unlock", () => this._call("lock", "unlock", "doors")); break;
@@ -1858,9 +1978,21 @@
           // re-rendering the card, so a run of taps does not make it jump.
           this._showPendingTemp();
           clearTimeout(this._tempTimer);
+          const entity = this._eid("climate", "climate");
+          const device = this._vehicleDevice();
+          const generation = this._generation;
           this._tempTimer = setTimeout(() => {
+            this._tempTimer = null;
             const target = this._pendingTemp;
             if (target == null) return;
+            this._mapFor = null;
+            if (this._detached || generation !== this._generation || this._isDriving() ||
+                this._vehicleDevice() !== device || this._eid("climate", "climate") !== entity ||
+                !this._hass.states[entity] || this._waiting()) {
+              this._pendingTemp = null;
+              this._showPendingTemp();
+              return;
+            }
             // Held, NOT cleared on firing. Clearing it here made the display
             // fall back to the entity's old target for as long as the round
             // trip took - so the number the user had just dialled in visibly
@@ -1868,7 +2000,9 @@
             // entity catches up, or if the command fails.
             this._call("climate", "set_temperature", "climate",
                        { temperature: target })
+              .then((sent) => { if (sent === false) throw new Error("cancelled"); })
               .catch(() => {
+                if (generation !== this._generation) return;
                 this._pendingTemp = null;
                 this._showPendingTemp();
               });
@@ -1984,7 +2118,7 @@
      */
     _applyGate() {
       const driving = this._isDriving();
-      const waiting = this._waiting();
+      const waiting = this._detached || !this._vehicleDevice() || this._waiting();
       this.shadowRoot.querySelectorAll("[data-act]").forEach((el) => {
         const off = waiting || (driving && el.dataset.act !== "refresh");
         el.toggleAttribute("disabled", off);
@@ -2381,13 +2515,15 @@
         _ensureExpandBackdropStyle();
         const card = document.createElement("geely-card");
         try {
-          card.setConfig({ ...(this._config || {}) });
+          card.setConfig({ ...(this._config || {}), prefix: this._prefix });
+          card._boundDevice = this._boundDevice;
         } catch (err) {
           console.warn("geely-card: could not build the expanded card:", err);
           return;
         }
         // Click the backdrop to dismiss. Escape is native to <dialog>.
         dlg.addEventListener("click", (ev) => { if (ev.target === dlg) dlg.close(); });
+        dlg.addEventListener("close", () => card._cancelDeferred());
         dlg.appendChild(card);
         document.body.appendChild(dlg);
         this._expandDialog = dlg;
@@ -2402,7 +2538,9 @@
      * reason as _openFullCard. Its buttons route through _onAction, which is
      * already blocked while driving, so this only ever opens when parked. */
     _openWindowsMenu() {
+      if (this._windowsDialog) this._windowsDialog.close();
       const dlg = document.createElement("dialog");
+      this._windowsDialog = dlg;
       dlg.style.cssText = [
         "position:fixed", "inset:0", "margin:auto", "border:none",
         "padding:0", "background:transparent", "color:inherit",
@@ -2429,7 +2567,10 @@
         ? this.shadowRoot.querySelector("style").textContent : "";
       dlg.append(style, panel);
       dlg.addEventListener("click", (ev) => { if (ev.target === dlg) dlg.close(); });
-      dlg.addEventListener("close", () => dlg.remove());
+      dlg.addEventListener("close", () => {
+        dlg.remove();
+        if (this._windowsDialog === dlg) this._windowsDialog = null;
+      });
       document.body.appendChild(dlg);
       dlg.showModal();
     }
@@ -2626,8 +2767,9 @@
     }
 
     _missing() {
+      const requested = this._config.name || this._prefix;
       this.shadowRoot.innerHTML = `<style>${BASE_CSS}</style>
-        <div class="shell"><p class="micro">${esc(this._t("status.no_vehicle_title", "Geely Connect"))}</p>
+        <div class="shell"><p class="micro title">${esc(this._t("status.no_vehicle_title", "Geely Connect"))}${requested ? ` · ${esc(requested)}` : ""}</p>
         <p style="margin-top:8px;font-size:13px">
           ${this._t("status.no_vehicle_body",
             "No Geely vehicle found. Set <code>prefix:</code> to your entity slug, "
