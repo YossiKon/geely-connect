@@ -37,7 +37,8 @@ from typing import Any
 
 from .api import CommandTrail, GeelyAuthError, GeelyControlError
 from .zeekr_client import (
-    ZeekrApiError, ZeekrAuthError, ZeekrClient, ZeekrIdaas, vehicle_vin,
+    ZeekrApiError, ZeekrAuthError, ZeekrClient, ZeekrIdaas, _car_refused,
+    vehicle_vin,
 )
 
 from .zeekr_regions import ZeekrRegion
@@ -61,6 +62,11 @@ _AUTH_HINTS = (
 # and a refusal inside a 200 "code=401 ...", and the body an error quotes
 # comes as a Python repr, 'code': '401'.
 _AUTH_STATUS = re.compile(r"\bhttp\s+40[13]\b|\bcode\W{0,4}40[13]\b")
+
+
+class _ChargeRefused(Exception):
+    """A 079001 from the charge-manage service, carried past _authed so it is
+    not mistaken for a dead session (see ZeekrAdapter._authed_charge)."""
 
 
 def _looks_authy(text: str) -> bool:
@@ -261,6 +267,14 @@ def _translate_command(service_id: str, command: str,
         # through; the integration already builds the right value.
         return "RHL", command, list(parameters or [])
 
+    if service_id == "RCS":                          # charging start / stop
+        # Captured 2026-11-13: the app sends only the rcs.* flag (restart on
+        # start, terminate on stop) - the legacy `operation` entry is dropped.
+        # Goes out on the charge-manage route, not remote-control (see
+        # ZeekrAdapter._send_control).
+        return "RCS", command, [q for q in (parameters or [])
+                                if str(q.get("key", "")).startswith("rcs.")]
+
     if service_id == "RWS_2":                        # windows / sunshade
         # serviceId RWS (no _2); target passes through (window / ventilate /
         # sunshade); start = open/down, stop = close/up - mirroring the door
@@ -351,6 +365,7 @@ class ZeekrAdapter(CommandTrail):
         # the session dead together sign in once between them (_renew_hf).
         self._renew_lock = threading.Lock()
         self._renewals = 0
+        self._charge_refused = False
 
     @property
     def hf_expiry(self) -> int:
@@ -571,12 +586,42 @@ class ZeekrAdapter(CommandTrail):
         }
         return self._authed(self._client.control_resp, self.vin, body)
 
-    # The two secondary endpoints below are not mapped on this platform, on
-    # either route. Said here as well as by raising, so the platforms leave
-    # out the entities that live only on them and the poll stops asking -
-    # see helpers.api_serves (#88).
+    # The state block is not mapped on this platform, on either route. Said
+    # here as well as by raising, so the platforms leave out the entities that
+    # live only on it and the poll stops asking - see helpers.api_serves (#88).
     serves_state = False
-    serves_charge_server = False
+
+    @property
+    def serves_charge_server(self) -> bool:
+        """The schedules: served on the new gateway's charge-manage service
+        (capture-verified 2026-11-13) when the car has an x-vin. The
+        charge-server route without a token is still unmapped.
+
+        Tied to the token alone: setup purges the schedule entities by this
+        (_purge_unserved_entities), right after a first refresh that reads
+        the schedule, and a 079001 has come and gone on the same token between
+        starts - one refusal must not take the entities' names and areas."""
+        return bool(self._client.enc_vin)
+
+    @property
+    def reads_charge_server(self) -> bool:
+        """Whether the poll still reads the schedules this session: false
+        once charge-manage has refused this car, or a read of it has ended in
+        a failed renewal - see _authed_charge."""
+        return not self._charge_refused
+
+    # The scheduled trip's write has not been captured on this route, so the
+    # service stops before it reads (helpers.api_serves).
+    serves_trip_write = False
+
+    @property
+    def stores_window_only_with_start(self) -> bool:
+        """The charge-manage service keeps a charging window only when it
+        arrives with `start`: sent with `stop` it is acknowledged and dropped
+        (verified 2026-11-13). A window change has to be refused at the time
+        entity while the schedule is off - only the caller can tell a change
+        from the switch re-sending what it last read."""
+        return bool(self._client.enc_vin)
 
     def can_send(self, service_id: str) -> bool:
         """Whether control() would send this serviceId rather than refuse it.
@@ -592,15 +637,128 @@ class ZeekrAdapter(CommandTrail):
             "new-platform status/state endpoint not mapped yet"
         )
 
-    def charge_server_get(self, biz_type: str) -> dict:
-        raise NotImplementedError(
-            "new-platform charge-server GET not mapped yet"
-        )
+    def _authed_charge(self, fn, *args):
+        """_authed for the charge-manage service, minus one thing: a 079001.
 
-    def scheduled_charging_set(self, **kwargs: Any) -> dict:
+        That code comes as HTTP 401, so _authed reads it as a dead session
+        and renews - a password login that signs the phone app out - and the
+        poll, which reads the schedules, would do it again every few cycles.
+        The client reads 079001 as a refusal of the car, not of the token
+        (zeekr_client._car_refused), and only one EX2 has answered this
+        service so far. So a 079001 here renews nothing; it is raised as a
+        refusal, and reads_charge_server goes false for this session so the
+        poll stops asking. Any other auth-looking failure renews as before,
+        once: if that still ends in GeelyAuthError the same flag is set, so a
+        401 or 403 that is not 079001 costs one login, not one per read. That
+        error also comes when the renewal itself fails, which the reauth flow
+        handles; a restart or a reauth starts a new session with the flag
+        clear.
+
+        The 079001 is taken out inside the call, before _authed sees it -
+        caught after, the renewal would already have happened. It comes back
+        worded `code=079001 ...` so a command's refusal keeps its code."""
+        def call():
+            try:
+                return fn(*args)
+            except ZeekrApiError as exc:
+                if _car_refused(exc):
+                    raise _ChargeRefused(str(exc)) from exc
+                raise
+        try:
+            return self._authed(call)
+        except _ChargeRefused as exc:
+            self._note_charge_refused(exc)
+            raise ZeekrApiError(f"code=079001 message={exc}") from exc
+        except GeelyAuthError as exc:
+            self._note_charge_refused(exc)
+            raise
+
+    def _note_charge_refused(self, exc: Exception) -> None:
+        if not self._charge_refused:
+            _LOGGER.warning(
+                "The charging service refused this car (%s): its schedule "
+                "is not read again this session", exc)
+        self._charge_refused = True
+
+    def charge_server_get(self, biz_type: str) -> dict:
+        """The legacy charge-server slot read, answered from charge-manage.
+
+        Slots 2 / 6 (the charging schedule) come from getChargingPlan and are
+        handed back in the bizType-6 shape the switch and time entities read
+        (bcCycleActive / rbcStartTime / rbcEndTime / rbcTarget). Slot 4 (the
+        Scheduled trip) is getLatestTravelPlan, whose fields already match.
+
+        An answer whose code is not the gateway's success is handed back as
+        it came, as vehicle_status does: the callers check the code, and a
+        refusal translated into an empty schedule would replace the good copy
+        and have the next On write the switch's default window over the car's.
+        """
+        if not self._client.enc_vin:
+            raise NotImplementedError(
+                "new-platform charge-server GET not mapped yet")
+        if str(biz_type) in ("2", "6"):
+            fetch = self._client.charging_plan_new
+        elif str(biz_type) == "4":
+            fetch = self._client.travel_plan_new
+        else:
+            raise NotImplementedError(
+                f"new-platform charge-server bizType {biz_type} not mapped yet")
+        resp = self._authed_charge(fetch)
+        if not isinstance(resp, dict) or str(resp.get("code")) not in ("000000", "0"):
+            return resp
+        raw = resp.get("data")
+        raw = raw if isinstance(raw, dict) else {}
+        if fetch is self._client.travel_plan_new:
+            return {**resp, "code": 1000, "data": raw}
+        return {**resp, "code": 1000, "data": {
+            "bcCycleActive": "true" if raw.get("bcCycleActive") in (True, "true", "1", 1) else "false",
+            "bcTempActive": "true" if raw.get("bcTempActive") in (True, "true", "1", 1) else "false",
+            "rbcStartTime": raw.get("startTime") or "",
+            "rbcEndTime": raw.get("endTime") or "",
+            "rbcTarget": str(raw.get("target") or "2"),
+            "timerId": raw.get("timerId"),
+        }}
+
+    def scheduled_charging_set(self, *, command: str, start_time: str = "",
+                               end_time: str = "", rbc_target: str = "2",
+                               **_: Any) -> dict:
+        """Scheduled charging on/off and window, via setChargingPlan.
+
+        `stop` goes out as the app sends it, without a window: the service
+        drops one sent with `stop` anyway, and the switch's `stop` carries
+        only what it last read. A window change while off is refused before
+        it gets here (stores_window_only_with_start). A refusal comes back
+        as GeelyControlError with its code, as control() does."""
+        if not self._client.enc_vin:
+            raise NotImplementedError(
+                "new-platform charge-server write not mapped yet")
+        if command != "start":
+            start_time = end_time = ""
+
+        def send() -> dict:
+            try:
+                return self._ok_1000(self._authed_charge(
+                    lambda: self._client.set_charging_plan_new(
+                        command=command, start_time=start_time,
+                        end_time=end_time, target=rbc_target)))
+            except ZeekrApiError as e:
+                raise GeelyControlError(_refusal_code(e), str(e)) from e
+
+        return self._recorded(
+            f"scheduled_charging {command}",
+            {"start": start_time, "end": end_time, "target": rbc_target},
+            send)
+
+    def scheduled_trip_set(self, **_: Any) -> dict:
         raise NotImplementedError(
-            "new-platform charge-server write not mapped yet"
-        )
+            "new-platform scheduled trip write not mapped yet")
+
+    @staticmethod
+    def _ok_1000(resp: Any) -> Any:
+        """The new gateway's 000000 is the integration's 1000."""
+        if isinstance(resp, dict) and str(resp.get("code")) in ("000000", "0"):
+            return {**resp, "code": 1000}
+        return resp
 
     def rapid_climate(self, *, ac: bool, temp: str,
                       heat_seats: list[str] | None = None,
@@ -789,6 +947,14 @@ class ZeekrAdapter(CommandTrail):
                 # Which endpoint a command went out is otherwise invisible: both
                 # routes surface the same code=... string, so this is the only
                 # way to tell a new-platform send from a legacy one from a log.
+                if new_id == "RCS":
+                    _LOGGER.debug(
+                        "control %s/%s -> NEW route POST /ms-charge-manage/"
+                        "api/v1.0/charge/control (x-vin header)",
+                        service_id, command)
+                    resp = self._authed_charge(self._client.charge_control_new,
+                                               new_cmd, new_params)
+                    return self._ok_1000(resp)
                 _LOGGER.debug(
                     "control %s/%s -> NEW route POST /ms-remote-control/"
                     "v1.0/remoteControl/control (x-vin header)",

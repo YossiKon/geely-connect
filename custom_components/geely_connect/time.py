@@ -154,6 +154,13 @@ class GeelyScheduledChargingTime(CoordinatorEntity, TimeEntity):
         # command=start re-asserts it; if not active, command=stop pushes
         # times without enabling.
         command = "start" if self._is_on(_truthy(sched.get("bcCycleActive"))) else "stop"
+        # A new platform car keeps a window only when it comes with `start`
+        # (zeekr_adapter.stores_window_only_with_start): refused here, where a
+        # change can be told from the switch re-sending what it read.
+        if command == "stop" and getattr(self._api, "stores_window_only_with_start", False):
+            raise HomeAssistantError(
+                "Geely Scheduled Charging time: the car only takes a new charging "
+                "window while Scheduled Charging is on - switch it on first")
         rbc_target = sched.get("rbcTarget") or "2"
         # GET echoes `rbcModel`; SET writes it as `chargeModel`.
         charge_model = sched.get("rbcModel") or "0"
