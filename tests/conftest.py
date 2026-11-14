@@ -26,6 +26,12 @@ def load(module: str):
     the pure-logic tests do not need, so each module is loaded on its own under
     a synthetic package name.
     """
+    # HA installs its voluptuous replacement at import time. Initialize it
+    # before a synthetic module can capture the original marker classes;
+    # otherwise schema checks depend on which test file happened to run first.
+    if have_homeassistant():
+        import homeassistant  # noqa: F401
+
     name = f"gc.{module}"
     if name in sys.modules:
         return sys.modules[name]
@@ -48,7 +54,13 @@ def load(module: str):
 
 
 def have_homeassistant() -> bool:
-    return importlib.util.find_spec("homeassistant") is not None
+    if importlib.util.find_spec("homeassistant") is None:
+        return False
+    # The lifecycle/config-flow helpers also use this check before importing
+    # the package directly, bypassing load(). Keep their marker classes in
+    # sync with the host just as for modules loaded through the shared helper.
+    import homeassistant  # noqa: F401
+    return True
 
 
 # A VIN-shaped string that is obviously fake. Never use a real one in tests.
