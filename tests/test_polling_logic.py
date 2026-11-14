@@ -436,13 +436,19 @@ def test_a_refresh_press_forces_the_position_wake_too():
     secondary one - once per press, not on every poll the press waits through
     (#95) - and must be read ONCE per cycle so one press cannot answer two
     gates differently."""
-    import io, os
-    from conftest import PKG
-    src = io.open(os.path.join(PKG, "__init__.py"), encoding="utf-8").read()
-    assert 'force_wake = forced and not poll_state.get("force_woke", False)' in src
-    assert "woke = was_driving or force_wake or moved or timer_due" in src
-    assert src.count('poll_state.get("force_secondary", False)') == 1, (
-        "forced is read twice; the two gates can disagree about one press")
+    import asyncio
+    from test_init_lifecycle import _mod, _setup, _snap
+    mod = _mod()
+    _, hass, entry, api, coord, _ = _setup(mod)
+    api.status_results = [_snap("0", "100") for _ in range(5)]
+    for _ in range(2):
+        asyncio.run(coord.refresh())
+    api.calls.clear()
+    hass.data["geely_connect"][entry.entry_id]["poll_state"]["force_secondary"] = True
+    asyncio.run(coord.refresh())
+    asyncio.run(coord.refresh())
+    assert api.calls.count("position") == 1, api.calls
+    assert api.calls.count("state") >= 1, api.calls
 
 
 def test_a_disowned_speed_does_not_read_as_driving():

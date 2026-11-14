@@ -297,6 +297,23 @@ def _check_control_resp(resp: dict) -> dict:
     raise GeelyControlError(code, resp.get("message"))
 
 
+def _check_position_resp(resp: dict, *, new_platform: bool = False) -> dict:
+    """PAI acknowledgement, respecting the two captured gateway envelopes.
+
+    The original backend requires success=true. The Zeekr routes acknowledge
+    with 1000 (HF) or 000000/0 (new gateway), often without a success field.
+    Neither an unknown envelope nor an explicit refusal satisfies a fix.
+    """
+    if not isinstance(resp, dict):
+        raise GeelyControlError(None, "Missing position acquisition acknowledgement")
+    if not new_platform:
+        return _check_control_resp(resp)
+    if (str(resp.get("code")) in ("1000", "000000", "0")
+            and resp.get("success") not in (False, "false")):
+        return resp
+    raise GeelyControlError(resp.get("code"), "Position acquisition was refused")
+
+
 def window_length(start: str, end: str) -> str:
     """The length of a charging window as HH:MM, across midnight if need be.
 
@@ -1235,7 +1252,8 @@ class GeelyApi(CommandTrail):
             "userId": str(self.user_id),
         }
         path = f"/remote-control/vehicle/telematics/{self.vin}"
-        return self._authed_apis_call("PUT", path, json.dumps(body).encode())
+        return _check_control_resp(
+            self._authed_apis_call("PUT", path, json.dumps(body).encode()))
 
     def vehicle_status_state(self) -> dict:
         path = f"/remote-control/vehicle/status/state/{self.vin}"
