@@ -25,6 +25,8 @@ def _fake_api(**over):
     a.pin_path = None
     a._jwt, a._jwt_exp, a._jwt_lock = "jwt", 2 ** 31, threading.Lock()
     a._jwt_uid = None          # falls back to user_id, as after a fresh login
+    a._charging_lock = threading.Lock()
+    a._charging_pending = {}
     a.__dict__.update(over)
     return a
 

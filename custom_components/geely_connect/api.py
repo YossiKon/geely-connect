@@ -898,6 +898,8 @@ class GeelyApi(CommandTrail):
         self._jwt_uid: str | None = None
         self._jwt_exp: int = 0   # unix ms
         self._jwt_lock = threading.Lock()
+        self._charging_lock = threading.Lock()
+        self._charging_pending: dict[str, dict] = {}
 
     # ---- low-level helpers ----
 
@@ -1258,9 +1260,37 @@ class GeelyApi(CommandTrail):
         path = f"/charge-server/ecarx_charge_set/{self.vin}?bizType={biz_type}"
         return self._authed_apis_call("GET", path, b"")
 
+    def _charging_window_write(self, slot, changed_time, command, start, end, send):
+        """Serialize read/merge/send/accept for every whole-window mutation.
+
+        Time setters identify their one edited boundary. Toggle callers keep
+        both pending boundaries and explicitly change only the command.
+        Successful intent expires after 60 s; a GET or a failed write cannot
+        replace it. The lock and holds belong to this API/entry lifecycle.
+        """
+        if changed_time not in (None, "start", "end"):
+            raise ValueError("invalid charging time boundary")
+        with self._charging_lock:
+            now = time.monotonic()
+            pending = {key: held for key, held in self._charging_pending.get(slot, {}).items()
+                       if now < held[1]}
+            values = {"start": start, "end": end, "command": command}
+            for key, (value, _until) in pending.items():
+                if key != changed_time and (key != "command" or changed_time is not None):
+                    values[key] = value
+            if slot == "2" and values["start"] == values["end"]:
+                raise GeelyControlError(
+                    "invalid_window", "the start and the end can't be the same")
+            response = send(values["command"], values["start"], values["end"])
+            key = changed_time or "command"
+            pending[key] = (values[key], time.monotonic() + 60)
+            self._charging_pending[slot] = pending
+            return response
+
     def scheduled_charging_set(self, *, command: str, start_time: str,
                                 end_time: str, rbc_target: str = "2",
-                                rbc: str = "2", charge_model: str = "0") -> dict:
+                                rbc: str = "2", charge_model: str = "0",
+                                changed_time: str | None = None) -> dict:
         """Set scheduled charging. command="start" enables, "stop" disables.
 
         Body shape for bizType=6 (charge-server). The charge-model write key
@@ -1275,33 +1305,38 @@ class GeelyApi(CommandTrail):
         selects the forwarded operation (1/0). Verified live 2026-05-31:
         start -> op=1 + forwarded rbc.startTime, stop -> op=0.
         """
-        body = {
-            "bizType": "6",
-            "command": command,
-            "chargeModel": charge_model,
-            "endTime": "",
-            "pin": self.vin,
-            "rbc": rbc,
-            "rbcEndTime": end_time,
-            "rbcStartTime": start_time,
-            "rbcTarget": rbc_target,
-            "scheduledTime": "",
-            "sessionId": "",
-            "vin": self.vin,
-        }
-        body_bytes = json.dumps(body, separators=(",", ":")).encode()
-        path = f"/charge-server/ecarx_charge_set/{self.vin}"
-        # The body carries `pin` and `vin`; only the schedule is worth a note.
-        return self._recorded(
-            f"scheduled_charging {command}",
-            {"start": start_time, "end": end_time, "target": rbc_target,
-             "chargeModel": charge_model},
-            lambda: _check_control_resp(
-                self._authed_apis_call("POST", path, body_bytes)))
+        def send(command, start_time, end_time):
+            body = {
+                "bizType": "6",
+                "command": command,
+                "chargeModel": charge_model,
+                "endTime": "",
+                "pin": self.vin,
+                "rbc": rbc,
+                "rbcEndTime": end_time,
+                "rbcStartTime": start_time,
+                "rbcTarget": rbc_target,
+                "scheduledTime": "",
+                "sessionId": "",
+                "vin": self.vin,
+            }
+            body_bytes = json.dumps(body, separators=(",", ":")).encode()
+            path = f"/charge-server/ecarx_charge_set/{self.vin}"
+            # The body carries `pin` and `vin`; only the schedule is worth a note.
+            return self._recorded(
+                f"scheduled_charging {command}",
+                {"start": start_time, "end": end_time, "target": rbc_target,
+                 "chargeModel": charge_model},
+                lambda: _check_control_resp(
+                    self._authed_apis_call("POST", path, body_bytes)))
+
+        return self._charging_window_write(
+            "6", changed_time, command, start_time, end_time, send)
 
     def scheduled_charging_set_slot_2(self, *, command: str, start_time: str,
                                       end_time: str,
-                                      day: str = "1,2,3,4,5,6,7") -> dict:
+                                      day: str = "1,2,3,4,5,6,7",
+                                      changed_time: str | None = None) -> dict:
         """Scheduled charging on a car that keeps it in slot 2 (an E2, #72).
 
         The E2's own app sends this body, captured both ways: `command`
@@ -1312,28 +1347,32 @@ class GeelyApi(CommandTrail):
         every start and stop sent from here; the slot's `timerId` went to
         "1" only for the app's own toggle (helpers.slot_2_is_on).
         """
-        body = {
-            "bizType": "2",
-            "command": command,
-            "pin": "",
-            "scheduleList": [{
-                "day": day,
-                "duration": window_length(start_time, end_time),
-                "startTime": start_time,
-                "timerActivation": "1",
-            }],
-            "sessionId": "",
-            "timerId": "2",
-            "timestamp": str(int(time.time() * 1000)),
-            "vin": self.vin,
-        }
-        body_bytes = json.dumps(body, separators=(",", ":")).encode()
-        path = f"/charge-server/ecarx_charge_set/{self.vin}"
-        return self._recorded(
-            f"scheduled_charging {command}",
-            {"start": start_time, "end": end_time, "slot": "2"},
-            lambda: _check_control_resp(
-                self._authed_apis_call("POST", path, body_bytes)))
+        def send(command, start_time, end_time):
+            body = {
+                "bizType": "2",
+                "command": command,
+                "pin": "",
+                "scheduleList": [{
+                    "day": day,
+                    "duration": window_length(start_time, end_time),
+                    "startTime": start_time,
+                    "timerActivation": "1",
+                }],
+                "sessionId": "",
+                "timerId": "2",
+                "timestamp": str(int(time.time() * 1000)),
+                "vin": self.vin,
+            }
+            body_bytes = json.dumps(body, separators=(",", ":")).encode()
+            path = f"/charge-server/ecarx_charge_set/{self.vin}"
+            return self._recorded(
+                f"scheduled_charging {command}",
+                {"start": start_time, "end": end_time, "slot": "2"},
+                lambda: _check_control_resp(
+                    self._authed_apis_call("POST", path, body_bytes)))
+
+        return self._charging_window_write(
+            "2", changed_time, command, start_time, end_time, send)
 
     def scheduled_trip_set(self, *, command: str, scheduled_time_ms: str,
                            ac: str = "true", bw: str = "1", bwl: str = "1") -> dict:
