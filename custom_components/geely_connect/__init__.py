@@ -84,7 +84,8 @@ from .const import (
     region_config,
 )
 from .helpers import (api_can_send, api_serves, password_decrypt,
-                      vehicle_metadata, schedule_refresh, speed_is_stale)
+                      vehicle_metadata, schedule_refresh, speed_is_stale,
+                      legacy_material_dirs)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -135,50 +136,21 @@ def _resolve_device_name(entry_data: dict) -> str:
     return f"{base} ({last4})" if last4 else base
 
 
-_OBSOLETE_UNIQUE_ID_PATTERNS: tuple[str, ...] = (
-    # Old engine switch - replaced by climate entity
-    "_sw_engine_pre_conditioning",
-    # Old PROBE buttons - replaced by proper entities
-    "_btn_probe_",
-    # Old confirmed buttons that are now lock / climate / button
-    "_btn_RDL_2", "_btn_RDU_2", "_btn_RES", "_btn_RWS_2", "_btn_RHL",
-    # Old "Tailgate" button - renamed to Unlock Trunk (different unique_id)
-    "_btn_tailgate",
-    # Old rapid warming/cooling/g-clean buttons - moved to climate presets / switch
-    "_btn_rapid_warming", "_btn_rapid_cooling", "_btn_g_clean",
-    # Old gear sensor - gearPosition not in current API response
-    "_gear",
-    # Removed after EX5 feature audit: no sentry mode (no cabin camera).
-    # The rear seat-heat selects are NOT listed here: select.py still creates
-    # them whenever the capability catalog reports rear positions, so listing
-    # them made every restart delete and re-register a live entity, losing its
-    # recorded history and any customisation each time.
-    "_sw_sentry_mode",
-    # `charge_state` (chargeSts) field is unreliable as a charging state. On
-    # an E2 it is the Scheduled Charging on/off, read by that switch (#72).
-    "_charge_state",
-    # Binary sensors made redundant by the new lock/switch/climate entities.
-    # The `_bs_` prefix avoids accidentally matching the new switches.
-    "_bs_doors_unlocked",      # → lock.doors
-    "_bs_defrost_active",      # → switch.defrost
-    "_bs_preclimate_active",   # → climate.climate (hvac_mode)
-    "_bs_charging",            # → switch.charging
-    # The new platform's isCharging / isPluggedIn, retired: false during a
-    # charge that three verified entities reported (#88). See binary_sensor.
-    "_bs_is_charging", "_bs_is_plugged_in",
-    # Sensor renames (key changed → unique_id changed → entity needs purge)
-    "_odometer",               # → renamed to total_mileage
-    "_tyre_pressure_fl",       # → tire_pressure_fl  (UK→US spelling)
-    "_tyre_pressure_fr",       # → tire_pressure_fr
-    "_tyre_pressure_rl",       # → tire_pressure_rl
-    "_tyre_pressure_rr",       # → tire_pressure_rr
-    # Door binary sensor renames - "Door <Position>" so they group
-    # alphabetically in HA's device page.
-    "_bs_driver_door_open",    # → door_driver
-    "_bs_passenger_door_open", # → door_passenger
-    "_bs_rear_left_door_open", # → door_rear_left
-    "_bs_rear_right_door_open",# → door_rear_right
-)
+# One-to-one, same-domain renames only. Cross-domain replacements and retired
+# features remain in the registry for the owner to handle without losing IDs.
+_LEGACY_ENTITY_KEYS = {
+    "sensor": {
+        "odometer": "total_mileage",
+        "tyre_pressure_fl": "tire_pressure_fl", "tyre_pressure_fr": "tire_pressure_fr",
+        "tyre_pressure_rl": "tire_pressure_rl", "tyre_pressure_rr": "tire_pressure_rr",
+    },
+    "binary_sensor": {
+        "bs_driver_door_open": "bs_door_driver",
+        "bs_passenger_door_open": "bs_door_passenger",
+        "bs_rear_left_door_open": "bs_door_rear_left",
+        "bs_rear_right_door_open": "bs_door_rear_right",
+    },
+}
 
 
 async def _maybe_refetch_vehicle_metadata(hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -233,20 +205,34 @@ async def _maybe_refetch_vehicle_metadata(hass: HomeAssistant, entry: ConfigEntr
 
 
 def _purge_obsolete_entities(hass: HomeAssistant, entry: ConfigEntry) -> int:
-    """Remove entities from prior versions of the integration. Walks ALL
-    entries (not just config-entry-linked ones) since some orphans get
-    detached from the config entry across reloads."""
+    """Migrate legacy unique IDs in place; never purge a history-bearing row.
+
+    Called by v7 migration and repeated at setup for interrupted upgrades.
+    Unowned rows and collisions are ambiguous: keep both, warn, and leave
+    ownership/history reconciliation to the user rather than guessing.
+    """
     registry = er.async_get(hass)
-    to_delete = [
-        e.entity_id for e in registry.entities.values()
-        if e.platform == DOMAIN
-        and any(p in e.unique_id for p in _OBSOLETE_UNIQUE_ID_PATTERNS)
-    ]
-    for eid in to_delete:
-        registry.async_remove(eid)
-    if to_delete:
-        _LOGGER.info("Purged %d obsolete entities: %s", len(to_delete), to_delete)
-    return len(to_delete)
+    vin = entry.data.get(CONF_VIN)
+    if not isinstance(vin, str) or not re.fullmatch(r"[A-Za-z0-9]{8,20}", vin):
+        return 0
+    prefix = f"geely_{vin}_"
+    migrated = 0
+    for row in list(registry.entities.values()):
+        domain = row.entity_id.split(".")[0]
+        mapping = _LEGACY_ENTITY_KEYS.get(domain, {})
+        key = row.unique_id.removeprefix(prefix)
+        if row.platform != DOMAIN or not row.unique_id.startswith(prefix) or key not in mapping:
+            continue
+        if getattr(row, "config_entry_id", None) != entry.entry_id:
+            _LOGGER.warning("Legacy entity rename needs manual ownership reconciliation")
+            continue
+        replacement = prefix + mapping[key]
+        if registry.async_get_entity_id(domain, DOMAIN, replacement) is not None:
+            _LOGGER.warning("Legacy entity rename collision; preserving both registry entries")
+            continue
+        registry.async_update_entity(row.entity_id, new_unique_id=replacement)
+        migrated += 1
+    return migrated
 
 
 async def _read_slot_2_now(hass: HomeAssistant, api: Any, coordinator: Any,
@@ -269,20 +255,12 @@ _TRIP_SENSORS = ("_bs_battery_temp_maintenance", "_bs_scheduled_trip_weekly",
 
 def _purge_unserved_entities(hass: HomeAssistant, entry: ConfigEntry, api: Any,
                              capabilities: dict | None = None) -> int:
-    """Remove this entry's entities that its api cannot feed or send for.
+    """Count retained rows for features this entry cannot currently serve.
 
-    The platforms no longer create them (see helpers.api_serves), but one
-    created by an earlier version would otherwise stay on the device page as
-    "no longer provided" until its owner deleted it by hand (#88). Per entry,
-    and keyed on the api rather than listed in _OBSOLETE_UNIQUE_ID_PATTERNS:
-    that list is global, and these are working entities on every car whose
-    api serves them.
-
-    The three Scheduled-trip sensors read charge-server slot 4, so they go
-    with the schedule where there is no charge-server - and on a car whose
-    catalogue says its slot 4 is the 1.0 shape nobody has decoded (#72),
-    where the sensors are not built and Battery Temperature Maintenance, built
-    there by earlier versions from a status flag, would otherwise linger."""
+    Platforms no longer provide these entities, but their registry settings
+    and history references belong to the user, including after a platform
+    migration. Keep them available for a later return to the original backend.
+    """
     gone: list[str] = []
     if not api_serves(api, "charge_server"):
         gone += ["_sw_scheduled_charging", "_time_scheduled_charging_start",
@@ -299,11 +277,8 @@ def _purge_unserved_entities(hass: HomeAssistant, entry: ConfigEntry, api: Any,
         for e in er.async_entries_for_config_entry(registry, entry.entry_id)
         if e.unique_id.endswith(tuple(gone))
     ]
-    for entity_id in stale:
-        registry.async_remove(entity_id)
     if stale:
-        _LOGGER.info("Removed %d entities this platform cannot serve yet: %s",
-                     len(stale), stale)
+        _LOGGER.info("Retained %d registry entries this platform cannot serve yet", len(stale))
     return len(stale)
 
 
@@ -1423,46 +1398,43 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Delete the vehicle's mTLS material when the integration is removed.
 
-    The private key authenticates Home Assistant to Geely as this car's
-    controller - whoever holds it can unlock and pre-condition the vehicle.
-    Removing the config entry drops the account token, so without this the key
-    and certificate would outlive the integration on disk, unreferenced and
-    unnoticed, including inside every backup taken afterwards.
+    Removing the config entry drops the account token. Without cleanup the
+    separate mTLS key and certificate would outlive it on disk and in future
+    backups. Keep their original location across platform/VIN migrations and
+    verify removal rather than claiming success after a suppressed error.
     """
     # A Repairs issue outliving the entry it was about would point at a
     # Configure page that no longer exists.
     ir.async_delete_issue(hass, DOMAIN, _x_vin_issue_id(entry))
-    expected_root = os.path.join(hass.config.path(".storage"), DOMAIN)
-    cert_path = entry.data.get(CONF_CERT_PATH)
-    if cert_path:
-        vin_dir = os.path.dirname(cert_path)
-    else:
-        # An entry that moved to the new platform dropped its certificate
-        # paths but not the files: the key stayed on disk, in every backup
-        # since, with nothing left pointing at it. The directory is named
-        # after the VIN, so it can still be found - under the root check below.
-        vin = entry.data.get(CONF_VIN)
-        if not isinstance(vin, str) or not re.fullmatch(r"[A-Za-z0-9]{8,20}", vin):
-            return
-        vin_dir = os.path.join(expected_root, vin)
-        if not await hass.async_add_executor_job(os.path.isdir, vin_dir):
-            return
-    # Only ever inside our own storage directory, never a path the server chose.
-    if os.path.commonpath([os.path.abspath(vin_dir),
-                           os.path.abspath(expected_root)]) != os.path.abspath(expected_root):
-        _LOGGER.warning("refusing to remove %s: outside the integration's storage",
-                        geely_api.mask_path(vin_dir))
-        return
-    try:
-        await hass.async_add_executor_job(
-            functools.partial(shutil.rmtree, vin_dir, ignore_errors=True)
-        )
-    except Exception as e:  # noqa: BLE001 - removal is best-effort
-        _LOGGER.warning("could not remove %s (%s); delete it by hand to be sure "
-                        "the vehicle key is gone", geely_api.mask_path(vin_dir), e)
-    else:
-        _LOGGER.info("Removed stored certificate and key for %s",
-                     geely_api.mask_path(vin_dir))
+    directories = await hass.async_add_executor_job(legacy_material_dirs, hass, entry.data)
+    # A historical duplicate entry may still use the material. Never remove
+    # a sibling's credentials just because this entry is being removed.
+    shared = set()
+    for other in getattr(hass.config_entries, "async_entries", lambda _: [])(DOMAIN):
+        if other.entry_id != entry.entry_id:
+            shared.update(await hass.async_add_executor_job(
+                legacy_material_dirs, hass, other.data))
+    for vin_dir in directories:
+        if vin_dir in shared:
+            _LOGGER.warning("Retaining shared legacy credentials used by another entry")
+            continue
+        try:
+            await hass.async_add_executor_job(shutil.rmtree, vin_dir)
+        except FileNotFoundError:
+            # Missing directory is already clean; a missing child during a
+            # partial removal is not proof the directory itself disappeared.
+            pass
+        except Exception as e:  # noqa: BLE001 - removal is best-effort
+            _LOGGER.warning("could not remove %s (%s); delete it by hand to be sure "
+                            "the vehicle key is gone", geely_api.mask_path(vin_dir),
+                            type(e).__name__)
+            continue
+        if await hass.async_add_executor_job(os.path.lexists, vin_dir):
+            _LOGGER.warning("could not remove %s; legacy material remains on disk",
+                            geely_api.mask_path(vin_dir))
+        else:
+            _LOGGER.info("Removed stored certificate and key for %s",
+                         geely_api.mask_path(vin_dir))
 
 
 # Unique-id fragments of the entities that ship disabled from v3 onwards.
@@ -1490,23 +1462,20 @@ def _reenable_integration_disabled_entities(hass: HomeAssistant, entry: ConfigEn
 
 
 def _purge_raw_exposure_entities(hass: HomeAssistant, entry: ConfigEntry) -> int:
-    """Remove the auto-generated full-exposure sensors.
+    """Retain raw registry identities/history when exposure is switched off.
 
-    They are recreated on demand when full exposure is switched back on under
-    Configure, so nothing is lost by clearing them: on an EX5 there are around
-    180, and even disabled they bury the entities worth looking at."""
+    The platform stops providing these sensors; deleting registry rows would
+    also discard user settings and break references when exposure returns.
+    """
     registry = er.async_get(hass)
     stale = [
         e.entity_id
         for e in er.async_entries_for_config_entry(registry, entry.entry_id)
         if "_raw_" in e.unique_id
     ]
-    for entity_id in stale:
-        registry.async_remove(entity_id)
     if stale:
         _LOGGER.info(
-            "Removed %d full-exposure diagnostic sensors; re-enable them under "
-            "Configure if you need to inspect a raw field", len(stale),
+            "Retained %d full-exposure registry entries and their user settings", len(stale),
         )
     return len(stale)
 
@@ -1514,17 +1483,12 @@ def _purge_raw_exposure_entities(hass: HomeAssistant, entry: ConfigEntry) -> int
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Migrate older entries forward.
 
-    v1 -> v2: generate per-install idfa/idfv so future logins don't kick the
-    iPhone off. v2 -> v3: switch off the window, sunroof, sunshade and
-    window-ventilation entities, which now ship disabled because opening them
-    by accident from a dashboard leaves the car exposed. v3 -> v4: clear the
-    ~180 auto-generated full-exposure sensors, now opt-in under Configure.
-    v4 -> v6: turn every entity back on - the useful set is now everything the
-    car reports plus the computed extras, with the duplicated aggregates
-    removed rather than hidden. Only entities the integration disabled are
-    restored, so anything switched off by hand stays off. Everything else keeps
-    working; missing fields fall back to safe defaults."""
-    if entry.version >= 6:
+    Pre-v2 entries gain a stable install fingerprint. Pre-v6 entries retain
+    the existing re-enable behavior for integration-disabled entities.
+    v7 migrates same-domain legacy renames in place, preserving entity IDs,
+    user settings and references. Retired/raw rows are retained, never deleted.
+    """
+    if entry.version >= 7:
         return True
 
     new_data = dict(entry.data)
@@ -1535,8 +1499,10 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             new_data["device_idfa"] = idfa
             new_data["device_idfv"] = idfv
 
-    _reenable_integration_disabled_entities(hass, entry)
-    _purge_raw_exposure_entities(hass, entry)
-    hass.config_entries.async_update_entry(entry, data=new_data, version=6)
-    _LOGGER.info("Migrated geely_connect entry %s to v6", entry.entry_id)
+    if entry.version < 6:
+        _reenable_integration_disabled_entities(hass, entry)
+        _purge_raw_exposure_entities(hass, entry)
+    _purge_obsolete_entities(hass, entry)
+    hass.config_entries.async_update_entry(entry, data=new_data, version=7)
+    _LOGGER.info("Migrated geely_connect entry %s to v7", entry.entry_id)
     return True

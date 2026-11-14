@@ -157,7 +157,7 @@ def _ir_module():
     return _IssueRegistry()
 
 
-def test_only_obsolete_unique_ids_are_purged():
+def test_retired_entities_keep_their_registry_identity():
     m = _mod()
     mk = lambda eid, uid, platform="geely_connect": types.SimpleNamespace(
         entity_id=eid, unique_id=uid, platform=platform)
@@ -166,10 +166,11 @@ def test_only_obsolete_unique_ids_are_purged():
         mk("sensor.keep", f"geely_{FAKE_VIN}_battery"),
         mk("switch.other", "x_sw_engine_pre_conditioning", platform="other"),
     ])
-    entry = types.SimpleNamespace(entry_id="e1")
+    entry = types.SimpleNamespace(entry_id="e1", data={"vin": FAKE_VIN})
     with _Patched(m, er=_er_module(reg)):
         n = m._purge_obsolete_entities(object(), entry)
-    assert n == 1 and reg.removed == ["switch.old"]
+    assert n == 0 and reg.removed == []
+    assert "switch.old" in reg.entities
 
 
 def test_the_device_name_updates_unless_the_user_renamed_it():
@@ -264,7 +265,7 @@ def test_reenable_touches_only_what_the_integration_disabled():
     assert reg.updated == [("sensor.a", {"disabled_by": None})]
 
 
-def test_purging_full_exposure_removes_only_raw_sensors():
+def test_turning_off_full_exposure_retains_raw_registry_rows():
     m = _mod()
     mk = lambda eid, uid: types.SimpleNamespace(entity_id=eid, unique_id=uid)
     entries = [mk("sensor.raw1", f"geely_{FAKE_VIN}_raw_a.b"),
@@ -276,7 +277,7 @@ def test_purging_full_exposure_removes_only_raw_sensors():
     with _Patched(m, er=fake_er):
         n = m._purge_raw_exposure_entities(object(),
                                            types.SimpleNamespace(entry_id="e1"))
-    assert n == 1 and reg.removed == ["sensor.raw1"]
+    assert n == 1 and reg.removed == []
 
 
 def _unserved_registry():
@@ -290,11 +291,8 @@ def _unserved_registry():
             mk("sensor.keep", f"geely_{FAKE_VIN}_battery")]
 
 
-def test_entities_the_api_cannot_serve_are_cleared_from_the_registry():
-    """An earlier version built them on a new-platform car, where they could
-    only read unknown and fail when pressed. Left alone they would sit on the
-    device page as "no longer provided" (#88). The Charging switch stays: the
-    state it reads is real even where its command is not mapped."""
+def test_unserved_entities_keep_history_references_for_future_backend_changes():
+    """Stop providing unsupported entities without deleting their identities."""
     m = _mod()
     reg = _EntityRegistry([])
     fake_er = _er_module(reg, per_entry=_unserved_registry())
@@ -303,20 +301,17 @@ def test_entities_the_api_cannot_serve_are_cleared_from_the_registry():
     with _Patched(m, er=fake_er):
         n = m._purge_unserved_entities(object(), types.SimpleNamespace(entry_id="e1"), api)
     assert n == 5
-    assert sorted(reg.removed) == ["binary_sensor.btm", "switch.pc", "switch.sched",
-                                   "time.end", "time.start"], reg.removed
+    assert reg.removed == []
 
 
-def test_a_1_0_car_loses_the_scheduled_trip_sensors_and_nothing_else():
-    """Its catalogue rules slot 4 out (#72), so the three sensors are not
-    built - and the Battery Temperature Maintenance an earlier version built
-    there from a status flag must not linger as "no longer provided"."""
+def test_a_1_0_car_retains_old_trip_registry_rows_without_providing_them():
+    """Catalogue gating changes provided entities, not historical identities."""
     m = _mod()
     reg = _EntityRegistry([])
     with _Patched(m, er=_er_module(reg, per_entry=_unserved_registry())):
         n = m._purge_unserved_entities(object(), types.SimpleNamespace(entry_id="e1"),
                                        object(), {"scheduled_trip.enabled": False})
-    assert n == 1 and reg.removed == ["binary_sensor.btm"], reg.removed
+    assert n == 1 and reg.removed == [], reg.removed
     for caps in ({}, {"scheduled_trip.enabled": True}, None):
         reg = _EntityRegistry([])
         with _Patched(m, er=_er_module(reg, per_entry=_unserved_registry())):
@@ -331,16 +326,14 @@ def test_an_api_that_serves_everything_loses_nothing():
     platform car without an x-vin keeps Parking Comfort: the legacy route it
     commands through takes RSM."""
     m = _mod()
-    for api, kept in ((object(), 7),
+    for api, retained in ((object(), 0),
                       (types.SimpleNamespace(serves_state=False, serves_charge_server=False,
-                                             can_send=lambda sid: True), 3)):
+                                             can_send=lambda sid: True), 4)):
         reg = _EntityRegistry([])
         with _Patched(m, er=_er_module(reg, per_entry=_unserved_registry())):
-            m._purge_unserved_entities(object(), types.SimpleNamespace(entry_id="e1"), api)
-        assert len(_unserved_registry()) - len(reg.removed) == kept, reg.removed
-    for pattern in m._OBSOLETE_UNIQUE_ID_PATTERNS:
-        for e in _unserved_registry():
-            assert pattern not in e.unique_id, (pattern, e.unique_id)
+            counted = m._purge_unserved_entities(object(), types.SimpleNamespace(entry_id="e1"), api)
+        assert counted == retained
+        assert reg.removed == []
 
 
 # ---------------------------------------------------------------- intervals ---
@@ -1703,7 +1696,7 @@ def test_unload_drops_the_bundle_only_when_platforms_unload():
 
 
 def test_removal_shreds_the_key_directory_but_only_inside_our_storage():
-    """The private key can unlock the car; it must die with the entry - but a
+    """Retired credentials must be removed with the entry, but a
     server-influenced path outside .storage/geely_connect must never be
     rm -rf'd."""
     m = _mod()
@@ -1711,7 +1704,7 @@ def test_removal_shreds_the_key_directory_but_only_inside_our_storage():
         hass = _Hass()
         hass.config = types.SimpleNamespace(
             path=lambda *p: os.path.join(root, *p))
-        vin_dir = os.path.join(root, ".storage", "geely_connect", "vin1")
+        vin_dir = os.path.join(root, ".storage", "geely_connect", FAKE_VIN)
         os.makedirs(vin_dir)
         open(os.path.join(vin_dir, "key.pem"), "w").write("KEY")
         entry = types.SimpleNamespace(

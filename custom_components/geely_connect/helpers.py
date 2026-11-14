@@ -15,6 +15,7 @@ import hashlib
 import logging
 import math
 import os
+import re
 from collections.abc import Callable
 from contextlib import contextmanager
 from typing import Any
@@ -36,6 +37,45 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# Retained across platform/VIN changes; api.redact masks the entire list in
+# diagnostics. Only validated local certificate paths may enter this field.
+LEGACY_CERT_PATHS = "legacy_cert_paths"
+
+
+def legacy_material_dirs(hass: HomeAssistant, data: dict) -> list[str]:
+    """Validated immediate vehicle directories, never the storage root.
+
+    Runs in the executor: realpath checks must not block HA's event loop.
+    Symlinked vehicle directories and paths outside our root are refused.
+    """
+    root = os.path.realpath(os.path.join(hass.config.path(".storage"), DOMAIN))
+    retained = data.get(LEGACY_CERT_PATHS)
+    paths = list(retained) if isinstance(retained, list) else []
+    for key in ("cert_path", "key_path"):
+        if data.get(key):
+            paths.append(data[key])
+    vin = data.get("vin")
+    if isinstance(vin, str) and re.fullmatch(r"[A-Za-z0-9]{8,20}", vin):
+        paths.append(os.path.join(root, vin, "cert.pem"))
+    directories = []
+    for path in paths:
+        if not isinstance(path, str) or not os.path.isabs(path):
+            _LOGGER.warning("Ignoring invalid legacy credential storage reference")
+            continue
+        original = os.path.abspath(os.path.dirname(path))
+        directory = os.path.join(root, os.path.basename(original))
+        if (os.path.basename(path) not in ("cert.pem", "key.pem")
+                or os.path.commonpath([directory, root]) != root
+                or os.path.realpath(os.path.dirname(original)) != root
+                or not re.fullmatch(r"[A-Za-z0-9]{8,20}", os.path.basename(directory))
+                or os.path.islink(original)
+                or os.path.realpath(original) != directory):
+            _LOGGER.warning("Ignoring unsafe legacy credential storage reference")
+            continue
+        if directory not in directories:
+            directories.append(directory)
+    return directories
 
 
 def vehicle_metadata(vehicle: dict) -> dict[str, str]:
