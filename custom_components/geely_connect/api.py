@@ -146,7 +146,7 @@ _SECRET_KEYS: set = {
     # (.storage/geely_connect/<VIN>/cert.pem). diagnostics._REDACT drops them;
     # this pass used to let them through, which is the drift the two lists
     # exist to prevent.
-    "certpath", "keypath",
+    "certpath", "keypath", "legacycertpaths",
     # The new platform's HF JWT travels in an Authorization header. No path
     # folds headers into a log today; the hedge costs nothing.
     "authorization",
@@ -539,7 +539,7 @@ def _load_pin_store(pin_path: str | None) -> dict[str, dict]:
             f"{mask_path(pin_path)} exists but could not be read ({mask_path(e)}). "
             "Refusing to continue without the pins it should contain - fix or "
             "delete it."
-        ) from e
+        ) from None
     if not isinstance(raw, dict):
         raise GeelyTLSPinError(f"{mask_path(pin_path)} is not a JSON object; refusing to use it")
 

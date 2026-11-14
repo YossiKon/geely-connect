@@ -219,25 +219,27 @@ def _new_platform_entry():
     return e
 
 
-def test_the_reported_charging_booleans_are_retired_everywhere():
+def test_retired_charging_booleans_are_not_built_but_keep_registry_history():
     """`isCharging` / `isPluggedIn` read false through a 6.8 kW AC charge that
     the Charging switch, Charger Plug and Charging Power all reported (#88),
-    and nobody had ever seen either read true. Not built on any platform, and
-    purged from installs that have them."""
+    and nobody had ever seen either read true. Stop building them, preserving
+    any historical registry rows and user references."""
     if not have_homeassistant():
         skip("homeassistant not installed")
     for entry in (None, _new_platform_entry()):
         leaked = _keys(_build_all(entry=entry)) & _RETIRED_KEYS
         assert leaked == set(), leaked
-    import ast
-    import io
-    import os
-    src = io.open(os.path.join(PKG, "__init__.py"), encoding="utf-8").read()
-    block = src.split("_OBSOLETE_UNIQUE_ID_PATTERNS: tuple[str, ...] = ", 1)[1]
-    patterns = ast.literal_eval(block[:block.index("\n)\n") + 2])
-    for key in _RETIRED_KEYS:
-        uid = f"geely_{FAKE_VIN}_{key}"
-        assert any(p in uid for p in patterns), uid
+    from types import SimpleNamespace
+    from test_init_lifecycle import _mod, _EntityRegistry, _Patched, _er_module
+    rows = [SimpleNamespace(entity_id=f"binary_sensor.fixture_{key}",
+                            unique_id=f"geely_{FAKE_VIN}_{key}", platform="geely_connect")
+            for key in _RETIRED_KEYS]
+    registry = _EntityRegistry(rows)
+    mod = _mod()
+    with _Patched(mod, er=_er_module(registry)):
+        mod._purge_obsolete_entities(object(), SimpleNamespace(entry_id="e1", data={"vin": FAKE_VIN}))
+    assert registry.removed == []
+    assert len(registry.entities) == len(rows)
 
 
 def test_the_promoted_fields_stay_on_both_platforms():
