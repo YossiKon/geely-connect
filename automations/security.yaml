@@ -284,43 +284,47 @@
 - id: geely_ex5_security_bedtime_check
   alias: "Geely EX5 - Bedtime security check"
   description: >-
-    At bedtime, refreshes the car data and reports anything left unlocked,
-    open or ajar - plus anything the car did not report, so an unavailable
-    sensor is never mistaken for a closed door. Stays silent when all is well.
+    At bedtime, requests a vehicle report and checks its age before reporting
+    unlocked/open readings or missing evidence. Reports inability to verify
+    if freshness is not established. Silence means no reported problems in
+    the required recent readings, not physical confirmation of security.
   mode: single
   triggers:
     - trigger: time
       # TUNE: your bedtime.
       at: "22:30:00"
   actions:
-    # Remember the current poll timestamp before asking for a new one, so we
-    # can tell a genuinely fresh reading from the one we already had.
+    # TUNE: maximum vehicle-report age in seconds, and whether to request a
+    # refresh (which wakes the car). With request_refresh: false no wake is
+    # requested, but the same age and completeness checks still apply.
     - variables:
-        poll_before: "{{ states('sensor.my_geely_ex5_last_updated') }}"
-    # Wake the car so the report is based on fresh data. Remove these three
-    # steps (the variables above, the button press and the wait below) if you
-    # would rather not poll the car at night. continue_on_error keeps the
-    # report going if the car is asleep and the refresh call fails.
-    - action: button.press
-      continue_on_error: true
-      target:
-        entity_id: button.my_geely_ex5_refresh_data
-    # Wait for the poll timestamp to actually change instead of guessing at a
-    # delay, so the report is never built from the pre-refresh reading.
-    - wait_template: >-
-        {{ states('sensor.my_geely_ex5_last_updated') not in ['unknown', 'unavailable']
-        and states('sensor.my_geely_ex5_last_updated') != poll_before }}
-      timeout:
-        seconds: 120
-      continue_on_timeout: true
-    # If even the lock is not reporting, the car is asleep or the integration
-    # is down and there is nothing trustworthy to say - stay quiet. Delete this
-    # condition if you would rather be told the car was unreachable at bedtime.
-    - condition: template
-      value_template: >-
-        {{ states('lock.my_geely_ex5_doors') not in ['unknown', 'unavailable'] }}
+        report_max_age_seconds: 300
+        request_refresh: true
+        report_before: "{{ as_timestamp(states('sensor.my_geely_ex5_car_reported_at'), 0) }}"
+    - if: "{{ request_refresh }}"
+      then:
+        - action: button.press
+          continue_on_error: true
+          target:
+            entity_id: button.my_geely_ex5_refresh_data
+        # Last Updated is cloud-contact time, not a new report from the car.
+        # A cached cloud response must not satisfy this wait. A newer vehicle
+        # timestamp must also pass the age policy; future times are rejected.
+        - wait_template: >-
+            {% set reported = as_timestamp(states('sensor.my_geely_ex5_car_reported_at'), 0) %}
+            {{ reported > report_before | float(0)
+               and 0 <= as_timestamp(now()) - reported <= report_max_age_seconds }}
+          timeout:
+            seconds: 120
+          continue_on_timeout: true
     - variables:
-        # Everything that is genuinely open or unlocked right now.
+        fresh_report: >-
+          {% set reported = as_timestamp(states('sensor.my_geely_ex5_car_reported_at'), 0) %}
+          {{ (not request_refresh or (wait is defined and wait.completed))
+             and reported > 0
+             and 0 <= as_timestamp(now()) - reported <= report_max_age_seconds }}
+        # These are reported states; even a recent report is not a physical
+        # inspection. If freshness failed, include these as possibly stale.
         problems: |-
           {%- set ns = namespace(items=[]) -%}
           {%- set openings = [
@@ -347,38 +351,45 @@
           {%- endif -%}
           {{ ns.items | join(', ') }}
         # Anything that did not report. An unavailable sensor must not be read
-        # as "closed" - the whole point of this automation is to be sure.
-        # TUNE: if your car never reports one of these, delete it from BOTH
-        # lists so the nightly report stops mentioning it every single night.
+        # as "closed" or silently counted as a completed check.
+        # TUNE: remove unsupported openings from BOTH lists. Keep the lock
+        # required. Transitional/invalid readings also cannot verify closure.
         unchecked: |-
           {%- set ns = namespace(items=[]) -%}
-          {%- set watched = [
-                'binary_sensor.my_geely_ex5_door_driver',
-                'binary_sensor.my_geely_ex5_door_passenger',
-                'binary_sensor.my_geely_ex5_door_rear_left',
-                'binary_sensor.my_geely_ex5_door_rear_right',
-                'binary_sensor.my_geely_ex5_trunk',
-                'binary_sensor.my_geely_ex5_hood',
-                'cover.my_geely_ex5_all_windows',
-                'cover.my_geely_ex5_sunroof'
-              ] -%}
-          {%- for e in watched -%}
-          {%- if states(e) in ['unknown', 'unavailable'] -%}
+          {%- set watched = {
+                'lock.my_geely_ex5_doors': ['locked', 'unlocked'],
+                'binary_sensor.my_geely_ex5_door_driver': ['on', 'off'],
+                'binary_sensor.my_geely_ex5_door_passenger': ['on', 'off'],
+                'binary_sensor.my_geely_ex5_door_rear_left': ['on', 'off'],
+                'binary_sensor.my_geely_ex5_door_rear_right': ['on', 'off'],
+                'binary_sensor.my_geely_ex5_trunk': ['on', 'off'],
+                'binary_sensor.my_geely_ex5_hood': ['on', 'off'],
+                'cover.my_geely_ex5_all_windows': ['open', 'closed'],
+                'cover.my_geely_ex5_sunroof': ['open', 'closed']
+              } -%}
+          {%- for e, valid in watched.items() -%}
+          {%- if states(e) not in valid -%}
           {%- set ns.items = ns.items + [state_attr(e, 'friendly_name') or e] -%}
           {%- endif -%}
           {%- endfor -%}
           {{ ns.items | join(', ') }}
-    # All clear and everything readable - say nothing.
+    # Only a recent report with complete readings and no reported problems is
+    # silent. A timeout or missing timestamp must produce an explicit warning.
     - condition: template
       value_template: >-
-        {{ problems | trim | length > 0 or unchecked | trim | length > 0 }}
+        {{ not fresh_report or problems | trim | length > 0 or unchecked | trim | length > 0 }}
     - action: notify.mobile_app_your_phone
       data:
         title: "Geely EX5 - bedtime check"
         message: |-
+          {%- if not fresh_report -%}
+          Could not verify bedtime security: no recent vehicle report was obtained. Readings below may be stale.
+          {% endif -%}
           {%- if problems | trim | length > 0 -%}
-          Before you turn in: {{ problems | trim }}.
+          Latest reported status: {{ problems | trim }}.
           {%- endif -%}
           {%- if unchecked | trim | length > 0 -%}
           {{ ' ' if problems | trim | length > 0 else '' }}No reading from the car for: {{ unchecked | trim }}.
           {%- endif -%}
+          {{ '\n' }}Vehicle report: {{ states('sensor.my_geely_ex5_car_reported_at') }};
+          cloud contact: {{ states('sensor.my_geely_ex5_last_updated') }}.

@@ -1,25 +1,73 @@
 {#- Geely Connect - home-screen NEEDS ATTENTION widget.
-    Shows nothing but a tick unless something wants doing.
+    Shows reported problems, incomplete readings, or stale vehicle data.
+    A tick requires every essential reading and a recent vehicle timestamp;
+    it is not a physical inspection of the car.
     Paste the whole file into the companion app's Template widget, then
     search-replace my_geely_ex5 with your own entity suffix.
 
     Thresholds - the only numbers worth changing:
-      tire_min_psi  soft-tire warning IN PSI. Read from the psi attribute,
-                    so it holds whichever unit your sensors display.
+      tire_min_psi  soft-tire warning IN PSI. Converted from the reported
+                    pressure unit (or a legacy psi attribute).
       batt_min      traction battery %
       v12_min       12V battery %
       svc_days      warn when service is this close
       svc_km        ...or this close in km
+      report_max_age_seconds  maximum age of a vehicle report (not cloud contact)
+      optional_readings      entity ids explicitly excluded from completeness
+                             checks, e.g. an unsupported service-distance sensor
 -#}
 {%- set tire_min_psi = 28 -%}
 {%- set batt_min = 20 -%}
 {%- set v12_min = 60 -%}
 {%- set svc_days = 30 -%}
 {%- set svc_km = 1000 -%}
+{%- set report_max_age_seconds = 300 -%}
+{%- set optional_readings = [] -%}
 
 {#- Every field has to be declared up front: each line below reads the field
     before writing it, and reading an undeclared namespace field raises. -#}
-{%- set ns = namespace(items=[], open=[], soft=[]) -%}
+{%- set ns = namespace(items=[], open=[], soft=[], missing=[]) -%}
+
+{#- Valid, stable security readings are required; unknown and transitional
+    states cannot establish closure/locking. Unsupported openings can be
+    explicitly listed in optional_readings above. -#}
+{%- set essential_states = {
+  'binary_sensor.my_geely_ex5_connected': ['on', 'off'],
+  'lock.my_geely_ex5_doors': ['locked', 'unlocked', 'open'],
+  'binary_sensor.my_geely_ex5_door_driver': ['on', 'off'],
+  'binary_sensor.my_geely_ex5_door_passenger': ['on', 'off'],
+  'binary_sensor.my_geely_ex5_door_rear_left': ['on', 'off'],
+  'binary_sensor.my_geely_ex5_door_rear_right': ['on', 'off'],
+  'binary_sensor.my_geely_ex5_trunk': ['on', 'off'],
+  'binary_sensor.my_geely_ex5_hood': ['on', 'off']} -%}
+{%- for eid, valid in essential_states.items() -%}
+  {%- if eid not in optional_readings and states(eid) not in valid -%}
+    {%- set ns.missing = ns.missing + [state_attr(eid, 'friendly_name') or eid] -%}
+  {%- endif -%}
+{%- endfor -%}
+
+{#- A benign numeric fallback suppresses false low-value alarms, but cannot
+    count as a checked reading. Zero 12V and sleeping TPMS are also unchecked. -#}
+{%- set essential_numbers = [
+  'sensor.my_geely_ex5_battery', 'sensor.my_geely_ex5_12v_battery',
+  'sensor.my_geely_ex5_days_to_service', 'sensor.my_geely_ex5_distance_to_service'] -%}
+{%- for eid in essential_numbers -%}
+  {%- set value = states(eid) -%}
+  {%- set valid = is_number(value) -%}
+  {%- if eid.endswith('_12v_battery') -%}
+    {%- set valid = valid and 0 < value | float(0) <= 100 -%}
+  {%- elif eid.endswith('_battery') -%}
+    {%- set valid = valid and 0 <= value | float(-1) <= 100 -%}
+  {%- endif -%}
+  {%- if eid not in optional_readings and not valid -%}
+    {%- set ns.missing = ns.missing + [state_attr(eid, 'friendly_name') or eid] -%}
+  {%- endif -%}
+{%- endfor -%}
+
+{%- set reported = as_timestamp(states('sensor.my_geely_ex5_car_reported_at'), 0) -%}
+{%- if reported <= 0 or not (0 <= as_timestamp(now()) - reported <= report_max_age_seconds) -%}
+  {%- set ns.items = ns.items + ['⚠️ <b>Unable to check:</b> vehicle report is missing, stale or future-dated; reported problems below may be stale'] -%}
+{%- endif -%}
 
 {%- if is_state('binary_sensor.my_geely_ex5_connected', 'off') -%}
   {%- set ns.items = ns.items + ['⚠️ <b>No contact with the car</b> - everything below may be stale'] -%}
@@ -39,8 +87,7 @@
   {%- set ns.items = ns.items + ['🚪 <b>Open:</b> ' ~ (ns.open | join(', '))] -%}
 {%- endif -%}
 
-{#- Only the two states that definitely mean "not secure", so unavailable or
-    unknown never raises a false alarm. -#}
+{#- Unknown readings are listed separately above, not called unlocked. -#}
 {%- if states('lock.my_geely_ex5_doors') in ['unlocked', 'open'] -%}
   {%- set ns.items = ns.items + ['🔓 <b>Doors unlocked</b>'] -%}
 {%- endif -%}
@@ -54,15 +101,26 @@
   {%- endif -%}
 {%- endif -%}
 
-{#- "p > 0" skips a parked car whose TPMS is asleep, and covers a missing
-    attribute, which float(0) turns into 0. -#}
+{#- HA converts pressure and normally reports a unit, not a psi attribute.
+    A sleeping TPMS, missing unit or invalid value is unchecked, not normal. -#}
+{%- set to_psi = {'psi': 1, 'kPa': 0.1450377, 'bar': 14.50377,
+  'Pa': 0.0001450377, 'hPa': 0.01450377, 'mbar': 0.01450377,
+  'inHg': 0.491154, 'mmHg': 0.0193368} -%}
 {%- set tires = {
   'sensor.my_geely_ex5_tire_front_left': 'front left',
   'sensor.my_geely_ex5_tire_front_right': 'front right',
   'sensor.my_geely_ex5_tire_rear_left': 'rear left',
   'sensor.my_geely_ex5_tire_rear_right': 'rear right'} -%}
 {%- for eid, label in tires.items() -%}
-  {%- set p = state_attr(eid, 'psi') | float(0) -%}
+  {%- set legacy_psi = state_attr(eid, 'psi') -%}
+  {%- set p = legacy_psi | float(0) if is_number(legacy_psi) else 0 -%}
+  {%- set unit = state_attr(eid, 'unit_of_measurement') -%}
+  {%- if p <= 0 and unit in to_psi -%}
+    {%- set p = states(eid) | float(0) * to_psi[unit] -%}
+  {%- endif -%}
+  {%- if eid not in optional_readings and (not is_number(states(eid)) or p <= 0) -%}
+    {%- set ns.missing = ns.missing + [label ~ ' tire pressure'] -%}
+  {%- endif -%}
   {%- if p > 0 and p < tire_min_psi -%}
     {%- set ns.soft = ns.soft + [label ~ ' ' ~ (p | round(1))] -%}
   {%- endif -%}
@@ -97,8 +155,12 @@
   {%- set ns.items = ns.items + ['🔧 Service in ' ~ (ns2.svc | join(' / '))] -%}
 {%- endif -%}
 
+{%- if ns.missing -%}
+  {%- set ns.items = ns.items + ['⚠️ <b>Unable to check:</b> ' ~ (ns.missing | join(', '))] -%}
+{%- endif -%}
+
 {%- if ns.items -%}
   {{ ns.items | join('<br>') }}
 {%- else -%}
-  ✅ <b>All good</b><br><i>Nothing needs your attention.</i>
+  ✅ <b>All good</b><br><i>No reported problems in the checked readings.</i>
 {%- endif -%}
