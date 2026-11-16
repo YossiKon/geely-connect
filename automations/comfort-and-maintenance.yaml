@@ -100,8 +100,8 @@
 - id: geely_precool_hot_cabin
   alias: "Geely: pre-cool when the cabin gets hot"
   description: >-
-    Cools the cabin down when the interior temperature climbs above a comfort
-    limit while the car is parked at home.
+    Requests AC cooling when the interior temperature climbs above a comfort
+    limit while the car is reported at home. Does not request window venting.
   mode: single
   triggers:
     # TUNE: hot-cabin threshold in degrees C. "for" avoids reacting to a single
@@ -126,17 +126,10 @@
     - condition: template
       value_template: "{{ has_value('climate.my_geely_ex5_climate') }}"
   actions:
-    # ORDER MATTERS - see the pre-heat automation above. Rapid Cooling also
-    # forces the target temperature to the entity minimum, so it has to run
-    # before the explicit setpoint, not after it.
-    - action: climate.set_preset_mode
-      continue_on_error: true
-      target:
-        entity_id: climate.my_geely_ex5_climate
-      data:
-        preset_mode: Rapid Cooling
-    # Same reason as the pre-heat above: one command at a time.
-    - delay: "00:00:30"
+    # AC only: set_temperature also starts remote climate. Rapid Cooling is
+    # deliberately excluded: on the legacy backend it also requests window
+    # venting. Adding that preset is an explicit opt-in to its compound effects,
+    # not a substitute for this unattended AC-only example.
     # TUNE: cabin target temperature. Valid range is 15.5-28.5 C.
     - action: climate.set_temperature
       target:
@@ -147,8 +140,8 @@
       data:
         title: "Geely: pre-cooling"
         message: >-
-          Cabin reached {{ states('sensor.my_geely_ex5_interior_temperature') }} C.
-          Cooling the car down to 22 C.
+          Cabin reported {{ states('sensor.my_geely_ex5_interior_temperature') }} C.
+          Requested AC cooling to 22 C; window venting was not requested.
 
 - id: geely_tire_pressure_low
   alias: "Geely: tire pressure below limit"
