@@ -94,7 +94,7 @@ def test_unmapped_endpoints_raise_cleanly():
     a, _ = _make_adapter()
     for call in (a.vehicle_status_state,
                  lambda: a.charge_server_get("7"),
-                 lambda: a.scheduled_charging_set(vin=FAKE_VIN)):
+                 lambda: a.scheduled_charging_set(command="start")):
         try:
             call()
             assert False, f"expected NotImplementedError from {call}"
@@ -107,9 +107,10 @@ def test_the_adapter_says_which_endpoints_it_cannot_serve():
     they build an entity on one of these, and the poll before it asks (#88)."""
     a, c = _make_adapter()
     assert a.serves_state is False and a.serves_charge_server is False
-    # Same on the x-vin route: neither endpoint is mapped on either.
+    # On the x-vin route the schedules come from charge-manage (captured
+    # 2026-11-13); the state block is still unmapped.
     c.enc_vin = "opaque-token"
-    assert a.serves_state is False and a.serves_charge_server is False
+    assert a.serves_state is False and a.serves_charge_server is True
 
 
 def test_can_send_is_what_control_would_actually_send():
@@ -121,7 +122,8 @@ def test_can_send_is_what_control_would_actually_send():
         assert a.can_send(sid) is True, sid
     c.enc_vin = "opaque-token"
     assert a.can_send("RDL_2") is True and a.can_send("RHL") is True
-    for sid in ("RSM", "RCS"):
+    assert a.can_send("RCS") is True
+    for sid in ("RSM",):
         assert a.can_send(sid) is False, sid
         try:
             a.control(sid, [])
@@ -999,3 +1001,272 @@ def test_a_refused_rapid_climate_without_a_token_keeps_its_code():
     note, = a.command_trail
     assert note["command"] == "rapid_climate"
     assert note["outcome"] == "rejected" and note["code"] == "8070"
+
+
+# --- charging on the new gateway (capture 2026-11-13, AU EX2) --------------
+
+def _xvin_adapter():
+    a, c = _make_adapter()
+    c.enc_vin = "opaque-token"
+    sent = []
+    c.charge_control_new = lambda command, params: (
+        sent.append(("control", command, params))
+        or {"code": "000000", "data": {"sessionId": "1"}})
+    c.control_new_resp = lambda *args: (_ for _ in ()).throw(
+        AssertionError("RCS must not go out on the remote-control route"))
+    c.set_charging_plan_new = lambda **kw: (
+        sent.append(("plan", kw)) or {"code": "000000", "data": {"sessionId": "2"}})
+    return a, c, sent
+
+
+def test_charging_start_stop_go_to_charge_manage_with_only_the_rcs_flag():
+    a, _, sent = _xvin_adapter()
+    start = [{"key": "operation", "value": "1"}, {"key": "rcs.restart", "value": "1"}]
+    stop = [{"key": "operation", "value": "0"}, {"key": "rcs.terminate", "value": "1"}]
+    assert a.control("RCS", start, "start")["code"] == 1000
+    assert a.control("RCS", stop, "stop")["code"] == 1000
+    assert sent == [
+        ("control", "start", [{"key": "rcs.restart", "value": "1"}]),
+        ("control", "stop", [{"key": "rcs.terminate", "value": "1"}]),
+    ], sent
+
+
+def test_the_schedule_reads_back_in_the_bizType_6_shape():
+    a, c, _ = _xvin_adapter()
+    c.charging_plan_new = lambda: {"code": "000000", "data": {
+        "timerId": "2", "target": "2", "startTime": "23:00", "endTime": "05:00",
+        "command": "start", "bcCycleActive": True, "bcTempActive": False}}
+    for slot in ("2", "6"):
+        r = a.charge_server_get(slot)
+        assert r["code"] == 1000
+        assert r["data"]["bcCycleActive"] == "true"
+        assert r["data"]["bcTempActive"] == "false"
+        assert (r["data"]["rbcStartTime"], r["data"]["rbcEndTime"]) == ("23:00", "05:00")
+        assert r["data"]["rbcTarget"] == "2"
+    # A car that has never held a schedule answers with nulls.
+    c.charging_plan_new = lambda: {"code": "000000", "data": {
+        "timerId": "2", "target": None, "startTime": None, "endTime": None,
+        "bcCycleActive": False}}
+    d = a.charge_server_get("6")["data"]
+    assert d["bcCycleActive"] == "false" and d["rbcStartTime"] == "" and d["rbcTarget"] == "2"
+    c.charging_plan_new = lambda: {"code": "000000", "data": None}
+    assert a.charge_server_get("6")["data"]["bcCycleActive"] == "false"
+
+
+def test_slot_4_is_the_travel_plan_and_other_slots_stay_unmapped():
+    a, c, _ = _xvin_adapter()
+    c.travel_plan_new = lambda: {"code": "000000", "data": {
+        "timerId": "4", "btActive": False, "bw": None}}
+    assert a.charge_server_get("4") == {"code": 1000, "data": {
+        "timerId": "4", "btActive": False, "bw": None}}
+    c.travel_plan_new = lambda: {"code": "000000", "data": None}
+    assert a.charge_server_get("4")["data"] == {}
+    try:
+        a.charge_server_get("7")
+        assert False, "bizType 7 is not a read"
+    except NotImplementedError:
+        pass
+
+
+def test_the_schedule_write_carries_command_window_and_target():
+    a, _, sent = _xvin_adapter()
+    r = a.scheduled_charging_set(command="start", start_time="23:00",
+                                 end_time="05:00", rbc_target="2",
+                                 charge_model="0")
+    assert r["code"] == 1000
+    assert sent == [("plan", {"command": "start", "start_time": "23:00",
+                              "end_time": "05:00", "target": "2"})], sent
+
+
+def test_off_always_goes_out_bare_and_reads_nothing_first():
+    """The service drops a window sent with `stop` (verified live), and the
+    switch's `stop` carries only what HA last read - so it goes out as the app
+    sends it, whatever window it was handed, with no read beforehand (#114
+    review, 2 and 6: the refusal belongs to the caller)."""
+    a, c, sent = _xvin_adapter()
+    c.charging_plan_new = lambda: (_ for _ in ()).throw(
+        AssertionError("stop must not read the plan first"))
+    for window in (("23:00", "05:00"), ("22:30", "05:00"), ("", "")):
+        a.scheduled_charging_set(command="stop", start_time=window[0],
+                                 end_time=window[1])
+        assert sent[-1] == ("plan", {"command": "stop", "start_time": "",
+                                     "end_time": "", "target": "2"}), sent
+    assert a.stores_window_only_with_start is True
+    b, _ = _make_adapter()
+    assert b.stores_window_only_with_start is False
+
+
+def _refusing(c, attr, text):
+    def boom(*_a, **_k):
+        boom.n += 1
+        raise zc.ZeekrApiError(text)
+    boom.n = 0
+    setattr(c, attr, boom)
+    return boom
+
+
+def test_a_079001_on_charge_manage_renews_nothing_and_stops_the_reads():
+    """079001 comes as HTTP 401, which _authed alone would take for a dead
+    session and answer with a password login - signing the phone app out on
+    every poll that reads the schedule (#114 review, 1)."""
+    _patch_idaas()
+    try:
+        a, c = _make_adapter(password="hunter2")
+        c.enc_vin = "opaque-token"
+        logins = []
+        c.login_tsp = lambda tv: logins.append(tv)
+        refused = 'HTTP 401: {"code":"079001","msg":"[SDK]not authorized"}'
+        read = _refusing(c, "charging_plan_new", refused)
+        assert a.serves_charge_server is True
+        try:
+            a.charge_server_get("6")
+            assert False, "a refused read is not a schedule"
+        except zc.ZeekrApiError as e:
+            assert str(e).startswith("code=079001"), e
+        assert read.n == 1 and logins == [], "a 079001 must not renew"
+        assert a.reads_charge_server is False, "the poll must stop asking"
+        assert a.serves_charge_server is True, \
+            "setup purges by this - a refusal must not remove the entities"
+        # A write refused the same way keeps its code and renews nothing.
+        _refusing(c, "set_charging_plan_new", refused)
+        try:
+            a.scheduled_charging_set(command="start", start_time="23:00",
+                                     end_time="05:00")
+            assert False
+        except ad.GeelyControlError as e:
+            assert e.code == "079001", e.code
+        _refusing(c, "charge_control_new", refused)
+        try:
+            a.control("RCS", [{"key": "rcs.terminate", "value": "1"}], "stop")
+            assert False
+        except ad.GeelyControlError as e:
+            assert e.code == "079001", e.code
+        assert logins == []
+        # A real dead session on the same route still renews once.
+        a2, c2 = _make_adapter(password="hunter2")
+        c2.enc_vin = "opaque-token"
+        n = {"calls": 0}
+
+        def plan():
+            n["calls"] += 1
+            if n["calls"] == 1:
+                raise zc.ZeekrApiError(
+                    "code=079021 message=The account is currently logged in elsewhere")
+            return {"code": "000000", "data": {"startTime": "23:00",
+                                               "endTime": "05:00"}}
+        c2.charging_plan_new = plan
+        assert a2.charge_server_get("6")["data"]["rbcStartTime"] == "23:00"
+        assert n["calls"] == 2 and a2.reads_charge_server is True
+    finally:
+        _restore_idaas()
+
+
+def test_a_charge_read_that_ends_in_an_auth_error_costs_one_login():
+    """A 401 or 403 that is not 079001 renews once; if that still ends in
+    GeelyAuthError the reads stop for the session, so each poll does not
+    spend another password login (#114, second review). The entities stay."""
+    _patch_idaas()
+    try:
+        a, c = _make_adapter(password="hunter2")
+        c.enc_vin = "opaque-token"
+        logins = []
+        c.login_tsp = lambda tv: logins.append(tv)
+        read = _refusing(c, "charging_plan_new", "HTTP 403: forbidden")
+        try:
+            a.charge_server_get("6")
+            assert False
+        except ad.GeelyAuthError:
+            pass
+        assert read.n == 2 and len(logins) == 1, (read.n, logins)
+        assert a.reads_charge_server is False
+        assert a.serves_charge_server is True
+        # The same when the renewal itself fails.
+        b, cb = _make_adapter(password="wrong-password")
+        cb.enc_vin = "opaque-token"
+        _refusing(cb, "charging_plan_new", "token expired")
+        try:
+            b.charge_server_get("6")
+            assert False
+        except ad.GeelyAuthError:
+            pass
+        assert b.reads_charge_server is False and b.serves_charge_server is True
+    finally:
+        _restore_idaas()
+
+
+def test_a_non_success_answer_is_handed_back_as_it_came():
+    """Translated into an empty schedule it would replace the good copy, and
+    the next On would write the switch's default window (#114 review, 3)."""
+    a, c, _ = _xvin_adapter()
+    bad = {"code": "037005", "msg": "execution failed", "data": None}
+    c.charging_plan_new = lambda: bad
+    c.travel_plan_new = lambda: bad
+    assert a.charge_server_get("6") is bad
+    assert a.charge_server_get("4") is bad
+
+
+def test_a_refused_schedule_write_is_a_control_error_with_its_code():
+    """As control() and rapid_climate raise it, so the trail keeps the code
+    and the switch shows a refusal rather than a traceback (#114 review, 5)."""
+    a, c, _ = _xvin_adapter()
+    _refusing(c, "set_charging_plan_new", "code=037000 message=parameter is incorrect")
+    try:
+        a.scheduled_charging_set(command="start", start_time="23:00", end_time="05:00")
+        assert False
+    except ad.GeelyControlError as e:
+        assert e.code == "037000", e.code
+
+
+def test_the_scheduled_trip_is_read_but_not_written_on_this_route():
+    """#114 review, 4: the service stops before its read, as before."""
+    a, _, _ = _xvin_adapter()
+    assert a.serves_trip_write is False
+    try:
+        a.scheduled_trip_set(command="stop")
+        assert False
+    except NotImplementedError:
+        pass
+
+
+def test_the_client_builds_the_captured_charging_bodies():
+    c = zc.ZeekrClient.__new__(zc.ZeekrClient)
+    c.access_token, c.enc_vin = "at", "opaque-token"
+    seen = []
+    c._request = lambda method, path, body=b"", query="", signer="v2", **_: (
+        seen.append((method, path, json.loads(body) if body else None))
+        or {"code": "000000"})
+    c.charge_control_new("stop", [{"key": "rcs.terminate", "value": "1"}])
+    c.charging_plan_new()
+    c.travel_plan_new()
+    c.set_charging_plan_new(command="start", start_time="23:00", end_time="05:00")
+    c.set_charging_plan_new(command="stop")
+    base = "/ms-charge-manage/api/v1.0/charge/"
+    assert seen == [
+        ("POST", base + "control", {"command": "stop", "serviceId": "RCS",
+            "setting": {"serviceParameters": [{"key": "rcs.terminate", "value": "1"}]}}),
+        ("GET", base + "getChargingPlan", None),
+        ("GET", base + "getLatestTravelPlan", None),
+        ("POST", base + "setChargingPlan", {"bcCycleActive": False,
+            "bcTempActive": False, "command": "start", "target": "2",
+            "timerId": "2", "startTime": "23:00", "endTime": "05:00",
+            "scheduledTime": ""}),
+        ("POST", base + "setChargingPlan", {"bcCycleActive": False,
+            "bcTempActive": False, "command": "stop", "target": "2",
+            "timerId": "2"}),
+    ], seen
+    for fn in (lambda: c.charge_control_new("stop"), c.charging_plan_new,
+               c.travel_plan_new, lambda: c.set_charging_plan_new(command="stop")):
+        for at, xv in ((None, "x"), ("at", None)):
+            c.access_token, c.enc_vin = at, xv
+            try:
+                fn()
+                assert False, "expected ZeekrAuthError"
+            except zc.ZeekrAuthError:
+                pass
+        c.access_token, c.enc_vin = "at", "opaque-token"
+
+
+def test_only_the_gateways_success_code_becomes_1000():
+    assert ad.ZeekrAdapter._ok_1000({"code": "000000"})["code"] == 1000
+    assert ad.ZeekrAdapter._ok_1000({"code": "037000"}) == {"code": "037000"}
+    assert ad.ZeekrAdapter._ok_1000(None) is None

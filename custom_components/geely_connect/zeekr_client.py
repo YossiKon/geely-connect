@@ -1232,6 +1232,99 @@ class ZeekrClient:
             "POST", "/ms-remote-control/v1.0/remoteControl/setSmartTemp",
             body=json.dumps(body).encode(), signer="snc")
 
+    def charge_control_new(self, command: str,
+                           parameters: list[dict] | None = None) -> dict:
+        """Start / stop charging on the NEW gateway (capture-verified 2026-11-13).
+
+        Not the remote-control route every other command takes: charging has
+        its own service, POST /ms-charge-manage/api/v1.0/charge/control, with
+        the same small body shape. The app sent, for an AU EX2:
+
+            {"command": "stop",  "serviceId": "RCS",
+             "setting": {"serviceParameters": [{"key": "rcs.terminate", "value": "1"}]}}
+            {"command": "start", "serviceId": "RCS",
+             "setting": {"serviceParameters": [{"key": "rcs.restart", "value": "1"}]}}
+        -> {"code": "000000", "data": {"sessionId": "..."}}
+        """
+        if not self.access_token:
+            raise ZeekrAuthError("not logged in (no new-platform session)")
+        if not self.enc_vin:
+            raise ZeekrAuthError("no x-vin vehicle token configured")
+        body = {
+            "command": command,
+            "serviceId": "RCS",
+            "setting": {"serviceParameters": parameters or []},
+        }
+        return self._request(
+            "POST", "/ms-charge-manage/api/v1.0/charge/control",
+            body=json.dumps(body).encode(), signer="snc")
+
+    def charging_plan_new(self) -> dict:
+        """The car's charging schedule on the NEW gateway (capture-verified).
+
+        GET /ms-charge-manage/api/v1.0/charge/getChargingPlan, no query - the
+        vehicle comes from the x-vin header. data looks like
+
+            {"timerId": "2", "target": "2", "startTime": "23:00",
+             "endTime": "05:00", "command": "start", "bcCycleActive": true,
+             "bcTempActive": false, ...}
+        """
+        if not self.access_token:
+            raise ZeekrAuthError("not logged in (no new-platform session)")
+        if not self.enc_vin:
+            raise ZeekrAuthError("no x-vin vehicle token configured")
+        return self._request(
+            "GET", "/ms-charge-manage/api/v1.0/charge/getChargingPlan",
+            query="", signer="snc")
+
+    def travel_plan_new(self) -> dict:
+        """The app's Scheduled trip on the NEW gateway (read only, captured).
+
+        GET /ms-charge-manage/api/v1.0/charge/getLatestTravelPlan - carries the
+        same btActive / btTempActive / bw fields as charge-server slot 4."""
+        if not self.access_token:
+            raise ZeekrAuthError("not logged in (no new-platform session)")
+        if not self.enc_vin:
+            raise ZeekrAuthError("no x-vin vehicle token configured")
+        return self._request(
+            "GET", "/ms-charge-manage/api/v1.0/charge/getLatestTravelPlan",
+            query="", signer="snc")
+
+    def set_charging_plan_new(self, *, command: str, start_time: str = "",
+                              end_time: str = "", target: str = "2") -> dict:
+        """Write the charging schedule on the NEW gateway (capture-verified).
+
+        POST /ms-charge-manage/api/v1.0/charge/setChargingPlan. The app sent
+
+            on:   {"bcCycleActive": false, "bcTempActive": false,
+                   "command": "start", "startTime": "23:00", "endTime": "05:00",
+                   "scheduledTime": "", "target": "2", "timerId": "2"}
+            off:  {"bcCycleActive": false, "bcTempActive": false,
+                   "command": "stop", "target": "2", "timerId": "2"}
+
+        `command` is the on/off; the two *Active flags go out false either way
+        and the car's read-back sets bcCycleActive from the command. The
+        gateway only stores a window that arrives with `start`: sent with
+        `stop` it answers 000000 and keeps the old one (verified 2026-11-13),
+        which is why the adapter sends `stop` without one.
+        """
+        if not self.access_token:
+            raise ZeekrAuthError("not logged in (no new-platform session)")
+        if not self.enc_vin:
+            raise ZeekrAuthError("no x-vin vehicle token configured")
+        body = {
+            "bcCycleActive": False,
+            "bcTempActive": False,
+            "command": command,
+            "target": target or "2",
+            "timerId": "2",
+        }
+        if start_time and end_time:
+            body.update(startTime=start_time, endTime=end_time, scheduledTime="")
+        return self._request(
+            "POST", "/ms-charge-manage/api/v1.0/charge/setChargingPlan",
+            body=json.dumps(body).encode(), signer="snc")
+
     def vehicle_status_new_resp(self) -> dict:
         """Live status from the NEW gateway, for vehicles that live there.
 

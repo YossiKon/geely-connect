@@ -930,6 +930,36 @@ def test_time_set_on_an_inactive_or_empty_schedule_keeps_it_off():
         "rbc_target": "2", "charge_model": "0"})], api2.calls
 
 
+def test_a_window_change_while_off_is_refused_where_windows_need_start():
+    """The new platform's charge service keeps a window only when it comes
+    with `start`; sent with `stop` it is acknowledged and lost. The time
+    entity is the one caller that knows it is changing the window, so it
+    refuses there - with or without a window on the car (#114 review, 2, 6)."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    t = load("time")
+    for sched in ({"rbcStartTime": "23:00", "rbcEndTime": "07:00",
+                   "bcCycleActive": "false"}, {}):
+        api = _Api()
+        api.stores_window_only_with_start = True
+        hass, b = _bundle(_status(sched=sched), api=api)
+        ent = _quiet(t.GeelyScheduledChargingTime(hass, b, "start"))
+        with _patched(t, schedule_refresh=_RefreshRec(), time_mod=_Clock()):
+            e = _expect_error(ent.async_set_value(dtime(22, 30)))
+        assert "switch it on first" in str(e), e
+        assert api.calls == [] and ent._optimistic_value is None
+    # With the schedule on, the change goes out with `start` as before.
+    api = _Api()
+    api.stores_window_only_with_start = True
+    sched = {"rbcStartTime": "23:00", "rbcEndTime": "07:00", "bcCycleActive": "true"}
+    hass, b = _bundle(_status(sched=sched), api=api)
+    ent = _quiet(t.GeelyScheduledChargingTime(hass, b, "start"))
+    with _patched(t, schedule_refresh=_RefreshRec(), time_mod=_Clock()):
+        asyncio.run(ent.async_set_value(dtime(22, 30)))
+    assert api.calls[0][1]["command"] == "start"
+    assert api.calls[0][1]["start_time"] == "22:30"
+
+
 def test_time_value_reads_its_field_and_holds_optimistically():
     if not have_homeassistant():
         skip("homeassistant not installed")
