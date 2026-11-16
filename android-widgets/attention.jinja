@@ -10,16 +10,62 @@
       v12_min       12V battery %
       svc_days      warn when service is this close
       svc_km        ...or this close in km
+
+    Two checks, both off - turn on what you want:
+      check_readings          true lists a door, trunk, hood, lock, contact
+                              or battery reading the car did not give as
+                              "Unable to check" instead of showing the tick.
+                              Leave out what your trim never reports with
+                              optional_readings.
+      report_max_age_seconds  the oldest report from the car (Car Reported
+                              At, not cloud contact), in seconds, that still
+                              counts. A parked car is asleep and its last
+                              report is usually hours old, so a small value
+                              reads "Unable to check" most of the time.
 -#}
 {%- set tire_min_psi = 28 -%}
 {%- set batt_min = 20 -%}
 {%- set v12_min = 60 -%}
 {%- set svc_days = 30 -%}
 {%- set svc_km = 1000 -%}
+{%- set check_readings = false -%}
+{%- set optional_readings = [] -%}
+{%- set report_max_age_seconds = 0 -%}
 
 {#- Every field has to be declared up front: each line below reads the field
     before writing it, and reading an undeclared namespace field raises. -#}
-{%- set ns = namespace(items=[], open=[], soft=[]) -%}
+{%- set ns = namespace(items=[], open=[], soft=[], missing=[]) -%}
+
+{%- if report_max_age_seconds | int(0) > 0 -%}
+  {%- set reported = as_timestamp(states('sensor.my_geely_ex5_car_reported_at'), 0) -%}
+  {%- if reported <= 0 or not (0 <= as_timestamp(now()) - reported <= report_max_age_seconds | int(0)) -%}
+    {%- set ns.items = ns.items + ['⚠️ <b>Unable to check:</b> no report from the car within ' ~ (report_max_age_seconds | int(0)) ~ ' s - everything below may be stale'] -%}
+  {%- endif -%}
+{%- endif -%}
+
+{#- A lock or unlock sent from Home Assistant reads locking / unlocking for a
+    while: a reading, not a missing one. -#}
+{%- if check_readings -%}
+  {%- set readings = {
+    'binary_sensor.my_geely_ex5_connected': ['on', 'off'],
+    'lock.my_geely_ex5_doors': ['locked', 'unlocked', 'open', 'opening',
+                                'locking', 'unlocking', 'jammed'],
+    'binary_sensor.my_geely_ex5_door_driver': ['on', 'off'],
+    'binary_sensor.my_geely_ex5_door_passenger': ['on', 'off'],
+    'binary_sensor.my_geely_ex5_door_rear_left': ['on', 'off'],
+    'binary_sensor.my_geely_ex5_door_rear_right': ['on', 'off'],
+    'binary_sensor.my_geely_ex5_trunk': ['on', 'off'],
+    'binary_sensor.my_geely_ex5_hood': ['on', 'off']} -%}
+  {%- for eid, valid in readings.items() -%}
+    {%- if eid not in optional_readings and states(eid) not in valid -%}
+      {%- set ns.missing = ns.missing + [state_attr(eid, 'friendly_name') or eid] -%}
+    {%- endif -%}
+  {%- endfor -%}
+  {%- set batt = 'sensor.my_geely_ex5_battery' -%}
+  {%- if batt not in optional_readings and not is_number(states(batt)) -%}
+    {%- set ns.missing = ns.missing + [state_attr(batt, 'friendly_name') or batt] -%}
+  {%- endif -%}
+{%- endif -%}
 
 {%- if is_state('binary_sensor.my_geely_ex5_connected', 'off') -%}
   {%- set ns.items = ns.items + ['⚠️ <b>No contact with the car</b> - everything below may be stale'] -%}
@@ -95,6 +141,10 @@
 {%- endif -%}
 {%- if ns2.svc -%}
   {%- set ns.items = ns.items + ['🔧 Service in ' ~ (ns2.svc | join(' / '))] -%}
+{%- endif -%}
+
+{%- if ns.missing -%}
+  {%- set ns.items = ns.items + ['⚠️ <b>Unable to check:</b> ' ~ (ns.missing | join(', '))] -%}
 {%- endif -%}
 
 {%- if ns.items -%}

@@ -287,6 +287,7 @@
     At bedtime, refreshes the car data and reports anything left unlocked,
     open or ajar - plus anything the car did not report, so an unavailable
     sensor is never mistaken for a closed door. Stays silent when all is well.
+    Optionally also checks the age of the car's own last report.
   mode: single
   triggers:
     - trigger: time
@@ -295,7 +296,17 @@
   actions:
     # Remember the current poll timestamp before asking for a new one, so we
     # can tell a genuinely fresh reading from the one we already had.
+    #
+    # TUNE: report_max_age_seconds is off (0). Set it to the oldest report from
+    # the car, in seconds, that still counts as tonight's: the wait below then
+    # waits for Car Reported At to fall inside that age rather than for Last
+    # Updated - cloud contact, which a poll moves even when the car sent
+    # nothing new - and a report older than that at the end of the wait sends
+    # "Could not verify" with both timestamps. A parked car is asleep and its
+    # last report is usually hours old, so a small age warns most nights.
     - variables:
+        report_max_age_seconds: 0
+        age_check: "{{ report_max_age_seconds | int(0) > 0 }}"
         poll_before: "{{ states('sensor.my_geely_ex5_last_updated') }}"
     # Wake the car so the report is based on fresh data. Remove these three
     # steps (the variables above, the button press and the wait below) if you
@@ -308,8 +319,14 @@
     # Wait for the poll timestamp to actually change instead of guessing at a
     # delay, so the report is never built from the pre-refresh reading.
     - wait_template: >-
+        {% if age_check %}
+        {% set reported = as_timestamp(states('sensor.my_geely_ex5_car_reported_at'), 0) %}
+        {{ reported > 0
+           and 0 <= as_timestamp(now()) - reported <= report_max_age_seconds | int(0) }}
+        {% else %}
         {{ states('sensor.my_geely_ex5_last_updated') not in ['unknown', 'unavailable']
         and states('sensor.my_geely_ex5_last_updated') != poll_before }}
+        {% endif %}
       timeout:
         seconds: 120
       continue_on_timeout: true
@@ -320,6 +337,12 @@
       value_template: >-
         {{ states('lock.my_geely_ex5_doors') not in ['unknown', 'unavailable'] }}
     - variables:
+        # Always true with the age check off. A future time is not recent.
+        fresh_report: >-
+          {% set reported = as_timestamp(states('sensor.my_geely_ex5_car_reported_at'), 0) %}
+          {{ not age_check
+             or (reported > 0
+                 and 0 <= as_timestamp(now()) - reported <= report_max_age_seconds | int(0)) }}
         # Everything that is genuinely open or unlocked right now.
         problems: |-
           {%- set ns = namespace(items=[]) -%}
@@ -350,9 +373,11 @@
         # as "closed" - the whole point of this automation is to be sure.
         # TUNE: if your car never reports one of these, delete it from BOTH
         # lists so the nightly report stops mentioning it every single night.
+        # The lock only reaches this list if you delete the condition above.
         unchecked: |-
           {%- set ns = namespace(items=[]) -%}
           {%- set watched = [
+                'lock.my_geely_ex5_doors',
                 'binary_sensor.my_geely_ex5_door_driver',
                 'binary_sensor.my_geely_ex5_door_passenger',
                 'binary_sensor.my_geely_ex5_door_rear_left',
@@ -371,14 +396,21 @@
     # All clear and everything readable - say nothing.
     - condition: template
       value_template: >-
-        {{ problems | trim | length > 0 or unchecked | trim | length > 0 }}
+        {{ not fresh_report or problems | trim | length > 0
+           or unchecked | trim | length > 0 }}
     - action: notify.mobile_app_your_phone
       data:
         title: "Geely EX5 - bedtime check"
         message: |-
+          {%- if not fresh_report -%}
+          Could not verify: no report from the car within {{ report_max_age_seconds | int(0) }} s. Readings below may be stale.
+          {% endif -%}
           {%- if problems | trim | length > 0 -%}
           Before you turn in: {{ problems | trim }}.
           {%- endif -%}
           {%- if unchecked | trim | length > 0 -%}
           {{ ' ' if problems | trim | length > 0 else '' }}No reading from the car for: {{ unchecked | trim }}.
+          {%- endif -%}
+          {%- if age_check %}
+          Car report: {{ states('sensor.my_geely_ex5_car_reported_at') }}; cloud contact: {{ states('sensor.my_geely_ex5_last_updated') }}.
           {%- endif -%}
