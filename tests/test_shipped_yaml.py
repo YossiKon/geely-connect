@@ -340,6 +340,21 @@ def test_the_shipped_automations_are_structurally_sound():
                 f"{entry['id']} has no action")
 
 
+def test_the_unattended_pre_cool_asks_for_cooling_and_not_for_the_windows():
+    """Rapid Cooling is the app's compound button: on the original backend its
+    body also asks for window ventilation (api.rapid_climate sends vlt true).
+    The hot-cabin example fires by itself whenever the car is at home, with
+    nobody beside it, so its one command to the car is a temperature - which
+    starts the climate - and never the preset (#118)."""
+    loader = _loader()
+    path = os.path.join(ROOT, "automations", "comfort-and-maintenance.yaml")
+    entry, = [e for e in loader.load_yaml(path)
+              if e.get("id") == "geely_precool_hot_cabin"]
+    to_the_car = [s for s in entry["actions"] if _is_car_command(s)]
+    assert [_call(s) for s in to_the_car] == ["climate.set_temperature"], to_the_car
+    assert "preset_mode" not in (to_the_car[0].get("data") or {}), to_the_car
+
+
 # ------------------------------------------- the one that keeps coming back ---
 
 def test_no_shipped_yaml_fires_two_car_commands_back_to_back():
