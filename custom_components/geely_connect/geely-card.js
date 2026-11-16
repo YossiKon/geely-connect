@@ -3342,17 +3342,15 @@
       // The driver sits left in LHD markets and right in RHD ones; the rear
       // door sensors are side-named already and never swap.
       const rhd = this._isRHD();
-      // The tire entities are named from the car's own driver/passenger
-      // fields under a left-hand-drive assumption, exactly like the front
-      // doors - tyreStatusDriver becomes tire_front_left. So on a
-      // right-hand-drive car all four mirror, or the drawing would put the
-      // driver's door on the right and the driver's tire on the left.
+      // The tires never swap either. Their fields are worded driver and
+      // passenger like the front doors', and this view mirrored all four on
+      // that reasoning - but they name sides, like the rear doors': on a
+      // right-hand-drive EX5 the soft tire was front right on the car's own
+      // screen and in tire_front_right, and this view drew it front left
+      // while the full card, which never mirrored, had it right (#122).
       const d = {
-        tires: rhd
-          ? { fl: tire("front_right"), fr: tire("front_left"),
-              rl: tire("rear_right"), rr: tire("rear_left") }
-          : { fl: tire("front_left"), fr: tire("front_right"),
-              rl: tire("rear_left"), rr: tire("rear_right") },
+        tires: { fl: tire("front_left"), fr: tire("front_right"),
+                 rl: tire("rear_left"), rr: tire("rear_right") },
         doors: { fl: isOpen(rhd ? "door_passenger" : "door_driver"),
                  fr: isOpen(rhd ? "door_driver" : "door_passenger"),
                  rl: isOpen("door_rear_left"), rr: isOpen("door_rear_right") },

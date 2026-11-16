@@ -330,21 +330,24 @@ def test_the_top_view_draws_the_drivers_door_on_the_drivers_side():
         assert got == [side], (country, cfg, got)
 
 
-def test_the_top_view_mirrors_the_tires_with_the_doors():
-    """The tire entities are named from the same driver/passenger fields under
-    the same left-hand-drive assumption, so they have to mirror together - or
-    the drawing puts the driver's door on the right and the driver's tire on
-    the left. front_left reads 220 kPa here and front_right 240."""
+def test_the_top_view_keeps_the_tires_on_their_own_sides():
+    """The tire fields are worded driver and passenger like the front doors',
+    so this view mirrored them with the doors on a right-hand-drive car. They
+    name sides: an Australian EX5's own screen had its soft tire front right,
+    where tire_front_right and the full card had it, and this view drew it
+    front left (#122). front_left reads 220 kPa here and front_right 240,
+    with rear_left 260 and rear_right 280."""
     probe = """(() => {
         const at = (x) => [...el.shadowRoot.querySelectorAll('.cartop text.tv-val')]
           .filter((t) => Number(t.getAttribute('x')) === x)
           .map((t) => t.textContent);
         return { left: at(42), right: at(358) };
     })()"""
-    lhd = _mount("geely-card-top", probe, country="IL")
-    rhd = _mount("geely-card-top", probe, country="AU")
-    assert lhd["left"][0] == "220" and lhd["right"][0] == "240", lhd
-    assert rhd["left"][0] == "240" and rhd["right"][0] == "220", rhd
+    for country, cfg in (("IL", {}), ("AU", {}), ("AU", {"rhd": False}),
+                         ("IL", {"rhd": True})):
+        got = _mount("geely-card-top", probe, cfg=cfg, country=country)
+        assert got["left"][0] == "220" and got["right"][0] == "240", (country, cfg, got)
+        assert got["left"][1] == "260" and got["right"][1] == "280", (country, cfg, got)
 
 
 # The sensor reports 2.50 bar; rounding it in the card used to print 3.
