@@ -820,12 +820,11 @@ automation:
         entity_id: device_tracker.my_geely_ex5_location
         state: home
     action:
+      # One command: setting the temperature also starts the climate. A second
+      # one sent straight after it is refused while the car handles the first.
       - service: climate.set_temperature
         target: { entity_id: climate.my_geely_ex5_climate }
         data: { temperature: 22 }
-      - service: climate.set_hvac_mode
-        target: { entity_id: climate.my_geely_ex5_climate }
-        data: { hvac_mode: heat_cool }
 ```
 
 **Auto-lock when you leave home**

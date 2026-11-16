@@ -3344,10 +3344,12 @@
       const rhd = this._isRHD();
       // The tires never swap either. Their fields are worded driver and
       // passenger like the front doors', and this view mirrored all four on
-      // that reasoning - but they name sides, like the rear doors': on a
+      // that reasoning - but the front pair names sides: on a
       // right-hand-drive EX5 the soft tire was front right on the car's own
       // screen and in tire_front_right, and this view drew it front left
-      // while the full card, which never mirrored, had it right (#122).
+      // while the full card, which never mirrored, had it right (#122). The
+      // rear pair read alike that day, so nothing was seen for it; it stays
+      // where its entities' names put it, as on the full card.
       const d = {
         tires: { fl: tire("front_left"), fr: tire("front_right"),
                  rl: tire("rear_left"), rr: tire("rear_right") },

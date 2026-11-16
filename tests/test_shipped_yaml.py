@@ -344,15 +344,18 @@ def test_the_unattended_pre_cool_asks_for_cooling_and_not_for_the_windows():
     """Rapid Cooling is the app's compound button: on the original backend its
     body also asks for window ventilation (api.rapid_climate sends vlt true).
     The hot-cabin example fires by itself whenever the car is at home, with
-    nobody beside it, so its one command to the car is a temperature - which
-    starts the climate - and never the preset (#118)."""
+    nobody beside it, so it sets a temperature - which starts the climate -
+    and every other call in it, at any depth, is a notification: the preset,
+    a window cover or a raw service call would each be something else (#118)."""
     loader = _loader()
     path = os.path.join(ROOT, "automations", "comfort-and-maintenance.yaml")
     entry, = [e for e in loader.load_yaml(path)
               if e.get("id") == "geely_precool_hot_cabin"]
-    to_the_car = [s for s in entry["actions"] if _is_car_command(s)]
-    assert [_call(s) for s in to_the_car] == ["climate.set_temperature"], to_the_car
-    assert "preset_mode" not in (to_the_car[0].get("data") or {}), to_the_car
+    calls = [str(_call(s)) for block, _ in _blocks(entry) for s in block if _call(s)]
+    assert "climate.set_temperature" in calls, calls
+    others = [c for c in calls
+              if c != "climate.set_temperature" and not c.startswith("notify.")]
+    assert not others, others
 
 
 # ------------------------------------------- the one that keeps coming back ---
