@@ -2143,12 +2143,19 @@ def test_the_slot_2_read_at_setup_leaves_the_data_alone_when_it_fails():
                 lambda biz: {"code": 1000, "data": "nonsense"}):
         api = types.SimpleNamespace(charge_server_get=get)
         assert run(api, dict(keep)) == keep
+    # An api that does not serve the slot, or has stopped reading it, is not
+    # asked at all. The getter answers well, so only the gate can keep the
+    # data as it was - a getter that raised was swallowed either way.
+    def good(biz):
+        return {"code": 1000, "data": {"bizType": 2}}
     served = types.SimpleNamespace(serves_charge_server=False,
-                                   charge_server_get=lambda biz: 1 / 0)
+                                   charge_server_get=good)
     assert run(served, dict(keep)) == keep
     stopped = types.SimpleNamespace(reads_charge_server=False,
-                                    charge_server_get=lambda biz: 1 / 0)
+                                    charge_server_get=good)
     assert run(stopped, dict(keep)) == keep
+    assert run(types.SimpleNamespace(charge_server_get=good), dict(keep)) == {
+        "_scheduled_charging": {"bizType": 2}}
     assert run(types.SimpleNamespace(charge_server_get=lambda biz: 1 / 0), None) is None
 
 

@@ -1194,6 +1194,177 @@ def test_a_charge_read_that_ends_in_an_auth_error_costs_one_login():
         _restore_idaas()
 
 
+def test_once_the_reads_have_stopped_a_charge_call_renews_only_for_a_lost_session():
+    """The diagnostics sweep, a schedule write and a charging press do not ask
+    reads_charge_server. On a car whose charge-manage answers 403 each would
+    spend another password login after the poll had stopped (#114, third
+    review, 1): the answer comes back as the refusal it is. A session another
+    sign-in has replaced is still renewed, as the next poll would."""
+    _patch_idaas()
+    try:
+        a, c = _make_adapter(password="hunter2")
+        c.enc_vin = "opaque-token"
+        logins = []
+        c.login_tsp = lambda tv: logins.append(tv)
+        forbidden = "HTTP 403: forbidden"
+        _refusing(c, "charging_plan_new", forbidden)
+        try:
+            a.charge_server_get("6")
+            assert False
+        except ad.GeelyAuthError:
+            pass
+        assert len(logins) == 1 and a.reads_charge_server is False
+        # The sweep's three reads, a write and a press: no further login.
+        _refusing(c, "travel_plan_new", forbidden)
+        for slot in ("2", "4", "6"):
+            try:
+                a.charge_server_get(slot)
+                assert False
+            except zc.ZeekrApiError as e:
+                assert "403" in str(e), e
+        _refusing(c, "set_charging_plan_new", forbidden)
+        try:
+            a.scheduled_charging_set(command="stop")
+            assert False
+        except ad.GeelyControlError:
+            pass
+        _refusing(c, "charge_control_new", forbidden)
+        try:
+            a.control("RCS", [{"key": "rcs.terminate", "value": "1"}], "stop")
+            assert False
+        except ad.GeelyControlError:
+            pass
+        assert len(logins) == 1, logins
+        # The phone app took the session: one renewal, and the press goes out.
+        calls = []
+
+        def replaced_once(command, params):
+            calls.append(command)
+            if len(calls) < 3:
+                raise zc.ZeekrApiError(
+                    "code=079021 message=The account is currently logged in elsewhere")
+            return {"code": "000000", "data": {"sessionId": "9"}}
+        c.charge_control_new = replaced_once
+        assert a.control("RCS", [{"key": "rcs.restart", "value": "1"}],
+                         "start")["code"] == 1000
+        assert len(logins) == 2 and len(calls) == 3, (logins, calls)
+        # A session that is missing altogether is renewed the same way.
+        seen = []
+
+        def missing_once(command, params):
+            seen.append(command)
+            if len(seen) < 3:
+                raise zc.ZeekrAuthError("not logged in (no new-platform session)")
+            return {"code": "000000", "data": {"sessionId": "10"}}
+        c.charge_control_new = missing_once
+        assert a.control("RCS", [{"key": "rcs.terminate", "value": "1"}],
+                         "stop")["code"] == 1000
+        assert len(logins) == 3 and len(seen) == 3, (logins, seen)
+        assert a.reads_charge_server is False, "a press does not start the reads"
+    finally:
+        _restore_idaas()
+
+
+def test_a_failed_sign_in_during_a_press_keeps_the_reads_and_a_renewal_that_cures_nothing_stops_them():
+    """A write or a press whose sign-in itself failed says nothing about the
+    charging service: one bad moment there would otherwise freeze the
+    schedule until a restart (#114, third review, 2). A renewal that went
+    through and changed nothing does stop the reads, and so does any failure
+    of a read a renewal was just spent on - a gateway error or a timeout as
+    much as a refusal - so the reads cost one login at most."""
+    _patch_idaas()
+    try:
+        b, cb = _make_adapter(password="wrong-password")
+        cb.enc_vin = "opaque-token"
+        _refusing(cb, "charge_control_new", "HTTP 403: forbidden")
+        try:
+            b.control("RCS", [{"key": "rcs.restart", "value": "1"}], "start")
+            assert False
+        except ad.GeelyAuthError:
+            pass
+        _refusing(cb, "set_charging_plan_new", "token expired")
+        try:
+            b.scheduled_charging_set(command="stop")
+            assert False
+        except ad.GeelyAuthError:
+            pass
+        assert b.reads_charge_server is True
+        # A read that meets a gateway error with no renewal spent on it.
+        _refusing(cb, "charging_plan_new", "HTTP 502: bad gateway")
+        try:
+            b.charge_server_get("6")
+            assert False
+        except zc.ZeekrApiError:
+            pass
+        assert b.reads_charge_server is True
+
+        # A press the renewal went through for, and still refused.
+        a, c = _make_adapter(password="hunter2")
+        c.enc_vin = "opaque-token"
+        logins = []
+        c.login_tsp = lambda tv: logins.append(tv)
+        _refusing(c, "charge_control_new", "HTTP 403: forbidden")
+        try:
+            a.control("RCS", [{"key": "rcs.restart", "value": "1"}], "start")
+            assert False
+        except ad.GeelyAuthError:
+            pass
+        assert len(logins) == 1 and a.reads_charge_server is False
+
+        # A press: 403, a renewal, then a gateway error. That is a press that
+        # failed, not a service that refuses, and the reads go on.
+        q, cq = _make_adapter(password="hunter2")
+        cq.enc_vin = "opaque-token"
+        press_answers = [zc.ZeekrApiError("HTTP 403: forbidden"),
+                         zc.ZeekrApiError("HTTP 502: bad gateway")]
+
+        def press(command, params):
+            raise press_answers.pop(0)
+        cq.charge_control_new = press
+        try:
+            q.control("RCS", [{"key": "rcs.restart", "value": "1"}], "start")
+            assert False
+        except ad.GeelyControlError:
+            pass
+        assert q.reads_charge_server is True
+
+        # A 079001 on a press, before any read was refused, stops the reads:
+        # it is the service's own answer about this car, and costs no login.
+        p, cp = _make_adapter(password="hunter2")
+        cp.enc_vin = "opaque-token"
+        signed_in = []
+        cp.login_tsp = lambda tv: signed_in.append(tv)
+        _refusing(cp, "charge_control_new",
+                  'HTTP 401: {"code":"079001","msg":"[SDK]not authorized"}')
+        try:
+            p.control("RCS", [{"key": "rcs.restart", "value": "1"}], "start")
+            assert False
+        except ad.GeelyControlError as e:
+            assert e.code == "079001", e.code
+        assert p.reads_charge_server is False and signed_in == []
+
+        # A read: 403, a renewal, then something else on the fresh session.
+        for second in (zc.ZeekrApiError("HTTP 502: bad gateway"),
+                       TimeoutError("timed out")):
+            a, c = _make_adapter(password="hunter2")
+            c.enc_vin = "opaque-token"
+            logins = []
+            c.login_tsp = lambda tv: logins.append(tv)
+            answers = [zc.ZeekrApiError("HTTP 403: forbidden"), second]
+
+            def plan():
+                raise answers.pop(0)
+            c.charging_plan_new = plan
+            try:
+                a.charge_server_get("6")
+                assert False
+            except type(second):
+                pass
+            assert len(logins) == 1 and a.reads_charge_server is False, second
+    finally:
+        _restore_idaas()
+
+
 def test_a_non_success_answer_is_handed_back_as_it_came():
     """Translated into an empty schedule it would replace the good copy, and
     the next On would write the switch's default window (#114 review, 3)."""

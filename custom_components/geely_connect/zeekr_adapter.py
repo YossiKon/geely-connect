@@ -15,8 +15,8 @@ Error mapping:
 Known gaps - raise cleanly, and the coordinator already treats
 secondary-endpoint failures as non-fatal and carries state forward:
   - vehicle_status_state   (legacy /remote-control/vehicle/status/state/{vin})
-  - charge_server_get      (legacy /charge-server/ecarx_charge_set GET)
-  - scheduled_charging_set (charge-server write)
+  - charge_server_get and scheduled_charging_set without an x-vin (with one
+    they go to the new gateway's charge-manage service, #114)
   - rapid_climate on a car with an x-vin is the new gateway's setSmartTemp;
     without one it is the charge-server bizType=7 write the iOS app sends
 
@@ -67,6 +67,12 @@ _AUTH_STATUS = re.compile(r"\bhttp\s+40[13]\b|\bcode\W{0,4}40[13]\b")
 class _ChargeRefused(Exception):
     """A 079001 from the charge-manage service, carried past _authed so it is
     not mistaken for a dead session (see ZeekrAdapter._authed_charge)."""
+
+
+# How the gateway words a session another sign-in has replaced (the phone
+# app's, usually): the one auth failure _authed_charge still renews for once
+# the schedule reads have stopped.
+_SESSION_REPLACED = ("079021", "logged in elsewhere")
 
 
 def _looks_authy(text: str) -> bool:
@@ -606,8 +612,7 @@ class ZeekrAdapter(CommandTrail):
     @property
     def reads_charge_server(self) -> bool:
         """Whether the poll still reads the schedules this session: false
-        once charge-manage has refused this car, or a read of it has ended in
-        a failed renewal - see _authed_charge."""
+        once a read of them has failed for good - see _authed_charge."""
         return not self._charge_refused
 
     # The scheduled trip's write has not been captured on this route, so the
@@ -637,27 +642,39 @@ class ZeekrAdapter(CommandTrail):
             "new-platform status/state endpoint not mapped yet"
         )
 
-    def _authed_charge(self, fn, *args):
-        """_authed for the charge-manage service, minus one thing: a 079001.
+    def _authed_charge(self, fn, *args, read: bool = False):
+        """_authed for the charge-manage service, minus what costs a login.
 
-        That code comes as HTTP 401, so _authed reads it as a dead session
+        A 079001 comes as HTTP 401, so _authed reads it as a dead session
         and renews - a password login that signs the phone app out - and the
         poll, which reads the schedules, would do it again every few cycles.
         The client reads 079001 as a refusal of the car, not of the token
         (zeekr_client._car_refused), and only one EX2 has answered this
-        service so far. So a 079001 here renews nothing; it is raised as a
-        refusal, and reads_charge_server goes false for this session so the
-        poll stops asking. Any other auth-looking failure renews as before,
-        once: if that still ends in GeelyAuthError the same flag is set, so a
-        401 or 403 that is not 079001 costs one login, not one per read. That
-        error also comes when the renewal itself fails, which the reauth flow
-        handles; a restart or a reauth starts a new session with the flag
-        clear.
+        service so far. So a 079001 here renews nothing and is raised as a
+        refusal, worded `code=079001 ...` so a command's refusal keeps its
+        code. It is taken out inside the call, before _authed sees it -
+        caught after, the renewal would already have happened.
 
-        The 079001 is taken out inside the call, before _authed sees it -
-        caught after, the renewal would already have happened. It comes back
-        worded `code=079001 ...` so a command's refusal keeps its code."""
+        What stops the poll's schedule reads for the session
+        (reads_charge_server): a 079001 on any call; an auth error out of a
+        schedule read (`read=True`); an auth error out of a write or a press
+        that a renewal went through for and did not cure; and any failure of
+        a read a renewal had just been spent on, a timeout included - so the
+        reads cost one login at most. A write or a press whose sign-in itself
+        failed does not stop them: one bad moment at the sign-in service
+        during a press would otherwise freeze the schedule until a restart.
+
+        Once the reads have stopped, a call renews only for a session that
+        is gone - replaced by another sign-in, or missing - which the next
+        poll would renew anyway. The diagnostics sweep, a schedule write and
+        a charging press do not ask reads_charge_server, and on a car whose
+        charge-manage answers 403 each would spend another login; there the
+        answer comes back as the refusal it is. A restart or a reauth starts
+        a new session with the reads on."""
+        tries = []
+
         def call():
+            tries.append(1)
             try:
                 return fn(*args)
             except ZeekrApiError as exc:
@@ -665,19 +682,34 @@ class ZeekrAdapter(CommandTrail):
                     raise _ChargeRefused(str(exc)) from exc
                 raise
         try:
+            if self._charge_refused:
+                try:
+                    return call()
+                except (ZeekrAuthError, ZeekrApiError) as exc:
+                    if not (isinstance(exc, ZeekrAuthError)
+                            or any(h in str(exc).lower() for h in _SESSION_REPLACED)):
+                        raise
             return self._authed(call)
         except _ChargeRefused as exc:
-            self._note_charge_refused(exc)
+            self._stop_charge_reads("The charging service refused this car", exc)
             raise ZeekrApiError(f"code=079001 message={exc}") from exc
         except GeelyAuthError as exc:
-            self._note_charge_refused(exc)
+            # A second try means the renewal went through and changed nothing.
+            if read or len(tries) > 1:
+                self._stop_charge_reads(
+                    "A charging-service call ended in a sign-in error", exc)
+            raise
+        except Exception as exc:  # noqa: BLE001 - re-raised; only counted
+            if read and len(tries) > 1:
+                self._stop_charge_reads(
+                    "A schedule read failed again on a fresh session", exc)
             raise
 
-    def _note_charge_refused(self, exc: Exception) -> None:
+    def _stop_charge_reads(self, what: str, exc: Exception) -> None:
         if not self._charge_refused:
             _LOGGER.warning(
-                "The charging service refused this car (%s): its schedule "
-                "is not read again this session", exc)
+                "%s (%s): the schedule is not read again this session",
+                what, exc)
         self._charge_refused = True
 
     def charge_server_get(self, biz_type: str) -> dict:
@@ -703,7 +735,7 @@ class ZeekrAdapter(CommandTrail):
         else:
             raise NotImplementedError(
                 f"new-platform charge-server bizType {biz_type} not mapped yet")
-        resp = self._authed_charge(fetch)
+        resp = self._authed_charge(fetch, read=True)
         if not isinstance(resp, dict) or str(resp.get("code")) not in ("000000", "0"):
             return resp
         raw = resp.get("data")

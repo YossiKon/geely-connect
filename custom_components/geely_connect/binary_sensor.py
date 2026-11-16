@@ -204,7 +204,8 @@ HYBRID_SPECS: tuple[tuple[str, str, tuple[str, ...], BinarySensorDeviceClass | N
 # anything is worse than no tile. See helpers.api_serves.
 _STATE_ONLY = frozenset(s[0] for s in SPECS if s[2][:1] == _STATE)
 # Read from slot 4, which only an EX5-scheme car answers in this shape: the new
-# platform does not serve it, and a 1.0 car's catalogue rules it out.
+# platform serves it only with a vehicle token (#114), and a 1.0 car's
+# catalogue rules it out.
 _TRIP_ONLY = frozenset(s[0] for s in SPECS if s[2][:1] == _TRIP)
 
 

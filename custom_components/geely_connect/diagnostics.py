@@ -167,10 +167,13 @@ async def _charge_server(hass: HomeAssistant, api: Any,
     error is the finding - so nothing here raises, and a slot that times out
     does not cost the report the slots already read.
 
-    The EM (Zeekr) platform has no such endpoint. Its adapter carries the
-    method and says it does not serve it - asked anyway, every slot came
-    back as a NotImplementedError row that read like seven failures. An
-    entry that failed setup before building a client has no method at all.
+    An EM (Zeekr) entry without a vehicle token has no such endpoint. Its
+    adapter carries the method and says it does not serve it - asked
+    anyway, every slot came back as a NotImplementedError row that read
+    like seven failures. With a token the sweep runs: the schedule slots
+    answer from the gateway's charge-manage service and the rest say they
+    are not mapped (#114). An entry that failed setup before building a
+    client has no method at all.
     """
     get = getattr(api, "charge_server_get", None)
     if get is None or not api_serves(api, "charge_server"):

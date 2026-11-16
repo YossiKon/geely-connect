@@ -224,8 +224,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
     # not advertise the wheel gets no switch until a reload finds either.
     if steering_wheel_fitted(caps, bundle["coordinator"].data):
         entities.append(GeelySteeringWheelHeatSwitch(hass, bundle))
-    # Read and written through the charge-server, which the new platform does
-    # not serve yet - see helpers.api_serves (#88).
+    # Read and written through the charge-server, which a new-platform car
+    # serves only with a vehicle token - see helpers.api_serves (#88, #114).
     if charges and api_serves(bundle.get("api"), "charge_server") and (
             caps.get("scheduled_charging.enabled", True)
             or caps.get("charging.enabled", True)):

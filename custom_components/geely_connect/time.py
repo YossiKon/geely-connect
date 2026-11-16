@@ -75,8 +75,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
     if not caps.get("scheduled_charging.enabled", True) and not caps.get("charging.enabled", True):
         _LOGGER.info("Capability says scheduled charging not supported - skipping time entities")
         return
-    # Read and written through the charge-server, which the new platform does
-    # not serve yet - see helpers.api_serves (#88).
+    # Read and written through the charge-server, which a new-platform car
+    # serves only with a vehicle token - see helpers.api_serves (#88, #114).
     if not api_serves(bundle.get("api"), "charge_server"):
         _LOGGER.debug("No charge-server on this platform - skipping the charging schedule")
         return

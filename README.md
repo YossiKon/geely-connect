@@ -1210,7 +1210,7 @@ written through the new gateway's charge service, so *Scheduled Charging* (the
 switch and its two times), *Battery Temperature Maintenance* and the two
 *Scheduled Trip* sensors are built; the gateway stores a new charging window
 only while the schedule is on, so a time change with it off is refused rather
-than lost. Without a token those five are left out rather than built to read
+than lost. Without a token those six are left out rather than built to read
 unknown - and with a token, *Parking Comfort* is left out, its command not
 being mapped on that route. Without a token
 its switch is there, because the command goes out the old way, but it reads
