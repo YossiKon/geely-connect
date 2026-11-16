@@ -1538,16 +1538,31 @@
         const ents = this._hass.entities || {};
         const head = `${this._prefix}_`;
         let device = (ents[`sensor.${head}battery`] || {}).device_id;
-        if (!device) {
-          for (const id in ents) {
-            if (ents[id].platform !== "geely_connect") continue;
-            if ((id.split(".")[1] || "").startsWith(head) && ents[id].device_id) {
-              device = ents[id].device_id;
-              break;
-            }
-          }
-        }
+        // Which car the prefix names when its battery sensor does not say:
+        // the one device with an id that is the prefix plus a known suffix,
+        // or else the one device whose ids merely start with it. Taking the
+        // first match in registry order picked either of two cars whose
+        // slugs both begin with a shortened prefix.
+        const cars = new Set(), exact = new Set(), loose = new Set();
         for (const id in ents) {
+          const e = ents[id];
+          if (e.platform !== "geely_connect" || !e.device_id) continue;
+          cars.add(e.device_id);
+          const object = id.split(".")[1] || "";
+          if (!object.startsWith(head)) continue;
+          (SUFFIXES.includes(object.slice(head.length)) ? exact : loose)
+            .add(e.device_id);
+        }
+        const only = (set) => (set.size === 1 ? [...set][0] : undefined);
+        if (!device) device = only(exact) || (exact.size ? undefined : only(loose));
+        // A prefix that names no one car, in a home with more than one: the
+        // whole-platform map below would hand this card another car's
+        // entities - its battery on screen and its lock under the Unlock
+        // button (#117). There the card says no vehicle was found instead.
+        // With one car the map still finds it whatever the prefix says.
+        this._lost = !device && cars.size > 1;
+        for (const id in ents) {
+          if (this._lost) break;
           if (ents[id].platform !== "geely_connect") continue;
           if (device && ents[id].device_id !== device) continue;
           const [dom, object] = id.split(".");
@@ -1561,6 +1576,15 @@
         }
       }
       return this._map[`${domain}.${suffix}`] || strict;
+    }
+
+    /* True when the prefix names no one car and the home has more than one
+     * (see _eid): the card then shows the no-vehicle text and sends nothing. */
+    _lostCar() {
+      if (!this._hass || !this._prefix) return false;
+      if (this._hass.states[`sensor.${this._prefix}_battery`]) return false;
+      this._eid("sensor", "battery");
+      return !!this._lost;
     }
 
     _st(entity) {
@@ -1701,7 +1725,9 @@
      * it happens.
      */
     _send(fire, retried = false) {
-      if (this._waiting()) return Promise.resolve();
+      // No car to send to: a dialog left open from before the prefix went
+      // stale must not fire at an id that names nothing.
+      if (this._waiting() || this._lostCar()) return Promise.resolve();
       const hold = this._cooldownMs();
       const release = () => {
         this._holdUntil = Date.now() + hold;
@@ -2381,7 +2407,11 @@
         _ensureExpandBackdropStyle();
         const card = document.createElement("geely-card");
         try {
-          card.setConfig({ ...(this._config || {}) });
+          // The car this card already shows, not one the pop-up finds for
+          // itself: with no `prefix:` configured each detected its own, and
+          // after the registry's order changed a card showing one car opened
+          // a pop-up that showed, and unlocked, another.
+          card.setConfig({ ...(this._config || {}), prefix: this._prefix });
         } catch (err) {
           console.warn("geely-card: could not build the expanded card:", err);
           return;
@@ -2658,7 +2688,7 @@
     getCardSize() { return 4; }
 
     _render() {
-      if (!this._prefix) return this._missing();
+      if (!this._prefix || this._lostCar()) return this._missing();
       const s = this._carState();
       const power = NUM(this._st("sensor.charging_power"));
       const range = OK(s.range) ? Math.round(NUM(s.range)) : "—";
@@ -2828,7 +2858,7 @@
     getCardSize() { return 9; }
 
     _render() {
-      if (!this._prefix) return this._missing();
+      if (!this._prefix || this._lostCar()) return this._missing();
       const s = this._carState();
       const batt = s.battery == null ? "—" : Math.round(s.battery);
       const split = this._rangeSplit(s);
@@ -3107,7 +3137,7 @@
     }
 
     _render() {
-      if (!this._prefix) return this._missing();
+      if (!this._prefix || this._lostCar()) return this._missing();
       const s = this._carState();
       const range = OK(s.range) ? Math.round(NUM(s.range)) : "—";
       const batt = s.battery == null ? "—" : Math.round(s.battery);
@@ -3193,7 +3223,7 @@
     }
 
     _render() {
-      if (!this._prefix) return this._missing();
+      if (!this._prefix || this._lostCar()) return this._missing();
       const s = this._carState();
       const range = OK(s.range) ? Math.round(NUM(s.range)) : "—";
       const temp = NUM(this._st("sensor.interior_temperature"));
@@ -3284,7 +3314,7 @@
     getCardSize() { return 10; }
 
     _render() {
-      if (!this._prefix) return this._missing();
+      if (!this._prefix || this._lostCar()) return this._missing();
       const s = this._carState();
       const batt = s.battery == null ? "—" : Math.round(s.battery);
       const split = this._rangeSplit(s);

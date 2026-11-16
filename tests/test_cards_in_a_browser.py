@@ -966,6 +966,125 @@ def test_a_second_cars_tank_does_not_leak_into_a_battery_only_card():
         assert not any("fuel" in l.lower() for l in got["labels"]), (tag, got["labels"])
 
 
+ALL_TAGS = ("geely-card", "geely-card-compact", "geely-card-top",
+            "geely-card-mini", "geely-card-strip")
+
+
+def _two_more_cars():
+    """Two further cars on the same Home Assistant, each its own device, each
+    with a lock: slugs fleet_a and fleet_b, which both begin with `fleet`."""
+    return """
+        for (const [slug, dev, pct] of [["fleet_a", "d2", "58"], ["fleet_b", "d3", "47"]]) {
+          for (const [dom, suffix, state] of [["sensor", "battery", pct],
+                                              ["lock", "doors", "locked"],
+                                              ["climate", "climate", "off"]]) {
+            const id = `${dom}.${slug}_${suffix}`;
+            hass.states[id] = { entity_id: id, state, attributes: {} };
+            hass.entities[id] = { platform: "geely_connect", device_id: dev };
+          }
+          hass.devices[dev] = { name: slug };
+        }
+    """
+
+
+def _lost_probe(tag, prefix):
+    return f"""() => {{
+        const el = document.createElement({json.dumps(tag)});
+        document.body.appendChild(el);
+        el.setConfig({{ prefix: {json.dumps(prefix)}, name: "My car" }});
+        const hass = window.mkHass({{}});
+        {_two_more_cars()}
+        el.hass = hass;
+        el._send(() => hass.callService("lock", "unlock",
+                                        {{ entity_id: el._eid("lock", "doors") }}));
+        return {{ lock: el._eid("lock", "doors"),
+                  battery: el._eid("sensor", "battery"),
+                  buttons: el.shadowRoot.querySelectorAll("[data-act]").length,
+                  text: el.shadowRoot.textContent,
+                  sent: hass.serviceCalls.length }};
+    }}"""
+
+
+def test_a_prefix_that_names_no_car_binds_to_none_where_there_are_several():
+    """With no registered entity under the prefix, the suffix map was built
+    over every Geely entity in the registry. In a home with more than one car
+    that handed the card another car's battery to show and another car's lock
+    to unlock (#117): a prefix gone stale after a rename, or one mistyped.
+    The card now says no vehicle was found, draws no control and sends
+    nothing - on all five cards."""
+    for tag in ALL_TAGS:
+        got = _evaluate(_lost_probe(tag, "gone"))
+        assert got["lock"] == "lock.gone_doors", (tag, got)
+        assert got["battery"] == "sensor.gone_battery", (tag, got)
+        assert got["buttons"] == 0 and got["sent"] == 0, (tag, got)
+        assert "prefix" in got["text"], (tag, got["text"][:80])
+
+
+def test_a_shortened_prefix_two_cars_share_binds_to_neither():
+    """`fleet` begins both fleet_a's ids and fleet_b's. The first match in
+    registry order used to decide which car the card showed and commanded."""
+    got = _evaluate(_lost_probe("geely-card", "fleet"))
+    assert got["lock"] == "lock.fleet_doors", got
+    assert got["buttons"] == 0 and got["sent"] == 0, got
+
+
+def test_the_right_prefix_among_several_cars_binds_to_its_own():
+    got = _evaluate(_lost_probe("geely-card", "fleet_b"))
+    assert got["lock"] == "lock.fleet_b_doors", got
+    assert got["battery"] == "sensor.fleet_b_battery", got
+    assert got["buttons"] > 0 and got["sent"] == 1, got
+
+
+def test_the_pop_up_shows_the_car_its_card_shows():
+    """A card with no `prefix:` binds to the registry's first battery, and its
+    pop-up - a full card of its own - used to do the same for itself. After
+    the registry's order changed, a card showing one car opened a pop-up
+    that showed, and commanded, another. The pop-up takes its card's car."""
+    script = f"""() => {{
+        const el = document.createElement("geely-card-compact");
+        document.body.appendChild(el);
+        el.setConfig({{}});
+        const hass = window.mkHass({{}});
+        el.hass = hass;
+        const shown = el._prefix;
+        // Another car is added, and the registry now lists it first.
+        const later = window.mkHass({{}});
+        {_two_more_cars().replace("hass.", "later.")}
+        const first = {{}};
+        for (const id in later.entities) {{
+          if (id.includes("fleet_a")) first[id] = later.entities[id];
+        }}
+        later.entities = {{ ...first, ...later.entities }};
+        el.hass = later;
+        el.shadowRoot.querySelector(".carwrap.expandable").click();
+        const inner = document.querySelector("dialog.geely-expand geely-card");
+        return {{ shown, after: el._prefix, popup: inner._prefix,
+                  lock: inner._eid("lock", "doors") }};
+    }}"""
+    got = _evaluate(script)
+    assert got["shown"] == "car" and got["after"] == "car", got
+    assert got["popup"] == "car", got
+    assert got["lock"] == "lock.car_doors", got
+
+
+def test_one_car_is_still_found_whatever_the_prefix_says():
+    """The whole-platform map is what lets a single car's card work with the
+    README's example prefix pasted as it stands, or with every id renamed.
+    With one car there is no other car to mistake it for, so that stays."""
+    for tag in ALL_TAGS:
+        script = f"""() => {{
+            const el = document.createElement({json.dumps(tag)});
+            document.body.appendChild(el);
+            el.setConfig({{ prefix: "my_geely_ex5" }});
+            el.hass = window.mkHass({{}});
+            return {{ battery: el._eid("sensor", "battery"),
+                      text: el.shadowRoot.textContent }};
+        }}"""
+        got = _evaluate(script)
+        assert got["battery"] == "sensor.car_battery", (tag, got)
+        assert "61" in got["text"], (tag, got["text"][:80])
+
+
 def test_a_renamed_entity_on_the_same_car_still_resolves_beside_a_second_car():
     """The scoping must not cost the rename fallback it sits inside: with the
     hybrid present, an E2 whose speed sensor was renamed still finds it, because
