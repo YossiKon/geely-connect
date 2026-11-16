@@ -1242,11 +1242,9 @@ def test_the_slot_2_times_read_and_write_the_window():
             asyncio.run(end.async_set_value(dtime(6, 30)))
         assert api.calls == [("slot_2", command, "10:00", "06:30", "1,2,3,4,5,6,7")], api.calls
         assert sched["scheduleList"][0] == {
-            "duration": "07:00", "endtime": "17:00", "startTime": "10:00",
+            "duration": "20:30", "endtime": "06:30", "startTime": "10:00",
             "timerActivation": "1", "day": "1,2,3,4,5,6,7"}, sched
-        with _patched(t, time_mod=clock):
-            assert end.native_value == dtime(6, 30)
-        assert rec.calls == [(15, 20, 20)]
+        assert end.native_value == dtime(6, 30) and rec.calls == [(15, 20, 20)]
     api = _Api()
     sched = _slot_2("1")
     del sched["scheduleList"][0]["day"]

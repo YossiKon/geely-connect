@@ -168,3 +168,41 @@ def test_time_write_cannot_restore_a_pending_peer_to_the_old_reported_time():
         else:
             raise AssertionError("equal effective window was accepted")
     assert not api.bodies and start._optimistic_value is None
+
+
+def test_a_slot_2_edit_outlives_both_holds_until_the_slot_is_read_again():
+    """#121 review: an E2 re-reads slot 2 only every few polls unless it is
+    charging. Start 10:00 -> 11:00, then once the 60 s holds are over and
+    before any slot read, an End edit sent 10:00-18:00 and a toggle 10:00-17:00
+    when the edited boundary was not written into the coordinator's copy."""
+    import sys
+    import time as real_time
+    import types
+    t, sw = load("time"), load("switch")
+    for follow_up in ("end", "toggle"):
+        api = _api()
+        api_mod = sys.modules[type(api).__module__]
+        hass, bundle = _bundle(_status(sched=_slot_2("1")), api=api,
+                               caps={"scheduled_charging.slot_2": True})
+        start = _quiet(t.GeelyScheduledChargingTime(hass, bundle, "start"))
+        end = _quiet(t.GeelyScheduledChargingTime(hass, bundle, "end"))
+        switch = _quiet(sw.GeelyScheduledChargingSwitch(hass, bundle))
+        clock = _Clock()
+        # The API's hold runs on time.monotonic; the rest of `time` stays real.
+        api_time = types.SimpleNamespace(**{k: getattr(real_time, k) for k in dir(real_time)
+                                            if not k.startswith("_")})
+        api_time.monotonic = clock.monotonic
+        with _patched(t, schedule_refresh=_RefreshRec(), time_mod=clock), \
+                _patched(sw, schedule_refresh=_RefreshRec()), \
+                _patched(api_mod, time=api_time):
+            asyncio.run(start.async_set_value(time(10)))
+            asyncio.run(start.async_set_value(time(11)))
+            clock.now += 61
+            assert start.native_value == time(11), follow_up
+            if follow_up == "end":
+                asyncio.run(end.async_set_value(time(18)))
+            else:
+                asyncio.run(switch.async_turn_off())
+        window = api.bodies[-1]["scheduleList"][0]
+        assert (window["startTime"], window["duration"]) == (
+            ("11:00", "07:00") if follow_up == "end" else ("11:00", "06:00")), (follow_up, window)

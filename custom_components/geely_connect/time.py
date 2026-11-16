@@ -39,7 +39,7 @@ from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .api import GeelyControlError, redact
+from .api import GeelyControlError, redact, window_length
 from .const import DOMAIN
 from .helpers import (api_serves, schedule_intent, slot_2_is_on, slot_2_window,
                       truthy as _truthy, schedule_refresh)
@@ -232,8 +232,14 @@ class GeelyScheduledChargingTime(CoordinatorEntity, TimeEntity):
                       self._kind, _fmt_hhmm(value), redact(resp))
         self._optimistic_value = value
         self._optimistic_until = time_mod.time() + 60
-        # Keep the reported slot intact: its peer boundary may be stale even
-        # though the API merged a pending edit before sending. The entity's
-        # own hold displays this edit; the API hold protects subsequent writes.
+        # Slot 2 is re-read only every few polls unless the car is charging,
+        # so the edited boundary goes into the coordinator's copy, as before:
+        # without it, once the entity's own 60 s hold ended it showed the old
+        # time again and the next edit or toggle sent that old time. Only the
+        # edited one: the API may have sent a pending peer in place of the
+        # copy's, so the copy's pair can match where the window sent did not.
+        window["startTime" if self._kind == "start" else "endtime"] = _fmt_hhmm(value)
+        if window.get("startTime") != window.get("endtime"):
+            window["duration"] = window_length(window["startTime"], window["endtime"])
         self.async_write_ha_state()
         schedule_refresh(self._hass, self.coordinator, 15, 20, 20)
