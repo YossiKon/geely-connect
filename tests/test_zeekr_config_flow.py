@@ -675,7 +675,7 @@ def test_switching_servers_replaces_derived_vehicle_token_but_keeps_manual_overr
 
     for probe_result, manual in (("new-eu-token", ""), ("", ""), ("unused", "manual-token")):
         entry = _legacy_entry()
-        entry.data.update({"platform": "zeekr", "country_code": "GB",
+        entry.data.update({"platform": "zeekr", "country_code": "GB", "vin": FAKE_VIN,
                            "zeekr_enc_vin": "old-sea-token"})
         if manual:
             entry.options["zeekr_enc_vin"] = manual

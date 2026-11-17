@@ -768,7 +768,11 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # entry behaves exactly as before this change). Mechanism per PR #57;
         # the material is public app package data, not an account credential.
         existing_x_vin = ""
-        if self._reauth_entry is not None:
+        vin_changed = (self._reauth_entry is not None
+                       and vin != self._reauth_entry.data.get(CONF_VIN))
+        # Both derived and manually supplied tokens belong to one vehicle.
+        # A replacement/renumbered VIN must be probed with this login instead.
+        if self._reauth_entry is not None and not vin_changed:
             entry = self._reauth_entry
             existing_x_vin = entry.options.get(CONF_ZEEKR_ENC_VIN) or ""
             # A derived token belongs to its server region. Re-probe when the
@@ -827,10 +831,15 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             new_data[CONF_PRESSURE_UNIT] = self._pressure_unit
             new_data[CONF_POLL_MODE] = self._poll_mode
             update: dict[str, Any] = {"data": new_data}
-            if vin != entry.data.get(CONF_VIN):
+            if vin_changed:
                 # Re-pointed at a renumbered car: the unique id follows, or
                 # the old VIN stays claimed and can never be added again.
                 update["unique_id"] = f"zeekr:{self._email}:{vin}"
+                # An old manual token would override the freshly probed token
+                # at reload. Clear it together with the vehicle/data update.
+                new_options = dict(entry.options)
+                new_options.pop(CONF_ZEEKR_ENC_VIN, None)
+                update["options"] = new_options
             self.hass.config_entries.async_update_entry(entry, **update)
             await self.hass.config_entries.async_reload(entry.entry_id)
             return self.async_abort(
