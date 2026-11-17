@@ -210,7 +210,9 @@ everything else.
 > came, does not stay on screen: the number goes back to the car's. Switching the
 > climate off or tapping a rapid preset gives up one that has not gone yet, since
 > it would reach the car as a start. A command refused because the car was busy
-> is retried once, quietly, since it never ran.
+> is retried once, quietly, since it never ran - except a temperature given up
+> in the meantime (Climate off, a rapid preset), or followed by a newer number
+> the stepper has already tried to send.
 > `cooldown:` in the card config changes the wait (seconds; 0 turns it off).
 > Nothing can report when the car has actually *finished* - the gateway
 > acknowledges receipt, not execution - so this is a spacing, not a status.

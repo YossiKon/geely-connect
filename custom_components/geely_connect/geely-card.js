@@ -629,7 +629,8 @@
   /* How long the temperature stepper waits for the tapping to stop. */
   const TEMP_SETTLE_MS = 1100;
   /* What `_send` resolves with when it sent nothing: the controls were held,
-   * or there is no car to send to. Nothing else resolves with it. */
+   * there is no car to send to, or a second try was no longer wanted.
+   * Nothing else resolves with it. */
   const NOT_SENT = Symbol("not sent");
 
   const ALWAYS_WATCHED = [
@@ -1397,6 +1398,11 @@
       this._mapFor = null;
       this._armed = null;          // suffix of the armed destructive action
       this._armedTimer = null;
+      // Counted, for a temperature waiting on its second try: how many
+      // stepper temperatures have gone to _send, and how many Climate-off
+      // and rapid-preset taps there have been - each gives a waiting one up.
+      this._tempSends = 0;
+      this._tempGiveUps = 0;
       this._sig = "";
     }
 
@@ -1656,7 +1662,7 @@
       return /has not yet been executed|8070/i.test(text);
     }
 
-    _call(domain, service, entitySuffix, data = {}) {
+    _call(domain, service, entitySuffix, data = {}, still = null) {
       // notifyOnError false: Home Assistant would otherwise raise its own
       // "Failed to perform the action" toast before we get a chance to see
       // whether the car simply wanted another moment. We surface the failures
@@ -1664,7 +1670,7 @@
       return this._send(() => this._hass.callService(
         domain, service,
         { entity_id: this._eid(domain, entitySuffix), ...data },
-        undefined, false));
+        undefined, false), false, still);
     }
 
     /* Write the stepper's number without rebuilding the card. */
@@ -1735,8 +1741,17 @@
      * v1.21.5: that one sent a second command while the first was still
      * running, whereas this one never ran at all, and a retry is the only way
      * it happens.
+     *
+     * `still` is the caller's answer, asked when that second try comes due,
+     * to "is this command still wanted?". Only the temperature gives one: a
+     * number given up in the meantime - the climate switched off, a rapid
+     * preset - would otherwise arrive seconds later as a start, and one
+     * followed by a newer dial the stepper already tried to send is out of
+     * date: sent, it would go over that newer number.
+     * A later tap stops the try only while its own hold lasts; this stops it
+     * after that as well.
      */
-    _send(fire, retried = false) {
+    _send(fire, retried = false, still = null) {
       // No car to send to: a dialog left open from before the prefix went
       // stale must not fire at an id that names nothing.
       if (this._waiting() || this._lostCar()) return Promise.resolve(NOT_SENT);
@@ -1768,7 +1783,7 @@
             // toast for something that is about to work on its own is noise.
             this._holdUntil = 0;
             return new Promise((r) => setTimeout(r, hold * 2))
-              .then(() => this._send(fire, true));
+              .then(() => (still && !still() ? NOT_SENT : this._send(fire, true, still)));
           }
           // Anything else is the car saying no, or saying no twice. Hiding that
           // would leave the owner believing a command worked.
@@ -1875,9 +1890,12 @@
           const on = this._climateOn(this._st("climate.climate"));
           // A temperature dialled in just before, and not sent yet, goes to
           // the car as a start: following this it would switch the climate
-          // back on. One already refused as busy is still retried - that
-          // retry belongs to _send and is not cancelled from here.
-          if (on) this._dropPendingTemp();
+          // back on. So would one refused as busy and waiting for its second
+          // try, which is given up here as well.
+          if (on) {
+            this._tempGiveUps += 1;
+            this._dropPendingTemp();
+          }
           this._call("climate", on ? "turn_off" : "turn_on", "climate");
           break;
         }
@@ -1909,8 +1927,20 @@
             // trip took - so the number the user had just dialled in visibly
             // jumped backwards and then forwards again. It is released when the
             // entity catches up, or if the command fails.
+            //
+            // Refused as busy, it gets one more try a few seconds on - but
+            // not after it was given up (the climate switched off, a rapid
+            // preset), and not after a newer dial has gone to _send itself,
+            // which the older number would otherwise follow. A dropped try
+            // does not hold the controls, so what its hold would have stopped
+            // goes out instead, as after any command that is not sent. A
+            // newer dial still waiting to settle does not count; there the
+            // try goes out as before.
+            const mine = ++this._tempSends;
+            const giveUps = this._tempGiveUps;
+            const wanted = () => this._tempSends === mine && this._tempGiveUps === giveUps;
             this._call("climate", "set_temperature", "climate",
-                       { temperature: target })
+                       { temperature: target }, wanted)
               .then((out) => {
                 // Never sent: another button pressed before the tapping
                 // settled was holding the controls - or held them when a busy
@@ -1930,8 +1960,10 @@
           const want = key === "rapidheat" ? "Rapid Warming" : "Rapid Cooling";
           const c = this._st("climate.climate");
           const cur = c && c.attributes && c.attributes.preset_mode;
-          // Either tap supersedes a temperature dialled in just before: a
-          // rapid preset carries its own, and ending one is the climate's off.
+          // Either tap supersedes a temperature dialled in just before, and
+          // one waiting for its second try: a rapid preset carries its own,
+          // and ending one is the climate's off.
+          this._tempGiveUps += 1;
           this._dropPendingTemp();
           if (cur === want) this._call("climate", "turn_off", "climate");
           else this._call("climate", "set_preset_mode", "climate", { preset_mode: want });

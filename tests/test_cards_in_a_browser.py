@@ -2125,6 +2125,103 @@ def test_a_rapid_preset_replaces_a_temperature_dialled_just_before():
     assert got["ending"] == {"pending": None, "sent": ["climate.turn_off"]}, got
 
 
+# A stepper whose first temperature the car refuses as busy: its quiet second
+# try is due two waits later, at 4.1 s with `cooldown: 1.5`. `steps` are the
+# taps made in the meantime.
+_BUSY_TEMPERATURE = """
+    const BUSY = "The last request has not yet been executed, please send the command later!";
+    const drive = (climate, steps) => {
+        const el = document.createElement("geely-card");
+        document.body.appendChild(el);
+        el.setConfig({ cooldown: 1.5 });
+        const hass = window.mkHass({ climate });
+        const sent = [];
+        let temperatures = 0;
+        hass.callService = (d, s, data) => {
+            sent.push(s === "set_temperature" ? data.temperature : s);
+            if (s !== "set_temperature" || ++temperatures > 1) return Promise.resolve();
+            return new Promise((_, refuse) => setTimeout(() => refuse({ message: BUSY }), 0));
+        };
+        el.hass = hass;
+        el._onAction("tempup");
+        for (const [ms, key] of steps) setTimeout(() => el._onAction(key), ms);
+        // The climate entity comes to show `temperature`, as it does once a
+        // command carrying it has been accepted - from wherever it was sent.
+        const reach = (temperature) => {
+            const id = "climate.car_climate", was = hass.states[id];
+            el.hass = Object.assign({}, hass, { states: Object.assign({}, hass.states, {
+                [id]: Object.assign({}, was, {
+                    attributes: Object.assign({}, was.attributes, { temperature }) }) }) });
+        };
+        return { sent, reach,
+                 shown: () => el.shadowRoot.querySelector(".tval").textContent.trim() };
+    };
+"""
+
+
+def test_a_temperature_waiting_for_its_second_try_is_given_up_with_the_climate():
+    """A temperature refused as busy is tried once more, two waits later. The
+    climate switched off in between, or a rapid preset tapped, used to be
+    followed by that try - a start: the climate came back on seconds after it
+    was switched off, and a plain temperature went over the preset's. Those
+    taps now give the try up. Left alone, or with the climate switched ON in
+    between, it goes out as before."""
+    script = "() => new Promise((done) => {" + _BUSY_TEMPERATURE + """
+        const off = drive("heat_cool", [[1500, "climate"]]);
+        const rapid = drive("heat_cool", [[1500, "rapidcool"]]);
+        const alone = drive("heat_cool", []);
+        const on = drive("off", [[1500, "climate"]]);
+        // Past 4.1 s, when the second try is due.
+        setTimeout(() => done({ off: off.sent, rapid: rapid.sent, alone: alone.sent,
+            on: on.sent, shown: [off.shown(), rapid.shown(), alone.shown()] }), 4800);
+    })"""
+    got = _evaluate(script, timeout=15000)
+    assert got["off"] == [22.5, "turn_off"], got
+    assert got["rapid"] == [22.5, "set_preset_mode"], got
+    assert got["alone"] == [22.5, 22.5], got
+    assert got["on"] == [22.5, "turn_on", 22.5], got
+    assert got["shown"] == ["22°", "22°", "22.5°"], got
+
+
+def test_a_second_try_does_not_follow_a_newer_dial_already_sent():
+    """The same second try, with the stepper tapped again while it waits. A
+    newer dial that has already gone out sent its own number; the older one
+    used to follow it and leave the car at 22.5 with 23 dialled, or, dialled
+    back to the same number, go out twice. A newer dial still settling when
+    the try comes due is no reason to drop it: dropping it would let the newer
+    one out where the try's hold stopped it, and that hold may be what keeps
+    another command's own retry from being dropped."""
+    script = "() => new Promise((done) => {" + _BUSY_TEMPERATURE + """
+        const early = drive("heat_cool", [[1300, "tempup"]]);
+        const same = drive("heat_cool", [[1300, "tempup"], [1500, "tempdown"]]);
+        // Settles at 4.6 s, after the try at 4.1 s: as before, the try goes
+        // out and its hold drops the newer number, which leaves the screen.
+        const late = drive("heat_cool", [[3500, "tempup"]]);
+        setTimeout(() => done({ early: early.sent, same: same.sent, late: late.sent,
+            shown: [early.shown(), same.shown(), late.shown()] }), 5300);
+    })"""
+    got = _evaluate(script, timeout=15000)
+    assert got["early"] == [22.5, 23], got
+    assert got["same"] == [22.5, 22.5], got
+    assert got["late"] == [22.5, 22.5], got
+    assert got["shown"] == ["23°", "22.5°", "22°"], got
+
+
+def test_a_second_try_that_is_the_only_start_still_goes_out():
+    """The climate entity keeps its target while the climate is off. Dialled
+    up and back down to it, the number on screen is that target, and the next
+    Home Assistant update clears the dial. The send refused as busy was the
+    only start, and its second try must still go out."""
+    script = "() => new Promise((done) => {" + _BUSY_TEMPERATURE + """
+        // 22.5 then 22 again: settles at 1.4 s, refused, tried again at 4.4 s.
+        const card = drive("off", [[300, "tempdown"]]);
+        setTimeout(() => card.reach(22), 1850);
+        setTimeout(() => done({ sent: card.sent }), 5200);
+    })"""
+    got = _evaluate(script, timeout=15000)
+    assert got == {"sent": [22, 22]}, got
+
+
 def test_refresh_is_held_by_the_wait_though_not_by_the_driving_lock():
     """It reads rather than commands, so a moving car may still be polled - but
     the wait blocks every command including that one, and a button that looks
