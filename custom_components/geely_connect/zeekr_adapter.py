@@ -372,6 +372,10 @@ class ZeekrAdapter(CommandTrail):
         self._renew_lock = threading.Lock()
         self._renewals = 0
         self._charge_refused = False
+        # Whole-window writes run in HA executor threads. Keep each accepted
+        # field until its own short hold expires, across stale schedule polls.
+        self._charging_lock = threading.Lock()
+        self._charging_pending: dict[str, tuple[str, float]] = {}
 
     @property
     def hf_expiry(self) -> int:
@@ -624,8 +628,8 @@ class ZeekrAdapter(CommandTrail):
         """The charge-manage service keeps a charging window only when it
         arrives with `start`: sent with `stop` it is acknowledged and dropped
         (verified 2026-11-13). A window change has to be refused at the time
-        entity while the schedule is off - only the caller can tell a change
-        from the switch re-sending what it last read."""
+        entity while the schedule is off. Its `changed_time` marker lets the
+        adapter repeat that guard after merging accepted command intent."""
         return bool(self._client.enc_vin)
 
     def can_send(self, service_id: str) -> bool:
@@ -753,33 +757,62 @@ class ZeekrAdapter(CommandTrail):
 
     def scheduled_charging_set(self, *, command: str, start_time: str = "",
                                end_time: str = "", rbc_target: str = "2",
+                               changed_time: str | None = None,
                                **_: Any) -> dict:
         """Scheduled charging on/off and window, via setChargingPlan.
 
         `stop` goes out as the app sends it, without a window: the service
         drops one sent with `stop` anyway, and the switch's `stop` carries
         only what it last read. A window change while off is refused before
-        it gets here (stores_window_only_with_start). A refusal comes back
-        as GeelyControlError with its code, as control() does."""
+        it gets here (stores_window_only_with_start). Recheck after merging
+        accepted intent so an overlapping Off cannot be undone by a time
+        edit that already passed that guard. A refusal comes back as
+        GeelyControlError with its code, as control() does.
+
+        Time setters identify their edited boundary; toggles change only the
+        command. Serialize merge/send/accept and hold each accepted field for
+        60 s, matching the legacy time setter's software policy. This is not
+        a live-verified EM propagation bound. Reads and rejected writes do
+        not change or extend a hold."""
         if not self._client.enc_vin:
             raise NotImplementedError(
                 "new-platform charge-server write not mapped yet")
-        if command != "start":
-            start_time = end_time = ""
+        if changed_time not in (None, "start", "end"):
+            raise ValueError("invalid charging time boundary")
+        with self._charging_lock:
+            now = time.monotonic()
+            pending = {key: held for key, held in self._charging_pending.items()
+                       if now < held[1]}
+            values = {"start": start_time, "end": end_time, "command": command}
+            for key, (value, _until) in pending.items():
+                if key != changed_time and (key != "command" or changed_time is not None):
+                    values[key] = value
+            command = values["command"]
+            if changed_time is not None and command != "start":
+                raise GeelyControlError(
+                    "schedule_off", "the car only takes a new charging window "
+                    "while Scheduled Charging is on - switch it on first")
+            start_time = values["start"] if command == "start" else ""
+            end_time = values["end"] if command == "start" else ""
 
-        def send() -> dict:
-            try:
-                return self._ok_1000(self._authed_charge(
-                    lambda: self._client.set_charging_plan_new(
-                        command=command, start_time=start_time,
-                        end_time=end_time, target=rbc_target)))
-            except ZeekrApiError as e:
-                raise GeelyControlError(_refusal_code(e), str(e)) from e
+            def send() -> dict:
+                try:
+                    return self._ok_1000(self._authed_charge(
+                        lambda: self._client.set_charging_plan_new(
+                            command=command, start_time=start_time,
+                            end_time=end_time, target=rbc_target)))
+                except ZeekrApiError as e:
+                    raise GeelyControlError(_refusal_code(e), str(e)) from e
 
-        return self._recorded(
-            f"scheduled_charging {command}",
-            {"start": start_time, "end": end_time, "target": rbc_target},
-            send)
+            response = self._recorded(
+                f"scheduled_charging {command}",
+                {"start": start_time, "end": end_time, "target": rbc_target},
+                send)
+            if isinstance(response, dict) and str(response.get("code")) == "1000":
+                key = changed_time or "command"
+                pending[key] = (values[key], time.monotonic() + 60)
+                self._charging_pending = pending
+            return response
 
     def scheduled_trip_set(self, **_: Any) -> dict:
         raise NotImplementedError(
