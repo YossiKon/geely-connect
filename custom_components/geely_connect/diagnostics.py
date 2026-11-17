@@ -53,6 +53,9 @@ _REDACT = {
     # addresses and controls the car. redact() (the first pass) already masks
     # it by normalised name; this is the belt to that pass's braces.
     "zeekr_enc_vin",
+    # The same token under its header's name, and two spellings a body might
+    # use for it. redact() masks these in any case and with any separator.
+    "x-vin", "xVin", "encVin",
     "hmac_access_key", "hmac_secret", "snc_secret", "vin_key", "vin_iv",
     "vin_key_hex", "vin_iv_hex", "eu_app_keys",
     # An original-login region's app id and secret, which an owner may supply
