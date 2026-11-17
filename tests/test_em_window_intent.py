@@ -234,3 +234,25 @@ def test_invalid_boundary_is_refused_before_any_transport_call():
     else:
         raise AssertionError("invalid boundary accepted")
     assert client.calls == []
+
+
+def test_em_time_entities_pass_boundary_intent_across_a_stale_poll():
+    import asyncio
+    from datetime import time as clock_time
+    from conftest import have_homeassistant
+    from run import skip
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    from test_command_entities import _bundle, _status, _quiet, _patched, _RefreshRec, _Clock
+    times = load("time")
+    adapter, client = _make()
+    snapshot = adapter.charge_server_get("6")["data"]
+    hass, bundle = _bundle(_status(sched=snapshot), api=adapter)
+    start = _quiet(times.GeelyScheduledChargingTime(hass, bundle, "start"))
+    end = _quiet(times.GeelyScheduledChargingTime(hass, bundle, "end"))
+    with _patched(times, schedule_refresh=_RefreshRec(), time_mod=_Clock()):
+        asyncio.run(start.async_set_value(clock_time(22)))
+        bundle["coordinator"].data["_scheduled_charging"] = adapter.charge_server_get("6")["data"]
+        asyncio.run(end.async_set_value(clock_time(8)))
+    assert [(c["start_time"], c["end_time"]) for c in client.calls] == [
+        ("22:00", "07:00"), ("22:00", "08:00")]
