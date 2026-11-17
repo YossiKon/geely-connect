@@ -131,6 +131,12 @@ _SECRET_KEYS: set = {
     # capability secret, not just an identifier - redacted like the tokens
     # above. Normalised form, matched by both passes; see diagnostics._REDACT.
     "zeekrencvin",
+    # ...and the same token, should a gateway body name it back. It travels in
+    # the `x-vin` header, the only name seen for it; `xVin` and `encVin` are
+    # spellings a body might use. No answer seen so far carries one, but the
+    # Scheduled trip read hands its body on whole to the diagnostics report,
+    # as the status and the catalogue already do.
+    "xvin", "encvin",
     # The IDaaS user-center session token as it appears on the wire (the new
     # platform's login responses carry it as `tokenValue`). No path folds a
     # successful login body into a log today, but masking it is a cheap hedge -

@@ -740,7 +740,7 @@ class ZeekrAdapter(CommandTrail):
             return resp
         raw = resp.get("data")
         raw = raw if isinstance(raw, dict) else {}
-        if fetch is self._client.travel_plan_new:
+        if str(biz_type) == "4":
             return {**resp, "code": 1000, "data": raw}
         return {**resp, "code": 1000, "data": {
             "bcCycleActive": "true" if raw.get("bcCycleActive") in (True, "true", "1", 1) else "false",

@@ -37,6 +37,24 @@ def test_a_locally_supplied_region_key_pair_is_masked_in_both_passes():
     assert {"app_id", "app_secret"} <= diag._REDACT
 
 
+def test_a_body_that_names_the_vehicle_token_back_is_masked():
+    """The new platform's vehicle token travels in the `x-vin` header, and the
+    Scheduled trip read hands the gateway's body on whole to the report. A body
+    that named the token back under the header's name, or as xVin / encVin, in
+    any case and with any separator, is masked by the first pass; the second
+    list holds the three exact spellings. The trip's own fields stay readable."""
+    token = "FAKEXVINTOKEN0123456789=="
+    body = {"code": 1000, "data": {
+        "btActive": True, "bw": "1", "xVin": token, "x-vin": token,
+        "X_VIN": token, "encVin": token, "enc_vin": token,
+        "list": [{"XVin": token}]}}
+    out = api.redact(body)
+    assert token not in str(out), out
+    assert out["data"]["btActive"] is True and out["data"]["bw"] == "1"
+    diag = load("diagnostics")
+    assert {"x-vin", "xVin", "encVin"} <= diag._REDACT
+
+
 def test_identifiers_are_shortened_not_removed():
     out = api.redact({"vin": FAKE_VIN, "userId": USER_ID, "email": EMAIL})
     assert out["vin"] == "...0000", out["vin"]
