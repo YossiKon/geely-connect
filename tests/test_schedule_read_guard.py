@@ -147,3 +147,47 @@ def test_accepted_toggles_arm_the_same_guard_as_time_edits():
             asyncio.run(coord.refresh())
             sched = coord.data["_scheduled_charging"]
             assert sched["timerId"] == "2" if slot == 2 else sched["bcCycleActive"] == "false"
+
+
+def test_an_early_read_remains_stale_when_it_completes_after_the_guard():
+    for slot in (2, 6):
+        stack, clock, poll, api, coord, start, _, _, _, _ = _fixture(slot)
+        with stack:
+            asyncio.run(start.async_set_value(dtime(22)))
+            old_executor = start._hass.async_add_executor_job
+            delayed = [False]
+            async def executor(fn, *args):
+                if fn == api.charge_server_get and args == (str(slot),) and not delayed[0]:
+                    delayed[0] = True
+                    stale = fn(*args)
+                    clock[0] = 1016
+                    return stale
+                return await old_executor(fn, *args)
+            start._hass.async_add_executor_job = executor
+            clock[0] = 1003
+            poll["force_secondary"] = True
+            asyncio.run(coord.refresh())
+            assert delayed[0]
+            assert _window(coord, slot) == ("22:00", "07:00"), slot
+
+
+def test_a_write_during_the_later_trip_read_survives_snapshot_publication():
+    stack, clock, poll, api, coord, start, _, _, _, _ = _fixture(6)
+    with stack:
+        old_executor = start._hass.async_add_executor_job
+        interleaved = [False]
+        async def executor(fn, *args):
+            if fn == api.charge_server_get and args == ("4",) and not interleaved[0]:
+                interleaved[0] = True
+                # The charging GET is already complete. While the same poll
+                # awaits slot 4, a successful command patches coordinator.data.
+                # Publication must use that current copy, not the older GET.
+                clock[0] = 1001
+                await start.async_set_value(dtime(22))
+                clock[0] = 1030
+            return await old_executor(fn, *args)
+        start._hass.async_add_executor_job = executor
+        poll["force_secondary"] = True
+        asyncio.run(coord.refresh())
+        assert interleaved[0]
+        assert _window(coord, 6) == ("22:00", "07:00")

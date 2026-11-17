@@ -410,9 +410,9 @@ def schedule_read_result(coordinator, result: dict, read_started: float) -> dict
     written_at = getattr(coordinator, "geely_schedule_written_at", None)
     current = (coordinator.data or {}).get("_scheduled_charging")
     if (written_at is not None and isinstance(current, dict)
-            and (read_started <= written_at or time.monotonic() < written_at + 15)):
+            and read_started < written_at + 15):
         # Read the current copy here: a command may have patched it while
-        # the GET was in flight, even beyond the short guard above.
+        # this poll awaited the charging GET or a later secondary read.
         return current
     return result
 

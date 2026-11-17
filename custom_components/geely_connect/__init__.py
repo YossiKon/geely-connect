@@ -897,6 +897,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             data["_scheduled_charging"] = prev["_scheduled_charging"]
         if "_scheduled_trip" in prev:
             data["_scheduled_trip"] = prev["_scheduled_trip"]
+        schedule_read = None
 
         # A user pressing Refresh Data means "fetch everything now" - three
         # presses in four otherwise re-fetched nothing but the main status,
@@ -943,8 +944,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     sc = await _call_with_retry(api.charge_server_get,
                                                 poll_state["charge_slot"])
                     if sc.get("code") in _SUCCESS_CODES and isinstance(sc.get("data"), dict):
-                        data["_scheduled_charging"] = schedule_read_result(
-                            coordinator, sc["data"], schedule_read_started)
+                        schedule_read = (sc["data"], schedule_read_started)
                 except GeelyTLSPinError as e:
                     # A pin failure means the server key changed - an active
                     # MITM or a legitimate rotation. Never hide it at DEBUG.
@@ -1019,6 +1019,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 poll_state["fix_odo"] = odo_now
 
         _follow_interval(data)
+        # Choose immediately before publication, after the final await: a
+        # command accepted during the later trip read patches coordinator.data
+        # and must not be replaced with this poll's older charging response.
+        if schedule_read is not None:
+            schedule_result, schedule_started = schedule_read
+            data["_scheduled_charging"] = schedule_read_result(
+                coordinator, schedule_result, schedule_started)
         return data
 
     coordinator = DataUpdateCoordinator(
