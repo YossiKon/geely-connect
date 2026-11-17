@@ -1117,7 +1117,7 @@
     .chips { display: flex; flex-wrap: wrap; gap: 6px; }
     .chip {
       display: inline-flex; align-items: center; gap: 5px;
-      font-size: 11px; font-weight: 500; padding: 4px 10px; border-radius: 999px;
+      font-family: inherit; font-size: 11px; font-weight: 500; padding: 4px 10px; border-radius: 999px;
       border: 1px solid var(--divider-color, rgba(120,130,140,.25));
       color: var(--secondary-text-color, #7a7f87); white-space: nowrap;
     }
@@ -1430,12 +1430,7 @@
     }
 
     setConfig(config) {
-      // A new configuration must not inherit an arm, dial or busy retry
-      // intended for the previous vehicle.
-      this._commandContext += 1;
-      this._dropPendingTemp();
-      clearTimeout(this._armedTimer);
-      this._armed = null;
+      const previousVehicle = this._hass && this._vehicleBinding();
       this._config = config || {};
       // YAML hands over a bare number for `prefix: 2024`; _title() and the
       // entity ids need a string.
@@ -1443,8 +1438,20 @@
       this._sig = "";
       if (this._hass) {
         this._prefix = this._prefix || this._detectPrefix(this._hass);
+        if (previousVehicle !== this._vehicleBinding()) {
+          this._commandContext += 1;
+          this._dropPendingTemp();
+          clearTimeout(this._armedTimer);
+          this._armed = null;
+        }
         this._safeRender();
       }
+    }
+
+    _vehicleBinding() {
+      const entity = this._eid("sensor", "battery");
+      const registered = (this._hass.entities || {})[entity];
+      return registered && registered.device_id || entity;
     }
 
     set hass(hass) {
@@ -1746,9 +1753,9 @@
      * There is no way to know when the car has finished: the gateway
      * acknowledges receipt, not execution, and nothing in the payload reports
      * a command completing. So this is a timer, not a status - held for
-     * `cooldown` from dispatch and again after the call resolves, with the
-     * controls visibly waiting. A call that never settles must not keep the
-     * controls disabled forever; cooldown: 0 disables this timer entirely.
+     * `cooldown` after the call resolves. While awaiting its answer, a separate
+     * 30-second ceiling covers slow round trips without permanently disabling
+     * controls for a lost call. cooldown: 0 disables both waits.
      *
      * A command the car refused *because it was busy* is retried once, after
      * twice the wait. That is not the double-fire this project reverted in
@@ -1762,16 +1769,20 @@
       if (context !== this._commandContext || this._waiting() || this._lostCar()
           || (!allowDriving && this._isDriving())) return Promise.resolve(NOT_SENT);
       const hold = this._cooldownMs();
-      const release = () => {
-        this._holdUntil = Date.now() + hold;
+      const command = {};
+      this._gateCommand = command;
+      const gate = (delay) => {
+        if (this._gateCommand !== command) return;
+        this._holdUntil = Date.now() + delay;
         clearTimeout(this._holdTimer);
         this._holdTimer = setTimeout(() => {
           this._holdUntil = 0;
           this._applyGate();
-        }, hold);
+        }, delay);
+        this._applyGate();
       };
-      release();
-      this._applyGate();
+      const release = () => gate(hold);
+      gate(hold ? Math.max(30000, hold) : 0);
       // Fired now rather than on a microtask: a command should leave the moment
       // the button is pressed, and only its *result* is handled asynchronously.
       let sent;
@@ -1787,7 +1798,10 @@
           if (!retried && this._isBusyError(err)) {
             // Retried quietly: the car was busy, the command never ran, and a
             // toast for something that is about to work on its own is noise.
-            this._holdUntil = 0;
+            if (this._gateCommand === command) {
+              this._holdUntil = 0;
+              this._applyGate();
+            }
             return new Promise((r) => setTimeout(r, hold * 2))
               .then(() => this._send(fire, true, context, allowDriving));
           }

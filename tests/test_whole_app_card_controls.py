@@ -114,18 +114,124 @@ def test_the_windows_chip_opens_its_menu_with_enter_or_space():
             assert page.locator("dialog[open] .win-menu").count() == 1
 
 
-def test_a_request_that_never_settles_does_not_leave_the_buttons_disabled():
-    got = _evaluate("""() => new Promise(done => {
-      const el = document.createElement('geely-card');
-      document.body.appendChild(el); el.setConfig({cooldown:0.05});
-      const hass = window.mkHass({}); let calls = 0;
-      hass.callService = () => { calls++; return new Promise(() => {}); };
-      el.hass = hass;
-      const find = () => el.shadowRoot.querySelector('[data-act="find"]');
-      find().click(); const held = find().disabled;
-      setTimeout(() => {
-        const released = !find().disabled; find().click();
-        done({held, released, calls});
-      }, 120);
-    })""")
-    assert got == {"held": True, "released": True, "calls": 2}, got
+def test_a_request_that_never_settles_has_a_ceiling_above_normal_cooldown():
+    with _keyboard_page() as page:
+        page.clock.install()
+        page.evaluate("""() => {
+          window.el=document.createElement('geely-card'); document.body.append(el);
+          el.setConfig({cooldown:1.5}); window.hass=mkHass({}); window.calls=0;
+          hass.callService=()=>{ calls++; return new Promise(()=>{}); };
+          el.hass=hass; el.shadowRoot.querySelector('[data-act="find"]').click();
+        }""")
+        page.clock.run_for(4000)
+        assert page.locator("geely-card [data-act='find']").is_disabled()
+        page.clock.run_for(26001)
+        assert page.locator("geely-card [data-act='find']").is_enabled()
+        page.locator("geely-card [data-act='find']").click()
+        assert page.evaluate('calls') == 2
+
+
+def test_slow_round_trips_hold_controls_through_rerenders_and_settlement():
+    for outcome in ('success', 'busy', 'failure'):
+        with _keyboard_page() as page:
+            page.clock.install()
+            page.evaluate("""() => {
+              window.el=document.createElement('geely-card'); document.body.append(el);
+              el.setConfig({cooldown:1.5}); window.hass=mkHass({}); window.calls=[];
+              hass.callService=(d,s)=>{ calls.push(s); return new Promise((resolve,reject)=>{
+                window.settle=resolve; window.refuse=reject;
+              }); };
+              el.hass=hass; el._call("lock","lock","doors").catch(()=>{});
+            }""")
+            page.clock.run_for(2000)
+            page.evaluate("hass.states['sensor.car_battery'].state='62'; el.hass={...hass};")
+            assert page.locator("geely-card [data-act='find']").is_disabled()
+            page.locator("geely-card [data-act='find']").evaluate('(b)=>b.click()')
+            assert page.evaluate('calls') == ['lock']
+            page.clock.run_for(500)
+            if outcome == 'success':
+                page.evaluate('settle()')
+            else:
+                page.evaluate("refuse({code:8070})" if outcome == 'busy' else "refuse({message:'rejected'})")
+            if outcome == 'busy':
+                page.clock.run_for(3001)
+                assert page.evaluate('calls') == ['lock', 'lock']
+            else:
+                assert page.locator("geely-card [data-act='find']").is_disabled()
+                page.clock.run_for(1501)
+                assert page.locator("geely-card [data-act='find']").is_enabled()
+
+
+def test_same_vehicle_config_preserves_dial_confirmation_and_busy_retry():
+    for changed in ({'prefix':'car','cooldown':0.1},
+                    {'prefix':'car','title':'New title','cooldown':0.1},
+                    {'prefix':'shortened','cooldown':0.1}):
+        for action in ('dial', 'arm', 'retry'):
+            with _keyboard_page() as page:
+                page.clock.install()
+                page.evaluate("""() => {
+                  window.el=document.createElement('geely-card'); document.body.append(el);
+                  el.setConfig({prefix:'car',cooldown:0.1}); window.hass=mkHass({});
+                  window.calls=[];
+                  // HA's entity registry includes the controls too; the battery-
+                  // only fixture otherwise cannot resolve a renamed prefix.
+                  for (const id of Object.keys(hass.states)) {
+                    hass.entities[id]={platform:'geely_connect',device_id:'d'};
+                  }
+                  hass.callService=(d,s,data)=>{
+                    calls.push([s,data]);
+                    return calls.length===1 && window.busy ? Promise.reject({code:8070}):Promise.resolve();
+                  }; el.hass=hass;
+                }""")
+                if action == 'dial':
+                    page.evaluate("el._onAction('tempup')")
+                elif action == 'arm':
+                    page.evaluate("el._onAction('unlock')")
+                else:
+                    page.evaluate("window.busy=true; el._onAction('lock')")
+                page.clock.run_for(50)
+                page.evaluate('(cfg)=>el.setConfig(cfg)',changed)
+                if action == 'arm':
+                    page.evaluate("el._onAction('unlock')")
+                page.clock.run_for(1500)
+                calls=page.evaluate('calls')
+                assert [c[0] for c in calls] == ({'dial':['set_temperature'], 'arm':['unlock'], 'retry':['lock','lock']}[action]), (changed, action, calls)
+                assert all(c[1]['entity_id'].startswith(('climate.car_', 'lock.car_')) for c in calls)
+
+
+def test_native_windows_chip_inherits_the_same_font_as_its_siblings():
+    got=_evaluate("""() => {
+      const el=document.createElement('geely-card-compact'); document.body.append(el);
+      el.setConfig({}); el.hass=mkHass({covers:{windows:'open'}});
+      return [...el.shadowRoot.querySelectorAll('.chip')].map(b=>getComputedStyle(b).fontFamily);
+    }""")
+    assert len(set(got)) == 1, got
+
+
+def test_a_late_answer_after_the_ceiling_does_not_release_a_newer_request():
+    for outcome in ('success', 'busy', 'failure'):
+        with _keyboard_page() as page:
+            page.clock.install()
+            page.evaluate("""() => {
+              window.el=document.createElement('geely-card'); document.body.append(el);
+              el.setConfig({cooldown:1.5}); window.hass=mkHass({}); window.calls=[];
+              window.answers=[];
+              hass.callService=(d,s)=>{ calls.push(s); return new Promise((resolve,reject)=>{
+                answers.push({resolve,reject});
+              }); };
+              el.hass=hass; el._call('lock','lock','doors').catch(()=>{});
+            }""")
+            page.clock.run_for(30001)
+            page.locator("geely-card [data-act='find']").click()
+            assert page.evaluate('calls') == ['lock', 'press']
+            if outcome == 'success':
+                page.evaluate('answers[0].resolve()')
+            else:
+                page.evaluate("answers[0].reject({code:8070})" if outcome == 'busy'
+                              else "answers[0].reject({message:'rejected'})")
+            page.clock.run_for(3001)
+            assert page.locator("geely-card [data-act='find']").is_disabled()
+            assert page.evaluate('calls') == ['lock', 'press']
+            page.evaluate('answers[1].resolve()')
+            page.clock.run_for(1501)
+            assert page.locator("geely-card [data-act='find']").is_enabled()
