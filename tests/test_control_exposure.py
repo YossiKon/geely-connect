@@ -1,87 +1,16 @@
-"""Advertised actions reach the selected car, through real HA/Chromium paths.
+"""Native departure actions reach the selected car through real HA paths.
 
 No cloud calls: API clients record requests; all vehicle identities are fake.
 """
-import asyncio
 from datetime import timedelta
 from pathlib import Path
 import types
 
-from conftest import load
-from test_platform_commands import _bundle, _setup_buttons, _by_uid, _need_ha, RecorderApi
-from test_zeekr_adapter import _make_adapter
-from test_zeekr_capabilities import _row
+from test_platform_commands import _need_ha
 from test_init_lifecycle import _mod, _service, _FakeApi, _Patched
-from test_cards_in_a_browser import _evaluate
 from test_audit_examples_safety import _hass_run
 
 ROOT = Path(__file__).resolve().parent.parent
-
-
-def _catalog(fid, **kwargs):
-    return {"functionId": fid, "valueEnable": True, **kwargs}
-
-
-def test_flash_requires_a_lights_only_declaration_and_sends_no_horn_parameter():
-    _need_ha()
-    caps = load("capabilities")
-    for catalogue, expected in (
-        ([], False),
-        ([_catalog("honk_flash")], False),
-        ([_catalog("honk_flash", valueEnum="honk_flash,honk")], False),
-        ([_catalog("honk_flash", valueEnum="honk_flash,flash,honk")], True),
-        ([{**_catalog("honk_flash", valueEnum="flash"), "valueEnable": False}], False),
-    ):
-        api = RecorderApi()
-        _, entities = _setup_buttons(_bundle(api=api, caps=caps.parse(catalogue)))
-        buttons = [b for b in entities if b.unique_id.endswith("_btn_flash_lights")]
-        assert bool(buttons) == expected
-        if expected:
-            assert buttons[0].translation_key == "flash_lights"
-            asyncio.run(buttons[0].async_press())
-            assert api.calls == [("RHL", [{"key": "rhl", "value": "light-flash"}], "start", 0)]
-
-
-def test_em_catalogue_to_button_to_wire_preserves_the_exact_captured_targets():
-    _need_ha()
-    ad, cap = load("zeekr_adapter"), load("capabilities")
-    for flash_enabled in (False, True):
-        rows = [_row("C_RDU_2_3"), _row("C_RDU_2_1"),
-                _row("C_RHL_1"), _row("C_RHL_2", use="Y" if flash_enabled else "N")]
-        view = cap.parse(ad.translate_capabilities(rows))
-        api, client = _make_adapter()
-        client.enc_vin = "fake-vehicle-token"
-        sent = []
-        client.control_new_resp = lambda sid, cmd, params=None: (
-            sent.append((sid, cmd, params)) or {"code": "000000", "data": {}})
-        _, entities = _setup_buttons(_bundle(api=api, caps=view))
-        asyncio.run(_by_uid(entities, "btn_unlock_frunk").async_press())
-        assert sent == [("RDU", "start", [{"key": "target", "value": "hood"}])]
-        if flash_enabled:
-            asyncio.run(_by_uid(entities, "btn_flash_lights").async_press())
-            assert sent[-1] == ("RHL", "start", [{"key": "rhl", "value": "light-flash"}])
-        else:
-            assert not any(b.unique_id.endswith("_btn_flash_lights") for b in entities)
-    for rows in ([], [_row("C_RDU_2_3")],
-                 [_row("C_RDU_2_3"), _row("C_RDU_2_1", use="N")]):
-        view = cap.parse(ad.translate_capabilities(rows))
-        assert not view.get("frunk.enabled")
-
-
-def test_an_e2_keeps_its_own_frunk_request_even_with_a_second_unlock_row():
-    _need_ha()
-    caps = load("capabilities").parse([
-        _catalog("remote_lock_unlock", valueEnum="Front_trunk"),
-        _catalog("remote_control_unlock_2", valueEnum="hood"),
-    ])
-    api = RecorderApi()
-    _, entities = _setup_buttons(_bundle(api=api, caps=caps))
-    asyncio.run(_by_uid(entities, "btn_unlock_frunk").async_press())
-    assert api.calls == [("rlu", [{"key": "operation", "value": "1"},
-                                 {"key": "rlu.target", "value": "1"}], "start", 0)]
-    disabled = load("capabilities").parse([
-        {**_catalog("remote_control_unlock_2", valueEnum="hood"), "valueEnable": False}])
-    assert not disabled.get("frunk.enabled")
 
 
 def test_native_trip_entity_target_is_scoped_and_conflicts_never_send():
@@ -112,44 +41,6 @@ def test_native_trip_entity_target_is_scoped_and_conflicts_never_send():
                 assert accepted
         assert first.calls == []
         assert bool(second.calls) == accepted
-
-
-def test_new_card_actions_render_only_for_the_selected_vehicle_and_dispatch():
-    got = _evaluate("""async () => {
-      const hass = mkHass({});
-      const add = (id) => { hass.states[id] = {entity_id:id, state:'unknown', attributes:{}}; };
-      // Another car's buttons must not create controls on this car.
-      add('button.other_flash_lights'); add('button.other_unlock_frunk');
-      const el = document.createElement('geely-card');
-      document.body.append(el); el.setConfig({prefix:'car', cooldown:0}); el.hass=hass;
-      const count = () => el.shadowRoot.querySelectorAll('[data-act="flash"], [data-act="frunk"]').length;
-      const absent=count();
-      add('button.car_flash_lights'); add('button.car_unlock_frunk');
-      el.hass={...hass}; // Entity appearance must itself trigger rendering.
-      const present=count();
-      el.shadowRoot.querySelector('[data-act="flash"]').click();
-      await Promise.resolve();
-      el.shadowRoot.querySelector('[data-act="frunk"]').click();
-      const first=hass.serviceCalls.length;
-      el.shadowRoot.querySelector('[data-act="frunk"]').click();
-      await Promise.resolve();
-      const calls=[...hass.serviceCalls];
-      el.setConfig({prefix:'car', hide:['flash','frunk']});
-      const hidden=count();
-      const small=[];
-      for (const tag of ['geely-card-compact','geely-card-mini','geely-card-strip']) {
-        const c=document.createElement(tag); document.body.append(c);
-        c.setConfig({prefix:'car', buttons:['flash','frunk']}); c.hass=hass;
-        small.push(c.shadowRoot.querySelectorAll('[data-act="flash"], [data-act="frunk"]').length);
-      }
-      hass.states['sensor.car_speed'].state='25'; el.setConfig({prefix:'car'}); el.hass={...hass};
-      const blocked=[...el.shadowRoot.querySelectorAll('[data-act="flash"], [data-act="frunk"]')].every(b=>b.disabled);
-      return {absent,present,first,calls,hidden,small,blocked};
-    }""")
-    assert got == {"absent": 0, "present": 2, "first": 1,
-                   "calls": [["button", "press", {"entity_id": "button.car_flash_lights"}],
-                             ["button", "press", {"entity_id": "button.car_unlock_frunk"}]],
-                   "hidden": 0, "small": [2, 2, 2], "blocked": True}, got
 
 
 def test_native_departure_blueprint_executes_real_ha_start_stop_and_refusals():
@@ -193,44 +84,6 @@ def test_native_departure_blueprint_executes_real_ha_start_stop_and_refusals():
             assert len(calls) == 2, "invalid departure/command sent a request"
         assert len(calls) == 2
     _hass_run(check)
-
-
-def test_localized_flash_name_keeps_a_card_resolvable_ha_object_id():
-    import json
-    from homeassistant.helpers.entity import async_generate_entity_id
-    from homeassistant.helpers.entity_platform import PlatformData
-
-    async def check(hass):
-        results = []
-        for language in ("fr", "pt-BR"):
-            text = json.loads((ROOT / f"custom_components/geely_connect/translations/{language}.json").read_text())
-            label = text["entity"]["button"]["flash_lights"]["name"]
-            hass.data["geely_connect"] = {"e1": _bundle(caps={"flash_lights.enabled": True})}
-            entities = []
-            await load("button").async_setup_entry(hass, types.SimpleNamespace(entry_id="e1"), entities.extend)
-            button = _by_uid(entities, "btn_flash_lights")
-            platform = PlatformData(hass, domain="button", platform_name="geely_connect")
-            key = "component.geely_connect.entity.button.flash_lights.name"
-            platform.platform_translations = {key: label}
-            platform.object_id_platform_translations = {key: label}
-            button.platform_data = platform
-            assert button.name == label
-            entity_id = async_generate_entity_id("button.{}", "Car " + button.suggested_object_id, hass=hass)
-            assert entity_id == "button.car_flash_lights", entity_id
-            results.append([entity_id, label])
-            assert _by_uid(entities, "btn_find_car").suggested_object_id == "Find Car"
-        return results
-    ids = _hass_run(check)
-    result = _evaluate("""(entities) => entities.map(([id,label]) => {
-      const hass=mkHass({}); hass.states[id]={entity_id:id,state:'unknown',attributes:{friendly_name:label}};
-      const c=document.createElement('geely-card'); document.body.append(c);
-      c.setConfig({prefix:'car',cooldown:0}); c.hass=hass;
-      const buttons=c.shadowRoot.querySelectorAll('[data-act="flash"]');
-      if(buttons.length) buttons[0].click();
-      return {count:buttons.length,calls:hass.serviceCalls};
-    })""", arg=ids)
-    assert result == [{"count": 1, "calls": [["button", "press", {"entity_id": entity_id}]]}
-                      for entity_id, _label in ids]
 
 
 def test_departure_guard_uses_the_helpers_ha_zone_when_host_is_utc():

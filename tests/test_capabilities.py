@@ -353,8 +353,7 @@ def test_an_e2_unlocks_its_trunk_with_rtu_and_an_ex5_keeps_rdu_2():
 def test_the_frunk_is_read_only_where_a_catalogue_names_it():
     """An E2's catalogue names the front trunk as a device of its 1.0 unlock
     row (#72), in both valueEnum and control_devices, as below. That is the
-    1.0 declaration. The EM hood target is covered separately; the flag is
-    presence-only: no
+    only declaration of one seen anywhere, so the flag is presence-only: no
     EX5, no Starray and no empty catalogue may get a frunk button."""
     devices = [{"nameKey": "control_devices", "name": "控制设备", "config": "Front_trunk"}]
     e2 = cap.parse([

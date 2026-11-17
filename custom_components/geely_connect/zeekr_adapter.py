@@ -200,11 +200,6 @@ def translate_capabilities(rows: list[dict]) -> list[dict]:
                         "paramsJson": [{"nameKey": "door", "config": ",".join(targets)}]})
         ids.discard("remote_control_unlock_2")
 
-    if "honk_flash" in ids and "C_RHL_2" in live:
-        entries.append({"functionId": "honk_flash", "valueEnable": True,
-                        "valueEnum": "flash"})
-        ids.discard("honk_flash")
-
     entries.extend({"functionId": fid, "valueEnable": True} for fid in sorted(ids))
     return entries
 
@@ -238,7 +233,7 @@ def _translate_command(service_id: str, command: str,
         target = p.get("target")
         if target == "trunk":                       # tailgate
             return "RDU", "stop", [{"key": "target", "value": "trunk"}]
-        if target == "hood":                        # frunk
+        if target == "hood":                        # frunk (no entity yet)
             return "RDU", "start", [{"key": "target", "value": "hood"}]
         if target:
             return None

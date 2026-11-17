@@ -97,13 +97,6 @@
       "description": "This entry uses the new Geely EM platform, and no app build this integration knows produced a vehicle token (the x-vin) that the gateway accepted for this car. Until it has one, the new-gateway status read stays off.\n\nOpen **Configure** on the Geely Connect entry and paste the token from your phone into **Vehicle token for the new platform (x-vin)**. The derivation is retried at every start, so a release that adds your app build clears this by itself."
     }
   },
-  "entity": {
-    "button": {
-      "flash_lights": {
-        "name": "Flash lights"
-      }
-    }
-  },
   "services": {
     "set_scheduled_trip": {
       "fields": {

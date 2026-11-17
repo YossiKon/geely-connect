@@ -6,18 +6,16 @@ state or check the official app. A visible control alone does not establish
 that equipment is fitted.
 
 The full Geely card exposes the existing seat and steering-wheel controls in
-its climate panel. Flash Lights and Frunk appear in the full and top cards
-only when their corresponding button entities exist. Compact, mini and strip
-cards can request them with `buttons: [flash, frunk]`. Frunk requires two taps,
-like Unlock and Trunk. `hide: [flash, frunk]` removes them from full/top cards.
-The normal Home Assistant button entities remain available for automations.
+its climate panel. The native departure action accepts a vehicle entity
+selector, and the script blueprint provides a Start/Stop workflow using the
+existing vehicle request.
 
-Flash Lights sends the lights-only request, separate from Find Car's horn and
-lights. It requires an explicit lights-only catalogue declaration. It was
-checked against captured request mappings and fake transports, **not actuated
-on the car during this audit**. EM Frunk similarly requires an advertised
-`hood` target and uses the captured EM mapping; its physical operation was
-not tested. E2/EX2 frunks retain their separate existing request.
+Lights-only flashing and EM frunk release remain unexposed. Captured mappings
+suggest `RHL` with `light-flash` and `RDU start` with target `hood`, respectively,
+but neither has an owner-confirmed physical result. Catalogue declarations
+alone do not establish safe command direction: EM doors and boot use `stop` to
+open. Each needs an owner to run the action and report what the car actually
+does before it becomes a button. The E2/EX2's existing frunk button is unchanged.
 
 ## Control inventory
 
@@ -42,7 +40,7 @@ vehicle-token route; its older fallback route has different capabilities.
 | Sunshade | Cover, full card | Same fitted-feature limitation. |
 | Boot unlatch | Button, cards | Releases a latch; does not power the gate open. Several owners confirmed operation, others report latch failures. |
 | Powered EX5 boot | No supported control | Inspected EX5 firmware lacks a remote open handler ([#20](https://github.com/YossiKon/geely-connect/issues/20)). |
-| Frunk release | Button, full/top cards; configurable small cards | E2/EX2 request preserved; advertised EM hood target now exposed with its own mapping. No opening test in this audit. |
+| Frunk release | Existing E2/EX2 button | Owner-confirmed E2/EX2 request preserved. EM hood mapping remains unexposed pending owner confirmation. |
 | Charging start/stop | Switch, cards | Both routes mapped where supported. E2 1.0 catalogues without an actual charge switch are excluded. |
 | Charging schedule | Switch and start/end time entities, full card | Original slots 6/2 and EM mappings. Off-state edits can be discarded on original APAC ([#123](https://github.com/YossiKon/geely-connect/issues/123)); do not assume an acknowledgement persisted. |
 | Charge connector release | No independent control | The reported latch follows door locks; stopping charge is not a separate release command. |
@@ -52,7 +50,7 @@ vehicle-token route; its older fallback route has different capabilities.
 | HA-timed preconditioning | Existing automation blueprints | HA calls the climate entity at the chosen time. Distinct from a departure stored in the car. |
 | Camping / Parking Comfort | Switch where available | State reading demonstrated; accepted remote writes have not demonstrated a vehicle effect ([#45](https://github.com/YossiKon/geely-connect/issues/45)). EM token route suppresses the unmapped switch. |
 | Find Car | Button, cards | Horn and flashing lights; not actuated in this audit. |
-| Flash Lights | Button, full/top cards; configurable small cards | Explicit catalogue support required. Lights-only request mapped on both routes; not physically qualified in this audit. |
+| Flash Lights | No exposed control | Captured lights-only mapping remains pending owner confirmation; Find Car also sounds the horn. |
 | Horn only | No dedicated control | Catalogue lead; exact supported request not established here. |
 | Cabin fan speed | No setter | Rapid climate uses the car's own programme; no captured remote fan-speed parameter. |
 | Individual windows / percentage | No setter | Covers support group open/close, not set-position. A position reading does not establish a writable position. |
@@ -94,7 +92,7 @@ service returned, and persisted through the last sample at 102.94 seconds.
 That is an observed upper bound for this run, **not a maximum propagation
 latency**. The disabled 23:00–07:00 schedule and all comfort settings were
 restored. No candidate code was deployed for these checks, so this evidence
-does not validate pending-intent concurrency/retention fixes. EM and slower
+does not validate candidate schedule changes. EM and slower
 propagation still need measurements; wake battery cost remains unmeasured.
 
 The initial Refresh reached the gateway while the car's own report stayed

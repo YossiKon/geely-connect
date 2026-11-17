@@ -356,10 +356,6 @@ SERVICE_LOCK         = "RDL_2"
 SERVICE_UNLOCK       = "RDU_2"
 SERVICE_LOCK_PARAMS  = [{"key": "door", "value": "all"}]
 
-# --- Lights-only request (catalogue/capture supported; not live-qualified here) ---
-SERVICE_FLASH_LIGHTS = "RHL"
-SERVICE_FLASH_LIGHTS_PARAMS = [{"key": "rhl", "value": "light-flash"}]
-
 # --- Find car (verified live) ---
 SERVICE_FIND_CAR        = "RHL"
 SERVICE_FIND_CAR_PARAMS = [{"key": "rhl", "value": "horn-light-flash"}]
@@ -438,7 +434,6 @@ SERVICE_TAILGATE_1_0_PARAMS: list[dict] = []
 # scheduling block. The ordinary body - scheduling block, no `latest`, exactly
 # what fire_control sends by default - popped the frunk on a Brazilian EX2 Max
 # (2026-10-22), so that is what the button sends. One car so far.
-SERVICE_FRUNK_RDU_PARAMS = [{"key": "target", "value": "hood"}]
 SERVICE_FRUNK        = "rlu"
 SERVICE_FRUNK_PARAMS = [{"key": "operation", "value": "1"},
                         {"key": "rlu.target", "value": "1"}]
