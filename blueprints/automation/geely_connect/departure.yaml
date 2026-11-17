@@ -29,6 +29,19 @@ blueprint:
       default: 22
       selector:
         number: { min: 15.5, max: 28.5, step: 0.5, unit_of_measurement: "°C" }
+    climate_temperature_unit:
+      name: Home Assistant temperature unit
+      description: >-
+        Match Settings > System > General > Unit system > Temperature.
+        The target above stays in Celsius; climate services use this HA unit,
+        which can differ from an individual temperature sensor's unit.
+      default: "°C"
+      selector:
+        select:
+          options: ["°C", "°F"]
+variables:
+  target_temp_c: !input target_temp
+  climate_temperature_unit: !input climate_temperature_unit
 # trigger_variables, not variables: a trigger only ever sees the former. Plain
 # `variables` are rendered once a trigger has fired, so the template below found
 # neither name and failed on every evaluation - the climate never started.
@@ -58,5 +71,10 @@ action:
   # set_temperature already switches the climate on.
   - service: climate.set_temperature
     target: { entity_id: !input climate_entity }
-    data: { temperature: !input target_temp }
+    data:
+      # Nudge the lower endpoint inward: HA converts 59.9 F to
+      # 15.499999999999998 C and otherwise rejects a valid 15.5 C target.
+      temperature: >-
+        {{ target_temp_c * 9 / 5 + 32 + (0.000000001 if target_temp_c == 15.5 else 0)
+           if climate_temperature_unit == '°F' else target_temp_c }}
 mode: single

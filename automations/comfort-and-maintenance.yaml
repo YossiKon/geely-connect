@@ -20,6 +20,14 @@
 #                                   Services > Geely Connect > any entity id)
 #   2. notify.mobile_app_your_phone -> your real notify service
 #                                   (Developer Tools > Actions > search "notify")
+#   3. climate_temperature_unit   -> "°C" or "°F" in BOTH climate automations,
+#                                   matching Settings > System > General >
+#                                   Unit system > Temperature. Climate services
+#                                   use this HA unit, regardless of sensor units.
+#      Targets and thresholds below stay in Celsius. Temperature thresholds
+#      convert each sensor's own displayed unit before comparing.
+#      The tiny offset at a 15.5 C target avoids HA rounding 59.9 F back to
+#      15.499999999999998 C and rejecting the vehicle's minimum setpoint.
 #
 # Every automation checks has_value() first, so nothing can fire on a sensor
 # that is unavailable or has not reported yet after a restart.
@@ -31,6 +39,9 @@
     Warms the cabin before the commute on Mon-Fri when the car is parked at home
     and it is cold outside.
   mode: single
+  variables:
+    climate_temperature_unit: "°C"  # TUNE: match HA's temperature unit (see above).
+    target_temp_c: 22  # TUNE: cabin target in Celsius, valid range 15.5-28.5 C.
   triggers:
     # TUNE: departure prep time.
     - trigger: time
@@ -53,6 +64,10 @@
     # TUNE: cold threshold in degrees C.
     - condition: numeric_state
       entity_id: sensor.my_geely_ex5_exterior_temperature
+      value_template: >-
+        {% set t = state.state | float(none) %}
+        {{ (t - 32) * 5 / 9 if t is not none and state.attributes.get('unit_of_measurement') == '°F'
+           else t if state.attributes.get('unit_of_measurement') == '°C' else none }}
       below: 8
     # TUNE: do not pre-heat on a nearly empty battery. Passes if the battery
     # sensor is unavailable, so a missing reading never blocks the automation.
@@ -84,18 +99,21 @@
     # This single call both switches the climate on and sets the target, so
     # there is no separate climate.set_hvac_mode step - one less remote
     # command sent to the car.
-    # TUNE: cabin target temperature. Valid range is 15.5-28.5 C.
+    # Convert the Celsius target to HA's climate service unit.
     - action: climate.set_temperature
       target:
         entity_id: climate.my_geely_ex5_climate
       data:
-        temperature: 22
+        temperature: >-
+          {{ target_temp_c * 9 / 5 + 32 + (0.000000001 if target_temp_c == 15.5 else 0)
+             if climate_temperature_unit == '°F' else target_temp_c }}
     - action: notify.mobile_app_your_phone
       data:
         title: "Geely: pre-heating"
         message: >-
-          It is {{ states('sensor.my_geely_ex5_exterior_temperature') }} C
-          outside. Warming the cabin to 22 C.
+          It is {{ states('sensor.my_geely_ex5_exterior_temperature') }}
+          {{ state_attr('sensor.my_geely_ex5_exterior_temperature', 'unit_of_measurement') }}
+          outside. Warming the cabin to {{ target_temp_c }} C.
 
 - id: geely_precool_hot_cabin
   alias: "Geely: pre-cool when the cabin gets hot"
@@ -103,11 +121,18 @@
     Requests AC cooling when the interior temperature climbs above a comfort
     limit while the car is reported at home. Does not request window venting.
   mode: single
+  variables:
+    climate_temperature_unit: "°C"  # TUNE: match HA's temperature unit (see above).
+    target_temp_c: 22  # TUNE: cabin target in Celsius, valid range 15.5-28.5 C.
   triggers:
     # TUNE: hot-cabin threshold in degrees C. "for" avoids reacting to a single
     # noisy reading.
     - trigger: numeric_state
       entity_id: sensor.my_geely_ex5_interior_temperature
+      value_template: >-
+        {% set t = state.state | float(none) %}
+        {{ (t - 32) * 5 / 9 if t is not none and state.attributes.get('unit_of_measurement') == '°F'
+           else t if state.attributes.get('unit_of_measurement') == '°C' else none }}
       above: 35
       for: "00:05:00"
   conditions:
@@ -130,18 +155,21 @@
     # deliberately excluded: on the legacy backend it also requests window
     # venting. Adding that preset is an explicit opt-in to its compound effects,
     # not a substitute for this unattended AC-only example.
-    # TUNE: cabin target temperature. Valid range is 15.5-28.5 C.
+    # Convert the Celsius target to HA's climate service unit.
     - action: climate.set_temperature
       target:
         entity_id: climate.my_geely_ex5_climate
       data:
-        temperature: 22
+        temperature: >-
+          {{ target_temp_c * 9 / 5 + 32 + (0.000000001 if target_temp_c == 15.5 else 0)
+             if climate_temperature_unit == '°F' else target_temp_c }}
     - action: notify.mobile_app_your_phone
       data:
         title: "Geely: pre-cooling"
         message: >-
-          Cabin reported {{ states('sensor.my_geely_ex5_interior_temperature') }} C.
-          Requested AC cooling to 22 C; window venting was not requested.
+          Cabin reported {{ states('sensor.my_geely_ex5_interior_temperature') }}
+          {{ state_attr('sensor.my_geely_ex5_interior_temperature', 'unit_of_measurement') }}.
+          Requested AC cooling to {{ target_temp_c }} C; window venting was not requested.
 
 - id: geely_tire_pressure_low
   alias: "Geely: tire pressure below limit"
