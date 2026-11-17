@@ -111,7 +111,9 @@
           "name": "Entidade do veículo",
           "description": "Selecione uma entidade do Geely desejado. Se informar também o VIN, ambos devem indicar o mesmo carro."
         }
-      }
+      },
+      "name": "Definir viagem programada",
+      "description": "Ative ou cancele uma partida única nos carros compatíveis com o servidor original, preservando os ajustes da cabine e da bateria. A gravação de viagens EM e a edição semanal não estão disponíveis."
     }
   },
   "exceptions": {

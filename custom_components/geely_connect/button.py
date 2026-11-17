@@ -171,6 +171,14 @@ class GeelyTelematicsButton(ButtonEntity):
             name=bundle.get("device_name") or f"Geely ({self._vin})",
         )
 
+    @property
+    def suggested_object_id(self) -> str | None:
+        # Keep card/automation suffixes stable when HA uses localized names
+        # for new entity IDs, while the display name remains translated.
+        if self.translation_key == "flash_lights":
+            return "flash_lights"
+        return super().suggested_object_id
+
     async def async_press(self) -> None:
         try:
             resp = await self._hass.async_add_executor_job(

@@ -63,7 +63,7 @@ sequence:
             value_template: >-
               {{ not state_attr(departure_helper, 'has_date')
                  or not state_attr(departure_helper, 'has_time')
-                 or as_timestamp(states(departure_helper), 0) <= as_timestamp(now()) }}
+                 or state_attr(departure_helper, 'timestamp') | float(0) <= as_timestamp(now()) }}
         then:
           - stop: Choose a future departure date and time before starting the trip.
             error: true

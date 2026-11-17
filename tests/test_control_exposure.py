@@ -177,7 +177,8 @@ def test_native_departure_blueprint_executes_real_ha_start_stop_and_refusals():
             script = Script(hass, config["sequence"], "Departure", "script",
                             variables=config["variables"])
             return await script.async_run({} if command is None else {"command": command}, Context())
-        hass.states.async_set("input_datetime.departure", future, {"has_date": True, "has_time": True})
+        hass.states.async_set("input_datetime.departure", future, {"has_date": True, "has_time": True,
+                              "timestamp": (dt_util.now() + timedelta(days=1)).timestamp()})
         await run()
         assert calls == [{"entity_id": "sensor.renamed_car_b", "command": "start", "departure": future}]
         hass.states.async_set("input_datetime.departure", "unavailable")
@@ -186,9 +187,84 @@ def test_native_departure_blueprint_executes_real_ha_start_stop_and_refusals():
         for value, attrs, command in (("unavailable", {}, "start"),
                                       ("2000-01-01 07:00:00", {"has_date": True, "has_time": True}, "start"),
                                       (future, {"has_date": True, "has_time": False}, "start"),
-                                      (future, {"has_date": True, "has_time": True}, "invalid")):
+                                      (future, {"has_date": True, "has_time": True, "timestamp": (dt_util.now() + timedelta(days=1)).timestamp()}, "invalid")):
             hass.states.async_set("input_datetime.departure", value, attrs)
             await run(command)
             assert len(calls) == 2, "invalid departure/command sent a request"
         assert len(calls) == 2
+    _hass_run(check)
+
+
+def test_localized_flash_name_keeps_a_card_resolvable_ha_object_id():
+    import json
+    from homeassistant.helpers.entity import async_generate_entity_id
+    from homeassistant.helpers.entity_platform import PlatformData
+
+    async def check(hass):
+        results = []
+        for language in ("fr", "pt-BR"):
+            text = json.loads((ROOT / f"custom_components/geely_connect/translations/{language}.json").read_text())
+            label = text["entity"]["button"]["flash_lights"]["name"]
+            hass.data["geely_connect"] = {"e1": _bundle(caps={"flash_lights.enabled": True})}
+            entities = []
+            await load("button").async_setup_entry(hass, types.SimpleNamespace(entry_id="e1"), entities.extend)
+            button = _by_uid(entities, "btn_flash_lights")
+            platform = PlatformData(hass, domain="button", platform_name="geely_connect")
+            key = "component.geely_connect.entity.button.flash_lights.name"
+            platform.platform_translations = {key: label}
+            platform.object_id_platform_translations = {key: label}
+            button.platform_data = platform
+            assert button.name == label
+            entity_id = async_generate_entity_id("button.{}", "Car " + button.suggested_object_id, hass=hass)
+            assert entity_id == "button.car_flash_lights", entity_id
+            results.append([entity_id, label])
+            assert _by_uid(entities, "btn_find_car").suggested_object_id == "Find Car"
+        return results
+    ids = _hass_run(check)
+    result = _evaluate("""(entities) => entities.map(([id,label]) => {
+      const hass=mkHass({}); hass.states[id]={entity_id:id,state:'unknown',attributes:{friendly_name:label}};
+      const c=document.createElement('geely-card'); document.body.append(c);
+      c.setConfig({prefix:'car',cooldown:0}); c.hass=hass;
+      const buttons=c.shadowRoot.querySelectorAll('[data-act="flash"]');
+      if(buttons.length) buttons[0].click();
+      return {count:buttons.length,calls:hass.serviceCalls};
+    })""", arg=ids)
+    assert result == [{"count": 1, "calls": [["button", "press", {"entity_id": entity_id}]]}
+                      for entity_id, _label in ids]
+
+
+def test_departure_guard_uses_the_helpers_ha_zone_when_host_is_utc():
+    from homeassistant.components.blueprint.models import Blueprint, BlueprintInputs
+    from homeassistant.components.blueprint.schemas import BLUEPRINT_SCHEMA
+    from homeassistant.components.script.config import SCRIPT_ENTITY_SCHEMA
+    from homeassistant.core import Context
+    from homeassistant.helpers.script import Script
+    from homeassistant.util import dt as dt_util
+    from homeassistant.util.yaml import loader
+    from zoneinfo import ZoneInfo
+
+    async def check(hass):
+        path = str(ROOT / "blueprints/script/geely_connect/native_departure.yaml")
+        bp = Blueprint(loader.load_yaml(path), expected_domain="script", path=path, schema=BLUEPRINT_SCHEMA)
+        config = SCRIPT_ENTITY_SCHEMA(BlueprintInputs(bp, {"use_blueprint": {"path": path, "input": {
+            "vehicle": "sensor.car_b_battery", "departure_helper": "input_datetime.departure"}}}).async_substitute())
+        calls = []
+        hass.services.async_register("geely_connect", "set_scheduled_trip", lambda c: calls.append(dict(c.data)))
+        previous = dt_util.DEFAULT_TIME_ZONE
+        try:
+            for zone, minutes, accepted in (("Australia/Sydney", -30, False),
+                                             ("America/Los_Angeles", 30, True)):
+                dt_util.set_default_time_zone(ZoneInfo(zone))
+                departure = dt_util.now() + timedelta(minutes=minutes)
+                text = departure.strftime("%Y-%m-%d %H:%M:%S")
+                hass.states.async_set("input_datetime.departure", text, {
+                    "has_date": True, "has_time": True, "timestamp": departure.timestamp()})
+                before = len(calls)
+                await Script(hass, config["sequence"], "Departure", "script",
+                             variables=config["variables"]).async_run({}, Context())
+                assert (len(calls) == before + 1) == accepted, (zone, calls)
+                if accepted:
+                    assert calls[-1]["departure"] == text
+        finally:
+            dt_util.set_default_time_zone(previous)
     _hass_run(check)

@@ -111,7 +111,9 @@
           "name": "Vehicle entity",
           "description": "Select an entity of the target Geely. If VIN is supplied too, both must select the same car."
         }
-      }
+      },
+      "name": "Set scheduled trip",
+      "description": "Arm or cancel a one-off departure on supported original-backend cars, preserving stored cabin and battery settings. EM trip writes and weekly editing are unavailable."
     }
   },
   "exceptions": {

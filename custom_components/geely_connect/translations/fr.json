@@ -111,7 +111,9 @@
           "name": "Entité du véhicule",
           "description": "Choisissez une entité de la Geely visée. Si un VIN est aussi fourni, les deux doivent désigner le même véhicule."
         }
-      }
+      },
+      "name": "Définir un trajet planifié",
+      "description": "Activez ou annulez un départ ponctuel sur les véhicules compatibles avec le serveur d’origine, en conservant les réglages de l’habitacle et de la batterie. L’écriture des trajets EM et la modification hebdomadaire ne sont pas disponibles."
     }
   },
   "exceptions": {
