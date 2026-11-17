@@ -4,6 +4,7 @@ No live HA instance, cloud account or vehicle is contacted. The service adapter
 records HA's native-Celsius result instead of sending a remote command.
 """
 import asyncio
+import re
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -115,6 +116,27 @@ def test_blueprints_send_celsius_default_through_both_ha_service_units():
             # Celsius users can retain every shipped default.
             await _run_temperature_actions(
                 hass, _blueprint(name, None if unit == "°C" else unit), 22)
+
+    for unit in ("°C", "°F"):
+        asyncio.run(_with_hass(unit, check))
+
+
+def test_readme_warmup_documented_units_reach_native_22_celsius():
+    _ha()
+    from homeassistant.util.yaml import loader
+
+    section = (ROOT / "README.md").read_text().split(
+        "**Warm up the car on weekday mornings**", 1)[1].split(
+        "**Auto-lock when you leave home**", 1)[0]
+    snippet = section.split("```yaml\n", 1)[1].split("```", 1)[0]
+    fahrenheit = float(re.search(
+        r"change it to `([0-9.]+)` for Fahrenheit", section).group(1))
+
+    async def check(hass):
+        config = loader.parse_yaml(snippet)["automation"][0]
+        if hass.config.units.temperature_unit == "°F":
+            config["action"][0]["data"]["temperature"] = fahrenheit
+        await _run_temperature_actions(hass, config, 22)
 
     for unit in ("°C", "°F"):
         asyncio.run(_with_hass(unit, check))

@@ -811,6 +811,10 @@ automation:
 ```
 
 **Warm up the car on weekday mornings**
+
+Home Assistant expects `temperature` in its configured temperature unit. This
+example targets 22°C: keep `22` for Celsius, or change it to `71.6` for Fahrenheit.
+
 ```yaml
 automation:
   - alias: Geely - pre-heat before work
