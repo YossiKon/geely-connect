@@ -180,6 +180,11 @@ def test_a_widget_with_an_age_set_rejects_stale_missing_and_future_reports():
             assert "Unable to check" in rendered and "worth plugging in" in rendered, rendered
         _normal_states(hass, reported=_ago(minutes=5))
         assert "All good" in _render_widget(hass, report_max_age_seconds=3600)
+        # A quoted age works here as it does in the bedtime check.
+        _normal_states(hass, reported=_ago(days=1))
+        assert "Unable to check" in _render_widget(hass, report_max_age_seconds="3600")
+        _normal_states(hass, reported=_ago(minutes=5))
+        assert "All good" in _render_widget(hass, report_max_age_seconds="3600")
     _hass_run(check)
 
 
@@ -229,6 +234,54 @@ def test_an_unreported_lock_is_silent_by_default_and_named_without_the_condition
         calls, _ = await _execute(hass, _bedtime(keep_lock_condition=False))
         assert len(_messages(calls)) == 1 and "No reading from the car for" in _messages(calls)[0]
         assert f"lock.{PREFIX}_doors" in _messages(calls)[0], calls
+    _hass_run(check)
+
+
+def test_removing_the_three_polling_steps_leaves_the_check_as_it_was():
+    """The file invites an owner who would rather not poll the car at night to
+    delete three steps: the poll_before variables, the button press and the
+    wait. The age setting sits in a step of its own, so the report still finds
+    both of its variables: the message is the one it always was, and Home
+    Assistant has no undefined variable to warn about - a warning that, on a
+    default install, would land in the log every night."""
+    import logging
+
+    class Seen(logging.Handler):
+        def __init__(self):
+            super().__init__(logging.WARNING)
+            self.lines = []
+
+        def emit(self, record):
+            self.lines.append(record.getMessage())
+
+    def without_polling(*, and_the_setting=False):
+        config = _bedtime()
+        kept = [a for a in config["actions"]
+                if "poll_before" not in a.get("variables", {})
+                and a.get("action") != "button.press" and "wait_template" not in a]
+        assert len(config["actions"]) - len(kept) == 3, config["actions"]
+        if and_the_setting:
+            kept = [a for a in kept if "age_check" not in a.get("variables", {})]
+        config["actions"] = kept
+        return config
+
+    async def check(hass):
+        log = logging.getLogger("homeassistant.helpers.template")
+        seen = Seen()
+        log.addHandler(seen)
+        try:
+            _normal_states(hass)
+            _set(hass, "lock.doors", "unlocked")
+            calls, _ = await _execute(hass, without_polling())
+            assert _messages(calls) == ["Before you turn in: the doors are unlocked."], calls
+            assert not any(domain == "button" for domain, _, _ in calls), calls
+            assert seen.lines == [], seen.lines
+            # The capture is live: with the setting's own step deleted as well,
+            # the warning this guards against does appear.
+            await _execute(hass, without_polling(and_the_setting=True))
+            assert any("age_check" in line for line in seen.lines), seen.lines
+        finally:
+            log.removeHandler(seen)
     _hass_run(check)
 
 

@@ -294,9 +294,6 @@
       # TUNE: your bedtime.
       at: "22:30:00"
   actions:
-    # Remember the current poll timestamp before asking for a new one, so we
-    # can tell a genuinely fresh reading from the one we already had.
-    #
     # TUNE: report_max_age_seconds is off (0). Set it to the oldest report from
     # the car, in seconds, that still counts as tonight's: the wait below then
     # waits for Car Reported At to fall inside that age rather than for Last
@@ -304,9 +301,14 @@
     # nothing new - and a report older than that at the end of the wait sends
     # "Could not verify" with both timestamps. A parked car is asleep and its
     # last report is usually hours old, so a small age warns most nights.
+    # This step stays even if you remove the three below it: the report at the
+    # end reads both of its variables.
     - variables:
         report_max_age_seconds: 0
         age_check: "{{ report_max_age_seconds | int(0) > 0 }}"
+    # Remember the current poll timestamp before asking for a new one, so we
+    # can tell a genuinely fresh reading from the one we already had.
+    - variables:
         poll_before: "{{ states('sensor.my_geely_ex5_last_updated') }}"
     # Wake the car so the report is based on fresh data. Remove these three
     # steps (the variables above, the button press and the wait below) if you
