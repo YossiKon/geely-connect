@@ -1887,6 +1887,17 @@
           this._tempTimer = setTimeout(() => {
             const target = this._pendingTemp;
             if (target == null) return;
+            // Another button pressed before the tapping settled holds the
+            // controls, and _send drops a command made while they are held:
+            // the dialled number stayed on screen, never sent (#117). It goes
+            // back to the car's instead. Sending it once the hold ends is not
+            // the answer - it then lands after whatever was pressed, and a
+            // temperature starts the climate the user had just switched off.
+            if (this._waiting()) {
+              this._pendingTemp = null;
+              this._showPendingTemp();
+              return;
+            }
             // Held, NOT cleared on firing. Clearing it here made the display
             // fall back to the entity's old target for as long as the round
             // trip took - so the number the user had just dialled in visibly

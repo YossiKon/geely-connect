@@ -1976,6 +1976,30 @@ def test_a_refused_temperature_does_not_stay_on_screen():
     assert got["shown"] == "22\u00b0", got
 
 
+def test_a_temperature_the_controls_were_held_for_does_not_stay_on_screen():
+    """Temp +, then Climate off inside the settle wait: the off held the
+    controls and the settled temperature was dropped, but 22.5 stayed on screen
+    as if sent (#117). Sent once the hold ended instead, it would have switched
+    the climate back on. The number goes back to the car's."""
+    script = """() => new Promise((done) => {
+        const el = document.createElement("geely-card");
+        document.body.appendChild(el);
+        el.setConfig({ cooldown: 1.5 });
+        const hass = window.mkHass({});
+        hass.states["climate.car_climate"].state = "cool";
+        el.hass = hass;
+        el._onAction("tempup");
+        setTimeout(() => el._onAction("climate"), 300);
+        setTimeout(() => done({
+            sent: hass.serviceCalls.map((c) => c[0] + "." + c[1]),
+            pending: el._pendingTemp,
+            shown: el.shadowRoot.querySelector(".tval").textContent.trim() }), 2600);
+    })"""
+    got = _evaluate(script, timeout=12000)
+    assert got["sent"] == ["climate.turn_off"], got
+    assert got["pending"] is None and got["shown"] == "22\u00b0", got
+
+
 def test_refresh_is_held_by_the_wait_though_not_by_the_driving_lock():
     """It reads rather than commands, so a moving car may still be polled - but
     the wait blocks every command including that one, and a button that looks
