@@ -43,6 +43,7 @@
     "tire_rear_left", "door_rear_left", "combined_range", "charge_complete",
     "charge_voltage", "electric_range", "charge_current", "door_passenger",
     "charger_plug", "total_mileage", "refresh_data", "unlock_trunk",
+    "flash_lights", "unlock_frunk",
     "door_driver", "12v_battery", "trip_meter", "fuel_level", "fuel_range",
     "location",
     "fuel_level_pct",
@@ -190,6 +191,9 @@
       "action.confirm_tap": "sure?",
       "action.defrost": "Defrost",
       "action.find": "Find",
+      "action.flash": "Flash lights",
+      "action.frunk": "Frunk",
+      "tooltip.frunk_release": "Release front trunk latch",
       "action.lock": "Lock",
       "action.open": "Open",
       "action.rapid_cool": "Rapid cool",
@@ -300,6 +304,9 @@
       "action.confirm_tap": "แน่ใจ?",
       "action.defrost": "ไล่ฝ้า",
       "action.find": "ค้นหา",
+      "action.flash": "กะพริบไฟ",
+      "action.frunk": "ฝากระโปรงหน้า",
+      "tooltip.frunk_release": "ปลดล็อกสลักฝากระโปรงหน้า",
       "action.lock": "ล็อก",
       "action.open": "เปิด",
       "action.rapid_cool": "เย็นเร็ว",
@@ -410,6 +417,9 @@
       "action.confirm_tap": "sicuro?",
       "action.defrost": "Sbrinamento",
       "action.find": "Trova",
+      "action.flash": "Lampeggia",
+      "action.frunk": "Bagagliaio anteriore",
+      "tooltip.frunk_release": "Sblocca il fermo del bagagliaio anteriore",
       "action.lock": "Blocca",
       "action.open": "Apri",
       "action.rapid_cool": "Raffreddamento rapido",
@@ -520,6 +530,9 @@
       "action.confirm_tap": "Сигурни?",
       "action.defrost": "Размразяване",
       "action.find": "Намери",
+      "action.flash": "Премигване",
+      "action.frunk": "Преден багажник",
+      "tooltip.frunk_release": "Освобождаване на предния багажник",
       "action.lock": "Заключи",
       "action.open": "Отвори",
       "action.rapid_cool": "Бързо охлаждане",
@@ -968,6 +981,7 @@
            <path d="M4.5 9.5h15M12 21v-6.2M9.6 17.2 12 14.8l2.4 2.4"/>`,
     trunk: `<path d="M4.5 19v-6l3-2h9l3 3v5"/><path d="M4.5 16h15"/>
             <path d="M7.5 11 12 4.8l7 3.2"/><circle cx="16.5" cy="18" r="0"/>`,
+    lights: `<path d="M14 5v14c-5 0-8-2-8-7s3-7 8-7zM18 6h4M18 12h4M18 18h4"/>`,
     find: `<path d="M12 20.5s-6-5.1-6-9.5a6 6 0 0 1 12 0c0 4.4-6 9.5-6 9.5z"/>
            <circle cx="12" cy="10.8" r="2.2"/>`,
     refresh: `<path d="M18.6 9A7 7 0 1 0 19 13"/><path d="M19.2 4.6V9h-4.4"/>`,
@@ -1603,7 +1617,8 @@
       // - exactly how the door count and the charging label froze before. One
       // rule here cannot be forgotten by the sixth card.
       return [...new Set(this._watched().concat(ALWAYS_WATCHED,
-        this._config.car_image ? PHOTO_WATCHED : [], this._navWatched()))]
+        this._config.car_image ? PHOTO_WATCHED : [], this._navWatched(),
+        ["button.flash_lights", "button.unlock_frunk"]))]
         .map((e) => {
           const st = this._st(e);
           if (!st) return "-";
@@ -1871,6 +1886,8 @@
         case "lock": this._call("lock", "lock", "doors"); break;
         case "unlock": this._guarded("unlock", () => this._call("lock", "unlock", "doors")); break;
         case "trunk": this._guarded("trunk", () => this._call("button", "press", "unlock_trunk")); break;
+        case "frunk": this._guarded("frunk", () => this._call("button", "press", "unlock_frunk")); break;
+        case "flash": this._call("button", "press", "flash_lights"); break;
         case "climate": {
           const on = this._climateOn(this._st("climate.climate"));
           // A temperature dialled in just before, and not sent yet, goes to
@@ -2303,6 +2320,12 @@
           case "trunk":
             out.push(this._actBtn("trunk", this._bootWord(), "trunk", { title: this._bootTitle() }));
             break;
+          case "frunk":
+            if (this._st("button.unlock_frunk")) out.push(this._frunkButton());
+            break;
+          case "flash":
+            if (this._st("button.flash_lights")) out.push(this._flashButton());
+            break;
           case "find":
             out.push(this._actBtn("find", this._t("action.find", "Find"), "find"));
             break;
@@ -2351,9 +2374,20 @@
         ["defrost", () => this._actBtn("defrost", this._t("action.defrost", "Defrost"), "defrost", { on: defrost && defrost.state === "on" })],
         ["vent", () => this._actBtn("vent", this._t("action.vent", "Vent"), "vent", { on: vent && vent.state === "on" })],
         ["trunk", () => this._actBtn("trunk", this._bootWord(), "trunk", { title: this._bootTitle() })],
+        ["frunk", () => this._st("button.unlock_frunk") ? this._frunkButton() : ""],
+        ["flash", () => this._st("button.flash_lights") ? this._flashButton() : ""],
         ["find", () => this._actBtn("find", this._t("action.find", "Find"), "find")],
         ["refresh", () => this._actBtn("refresh", this._t("action.sync", "Sync"), "refresh")],
       ].filter(([name]) => !this._hidden(name)).map(([, draw]) => draw()).join("");
+    }
+
+    _frunkButton() {
+      return this._actBtn("frunk", this._t("action.frunk", "Frunk"), "trunk",
+        { title: this._t("tooltip.frunk_release", "Release front trunk latch") });
+    }
+
+    _flashButton() {
+      return this._actBtn("flash", this._t("action.flash", "Flash lights"), "lights");
     }
 
     _actBtn(key, label, ic, opts = {}) {

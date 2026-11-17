@@ -1,5 +1,6 @@
 """Geely one-shot action buttons.
 
+  Flash lights    → RHL / [{rhl: "light-flash"}]        catalogue/capture support
   Find car        → RHL / [{rhl: "horn-light-flash"}]     verified live
   Unlock Trunk    → RDU_2 / [{target: "trunk"}]
                     RTU / []  where the catalogue speaks 1.0 (an E2, #72)
@@ -14,6 +15,8 @@
   Unlock Frunk    → rlu / [{operation: "1"}, {rlu.target: "1"}]
       Only where the catalogue names a front trunk (an E2's does, #72). The
       E2's app sends it; fired from Home Assistant it popped an EX2 Max's frunk.
+      An EM catalogue naming hood instead selects RDU_2 target=hood, translated
+      to the captured RDU start request by its adapter; not live-tested here.
 
 Rapid warming / cooling are exposed as climate.preset_modes - see
 climate.py - because they're a "set the climate to a mode" action, not
@@ -40,6 +43,9 @@ from .api import GeelyControlError, redact
 
 from .const import (
     DOMAIN,
+    SERVICE_FLASH_LIGHTS,
+    SERVICE_FLASH_LIGHTS_PARAMS,
+    SERVICE_FRUNK_RDU_PARAMS,
     SERVICE_FIND_CAR,
     SERVICE_FIND_CAR_PARAMS,
     SERVICE_FRUNK,
@@ -84,7 +90,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
     if caps.get("frunk.enabled"):
         entities.append(GeelyTelematicsButton(
             hass, bundle, "unlock_frunk", "Unlock Frunk", "mdi:car",
-            SERVICE_FRUNK, SERVICE_FRUNK_PARAMS))
+            SERVICE_TAILGATE if caps.get("frunk.rdu") else SERVICE_FRUNK,
+            SERVICE_FRUNK_RDU_PARAMS if caps.get("frunk.rdu") else SERVICE_FRUNK_PARAMS))
+
+    # Lights-only also requires positive evidence; no permissive default.
+    if caps.get("flash_lights.enabled"):
+        entities.append(GeelyTelematicsButton(
+            hass, bundle, "flash_lights", "Flash Lights", "mdi:car-light-high",
+            SERVICE_FLASH_LIGHTS, SERVICE_FLASH_LIGHTS_PARAMS))
 
     # Manual "Refresh now" - forces an immediate poll, bypassing the back-off.
     entities.append(GeelyRefreshButton(hass, bundle))
@@ -147,7 +160,10 @@ class GeelyTelematicsButton(ButtonEntity):
         self._service_id = service_id
         self._params = params
         self._attr_unique_id = f"geely_{self._vin}_btn_{key}"
-        self._attr_name = name
+        if key == "flash_lights":
+            self._attr_translation_key = key
+        else:
+            self._attr_name = name
         self._attr_icon = icon
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self._vin)},

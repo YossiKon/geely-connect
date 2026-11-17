@@ -92,6 +92,7 @@ def parse(items: list[dict]) -> dict[str, Any]:
       lock.enabled, unlock.enabled, unlock.targets (list of accepted targets)
       sunroof.enabled, sunshade.enabled, windows.enabled
       windows.rws_1_0  (bool - windows and ventilation speak RWS with `rws`)
+      flash_lights.enabled (requires an explicit lights-only declaration)
       find_car.enabled
       charging.enabled, parking_comfort.enabled
       scheduled_charging.enabled, scheduled_trip.enabled
@@ -211,6 +212,8 @@ def parse(items: list[dict]) -> dict[str, Any]:
         out["gclean.enabled"] = True
     if enabled("honk_flash"):
         out["find_car.enabled"] = True
+        if "flash" in _split(by_id["honk_flash"].get("valueEnum")):
+            out["flash_lights.enabled"] = True
     if enabled("door_lock_switch_control") or enabled("remote_control_lock_2"):
         out["lock.enabled"] = True
     if enabled("remote_control_unlock_2"):
@@ -243,7 +246,7 @@ def parse(items: list[dict]) -> dict[str, Any]:
     # row - `remote_lock_unlock`, valueEnum and control_devices `Front_trunk`
     # (#72) - and an EX2 Max's names it the same way; the button has opened its
     # frunk. The new platform lists one only as the unlock target `hood` (#88),
-    # which has no entity yet. Unlike the flags around it this one is read on
+    # which uses the 2.0 request. Unlike the flags around it this one is read on
     # presence only: no EX5 or Starray has a frunk, so a catalogue that does not
     # name it, or no catalogue at all, gets no Unlock Frunk button rather than
     # one that cannot work.
@@ -251,6 +254,9 @@ def parse(items: list[dict]) -> dict[str, Any]:
     devices = _targets(lu) | _split(_params_to_dict(lu).get("control_devices"))
     if enabled("remote_lock_unlock") and "front_trunk" in {d.lower() for d in devices}:
         out["frunk.enabled"] = True
+    elif enabled("remote_control_unlock_2") and "hood" in _targets(by_id["remote_control_unlock_2"]):
+        out["frunk.enabled"] = True
+        out["frunk.rdu"] = True
     if enabled("remote_control_skylight_2"):
         out["sunroof.enabled"] = True
     if enabled("remote_control_curtain_2"):
