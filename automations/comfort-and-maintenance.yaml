@@ -25,7 +25,8 @@
 #                                   Unit system > Temperature. Climate services
 #                                   use this HA unit, regardless of sensor units.
 #      Targets and thresholds below stay in Celsius. Temperature thresholds
-#      convert each sensor's own displayed unit before comparing.
+#      convert each sensor's own displayed unit before comparing. A sensor
+#      that shows no unit, or one other than °C or °F, never passes them.
 #      The tiny offset at a 15.5 C target avoids HA rounding 59.9 F back to
 #      15.499999999999998 C and rejecting the vehicle's minimum setpoint.
 #

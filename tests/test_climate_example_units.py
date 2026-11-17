@@ -125,7 +125,7 @@ def test_readme_warmup_documented_units_reach_native_22_celsius():
     _ha()
     from homeassistant.util.yaml import loader
 
-    section = (ROOT / "README.md").read_text().split(
+    section = (ROOT / "README.md").read_text(encoding="utf-8").split(
         "**Warm up the car on weekday mornings**", 1)[1].split(
         "**Auto-lock when you leave home**", 1)[0]
     snippet = section.split("```yaml\n", 1)[1].split("```", 1)[0]
