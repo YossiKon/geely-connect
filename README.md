@@ -205,11 +205,15 @@ everything else.
 > screen. The temperature stepper does not send per tap at all: it writes the new
 > number straight into the display and tells the car once you stop tapping, and it
 > keeps showing your number until the car confirms it - so it never flicks back to
-> the old target while the command is in flight. A command refused because the car
-> was busy is retried once, quietly, since it never ran. `cooldown:` in the card
-> config changes the wait (seconds; 0 turns it off). Nothing can report when the
-> car has actually *finished* - the gateway acknowledges receipt, not execution -
-> so this is a spacing, not a status.
+> the old target while the command is in flight. A temperature that ends up not
+> being sent, because another button was holding the controls when its moment
+> came, does not stay on screen: the number goes back to the car's. Switching the
+> climate off or tapping a rapid preset gives up one that has not gone yet, since
+> it would reach the car as a start. A command refused because the car was busy
+> is retried once, quietly, since it never ran.
+> `cooldown:` in the card config changes the wait (seconds; 0 turns it off).
+> Nothing can report when the car has actually *finished* - the gateway
+> acknowledges receipt, not execution - so this is a spacing, not a status.
 
 > **The cards read a car with a tank differently from a battery-only one.** The
 > integration only creates the fuel entities when it has decided the car has a

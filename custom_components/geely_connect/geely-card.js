@@ -628,6 +628,9 @@
   const DEFAULT_COOLDOWN_S = 3;
   /* How long the temperature stepper waits for the tapping to stop. */
   const TEMP_SETTLE_MS = 1100;
+  /* What `_send` resolves with when it sent nothing: the controls were held,
+   * or there is no car to send to. Nothing else resolves with it. */
+  const NOT_SENT = Symbol("not sent");
 
   const ALWAYS_WATCHED = [
     "sensor.speed", "sensor.engine_state",
@@ -1674,6 +1677,15 @@
         ? `${String(shown).replace(/\.0$/, "")}°` : "—°";
     }
 
+    /* Give up a dialled-in temperature the car has not confirmed, and put the
+     * car's own number back on screen. */
+    _dropPendingTemp() {
+      if (this._pendingTemp == null) return;
+      clearTimeout(this._tempTimer);
+      this._pendingTemp = null;
+      this._showPendingTemp();
+    }
+
     /* Tell the user, the way Home Assistant's own cards do. */
     _toast(message) {
       this.dispatchEvent(new CustomEvent("hass-notification", {
@@ -1727,7 +1739,7 @@
     _send(fire, retried = false) {
       // No car to send to: a dialog left open from before the prefix went
       // stale must not fire at an id that names nothing.
-      if (this._waiting() || this._lostCar()) return Promise.resolve();
+      if (this._waiting() || this._lostCar()) return Promise.resolve(NOT_SENT);
       const hold = this._cooldownMs();
       const release = () => {
         this._holdUntil = Date.now() + hold;
@@ -1861,6 +1873,11 @@
         case "trunk": this._guarded("trunk", () => this._call("button", "press", "unlock_trunk")); break;
         case "climate": {
           const on = this._climateOn(this._st("climate.climate"));
+          // A temperature dialled in just before, and not sent yet, goes to
+          // the car as a start: following this it would switch the climate
+          // back on. One already refused as busy is still retried - that
+          // retry belongs to _send and is not cancelled from here.
+          if (on) this._dropPendingTemp();
           this._call("climate", on ? "turn_off" : "turn_on", "climate");
           break;
         }
@@ -1884,7 +1901,7 @@
           // re-rendering the card, so a run of taps does not make it jump.
           this._showPendingTemp();
           clearTimeout(this._tempTimer);
-          this._tempTimer = setTimeout(() => {
+          const timer = this._tempTimer = setTimeout(() => {
             const target = this._pendingTemp;
             if (target == null) return;
             // Held, NOT cleared on firing. Clearing it here made the display
@@ -1894,7 +1911,15 @@
             // entity catches up, or if the command fails.
             this._call("climate", "set_temperature", "climate",
                        { temperature: target })
-              .catch(() => {
+              .then((out) => {
+                // Never sent: another button pressed before the tapping
+                // settled was holding the controls - or held them when a busy
+                // retry came due - and _send drops such a command without a
+                // word. The number stayed on screen as if the car had been
+                // told (#117). Unless the stepper has been tapped again since,
+                // it goes back to the car's.
+                if (out === NOT_SENT && this._tempTimer === timer) this._dropPendingTemp();
+              }, () => {
                 this._pendingTemp = null;
                 this._showPendingTemp();
               });
@@ -1905,6 +1930,9 @@
           const want = key === "rapidheat" ? "Rapid Warming" : "Rapid Cooling";
           const c = this._st("climate.climate");
           const cur = c && c.attributes && c.attributes.preset_mode;
+          // Either tap supersedes a temperature dialled in just before: a
+          // rapid preset carries its own, and ending one is the climate's off.
+          this._dropPendingTemp();
           if (cur === want) this._call("climate", "turn_off", "climate");
           else this._call("climate", "set_preset_mode", "climate", { preset_mode: want });
           break;

@@ -1976,6 +1976,155 @@ def test_a_refused_temperature_does_not_stay_on_screen():
     assert got["shown"] == "22\u00b0", got
 
 
+def test_a_temperature_never_sent_does_not_stay_on_screen():
+    """Temp +, then another button before the tapping settled: that command
+    held the controls, the settled temperature was dropped without a word, and
+    the new number stayed on screen as if the car had been told (#117). The
+    temperature is still not sent - sent later it would get in the way of
+    whatever was pressed after it - but the number goes back to the car's."""
+    script = """() => new Promise((done) => {
+        const el = document.createElement("geely-card");
+        document.body.appendChild(el);
+        el.setConfig({ cooldown: 1.5 });
+        const hass = window.mkHass({});
+        el.hass = hass;
+        const shown = () => el.shadowRoot.querySelector(".tval").textContent.trim();
+        const seen = {};
+        el._onAction("tempup");
+        setTimeout(() => el._onAction("find"), 300);
+        // The settle wait ends at 1.1 s, inside find's hold, which ends at 1.8 s.
+        setTimeout(() => { seen.settling = shown(); }, 700);
+        setTimeout(() => { seen.settled = shown(); seen.pending = el._pendingTemp; }, 1500);
+        setTimeout(() => done({ ...seen, after: shown(),
+            sent: hass.serviceCalls.map((c) => c[0] + "." + c[1]) }), 2600);
+    })"""
+    got = _evaluate(script, timeout=12000)
+    assert got["sent"] == ["button.press"], got
+    assert got["settling"] == "22.5\u00b0", got
+    assert got["settled"] == "22\u00b0" and got["pending"] is None, got
+    assert got["after"] == "22\u00b0", got
+
+
+def test_a_temperature_whose_retry_was_dropped_does_not_stay_on_screen():
+    """The other way a temperature is never delivered: the car refuses it as
+    busy, and the quiet retry comes due while another command holds the
+    controls. That retry is dropped too, and the number must not stay."""
+    script = """() => new Promise((done) => {
+        const el = document.createElement("geely-card");
+        document.body.appendChild(el);
+        el.setConfig({ cooldown: 1.5 });
+        const hass = window.mkHass({});
+        const calls = [];
+        hass.callService = (d, s) => {
+            calls.push(d + "." + s);
+            return d === "climate" ? Promise.reject({ message:
+                "The last request has not yet been executed, please send the command later!" })
+                : Promise.resolve();
+        };
+        el.hass = hass;
+        el._onAction("tempup");
+        // Refused at 1.1 s, so its retry is due at 4.1 s; find at 3.4 s holds
+        // the controls until 4.9 s.
+        setTimeout(() => el._onAction("find"), 3400);
+        setTimeout(() => done({ calls, pending: el._pendingTemp,
+            shown: el.shadowRoot.querySelector(".tval").textContent.trim() }), 5300);
+    })"""
+    got = _evaluate(script, timeout=15000)
+    assert got["calls"] == ["climate.set_temperature", "button.press"], got
+    assert got["pending"] is None and got["shown"] == "22\u00b0", got
+
+
+def test_a_dropped_retry_does_not_take_a_newer_dial_off_the_screen():
+    """The stepper tapped again while an earlier temperature waits for its
+    retry: the newer number goes out and is accepted, and the old retry, due
+    under that command's hold, is dropped. That drop is the old dial's, and
+    must not wipe the number the car has just been sent."""
+    script = """() => new Promise((done) => {
+        const el = document.createElement("geely-card");
+        document.body.appendChild(el);
+        el.setConfig({ cooldown: 1.5 });
+        const hass = window.mkHass({});
+        const calls = [];
+        hass.callService = (d, s, data) => {
+            calls.push(d + "." + s + " " + data.temperature);
+            return calls.length === 1 ? Promise.reject({ message:
+                "The last request has not yet been executed, please send the command later!" })
+                : Promise.resolve();
+        };
+        el.hass = hass;
+        el._onAction("tempup");
+        // 22.5 is refused at 1.1 s, so its retry is due at 4.1 s. A second tap
+        // at 2.4 s settles at 3.5 s: 23 goes out and holds the controls until
+        // 5.0 s, where the old retry finds them.
+        setTimeout(() => el._onAction("tempup"), 2400);
+        setTimeout(() => done({ calls, pending: el._pendingTemp,
+            shown: el.shadowRoot.querySelector(".tval").textContent.trim() }), 4700);
+    })"""
+    got = _evaluate(script, timeout=15000)
+    assert got["calls"] == ["climate.set_temperature 22.5", "climate.set_temperature 23"], got
+    assert got["pending"] == 23 and got["shown"] == "23\u00b0", got
+
+
+def test_switching_the_climate_off_cancels_a_temperature_dialled_just_before():
+    """A temperature goes to the car as a start. With no wait between
+    commands (`cooldown: 0`) the settled temperature followed a climate-off
+    pressed after the dial and switched the climate back on; with the wait it
+    was dropped, and its number stayed on screen. Either way the dial is now
+    given up at the press and the number goes back. Switching the climate ON
+    contradicts nothing and keeps the dial: on, then the temperature."""
+    script = """() => new Promise((done) => {
+        const drive = (cooldown, climate) => {
+            const el = document.createElement("geely-card");
+            document.body.appendChild(el);
+            el.setConfig({ cooldown });
+            const hass = window.mkHass({ climate });
+            el.hass = hass;
+            const shown = () => el.shadowRoot.querySelector(".tval").textContent.trim();
+            const seen = {};
+            el._onAction("tempup");
+            setTimeout(() => { seen.dialled = shown(); el._onAction("climate"); seen.pressed = shown(); }, 300);
+            return () => ({ ...seen, pending: el._pendingTemp,
+                sent: hass.serviceCalls.map((c) => c[0] + "." + c[1]) });
+        };
+        const held = drive(1.5, "heat_cool"), free = drive(0, "heat_cool"), on = drive(0, "off");
+        // Past the settle wait, which ends at 1.1 s.
+        setTimeout(() => done({ held: held(), free: free(), on: on() }), 1900);
+    })"""
+    got = _evaluate(script, timeout=12000)
+    want = {"dialled": "22.5\u00b0", "pressed": "22\u00b0", "pending": None,
+            "sent": ["climate.turn_off"]}
+    assert got["held"] == want, got
+    assert got["free"] == want, got
+    assert got["on"] == {"dialled": "22.5\u00b0", "pressed": "22.5\u00b0", "pending": 22.5,
+                         "sent": ["climate.turn_on", "climate.set_temperature"]}, got
+
+
+def test_a_rapid_preset_replaces_a_temperature_dialled_just_before():
+    """A rapid preset carries its own temperature, and ending one is the
+    climate's off. Tapped after a dial, either is what the car is left with:
+    the dialled temperature does not follow it as a plain start, which with
+    no wait between commands it did."""
+    script = """() => new Promise((done) => {
+        const drive = (preset) => {
+            const el = document.createElement("geely-card");
+            document.body.appendChild(el);
+            el.setConfig({ cooldown: 0 });
+            const hass = window.mkHass({ climate: "heat_cool" });
+            hass.states["climate.car_climate"].attributes.preset_mode = preset;
+            el.hass = hass;
+            el._onAction("tempup");
+            setTimeout(() => el._onAction("rapidheat"), 300);
+            return () => ({ pending: el._pendingTemp,
+                sent: hass.serviceCalls.map((c) => c[0] + "." + c[1]) });
+        };
+        const starting = drive("none"), ending = drive("Rapid Warming");
+        setTimeout(() => done({ starting: starting(), ending: ending() }), 1900);
+    })"""
+    got = _evaluate(script, timeout=12000)
+    assert got["starting"] == {"pending": None, "sent": ["climate.set_preset_mode"]}, got
+    assert got["ending"] == {"pending": None, "sent": ["climate.turn_off"]}, got
+
+
 def test_refresh_is_held_by_the_wait_though_not_by_the_driving_lock():
     """It reads rather than commands, so a moving car may still be polled - but
     the wait blocks every command including that one, and a button that looks
