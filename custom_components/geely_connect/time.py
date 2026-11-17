@@ -41,7 +41,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .api import GeelyControlError, redact, window_length
 from .const import DOMAIN
-from .helpers import (api_serves, schedule_intent, slot_2_is_on, slot_2_window,
+from .helpers import (api_serves, note_schedule_write, schedule_intent, slot_2_is_on, slot_2_window,
                       truthy as _truthy, schedule_refresh)
 
 _LOGGER = logging.getLogger(__name__)
@@ -172,7 +172,6 @@ class GeelyScheduledChargingTime(CoordinatorEntity, TimeEntity):
                     end_time=new_end,
                     rbc_target=rbc_target,
                     charge_model=charge_model,
-                    changed_time=self._kind,
                 )
             )
         except GeelyControlError as e:
@@ -194,6 +193,7 @@ class GeelyScheduledChargingTime(CoordinatorEntity, TimeEntity):
         data = self.coordinator.data
         if isinstance(data, dict):
             data.setdefault("_scheduled_charging", {})[self._field] = _fmt_hhmm(value)
+        note_schedule_write(self.coordinator)
         self.async_write_ha_state()
 
         # Server takes about 30s to propagate, so refresh at 15, 35 and 55s.
@@ -209,8 +209,9 @@ class GeelyScheduledChargingTime(CoordinatorEntity, TimeEntity):
                 "yet - set the start and end once in the Geely app")
         start = _fmt_hhmm(value) if self._kind == "start" else window["startTime"]
         end = _fmt_hhmm(value) if self._kind == "end" else window["endtime"]
-        # The API validates the effective window after merging pending peer
-        # intent. A stale GET can make two different intended times look equal.
+        if start == end:
+            raise HomeAssistantError(
+                "Geely Scheduled Charging time: the start and the end can't be the same")
         # `chargeSts` first, `timerId` as the fallback (helpers.slot_2_is_on):
         # a start from here moves the first and not the second, and reading
         # the second sent every later time change out as `stop` (#72).
@@ -220,7 +221,6 @@ class GeelyScheduledChargingTime(CoordinatorEntity, TimeEntity):
                 lambda: self._api.scheduled_charging_set_slot_2(
                     command=command, start_time=start, end_time=end,
                     day=window.get("day") or "1,2,3,4,5,6,7",
-                    changed_time=self._kind,
                 )
             )
         except GeelyControlError as e:
@@ -232,14 +232,7 @@ class GeelyScheduledChargingTime(CoordinatorEntity, TimeEntity):
                       self._kind, _fmt_hhmm(value), redact(resp))
         self._optimistic_value = value
         self._optimistic_until = time_mod.time() + 60
-        # Slot 2 is re-read only every few polls unless the car is charging,
-        # so the edited boundary goes into the coordinator's copy, as before:
-        # without it, once the entity's own 60 s hold ended it showed the old
-        # time again and the next edit or toggle sent that old time. Only the
-        # edited one: the API may have sent a pending peer in place of the
-        # copy's, so the copy's pair can match where the window sent did not.
-        window["startTime" if self._kind == "start" else "endtime"] = _fmt_hhmm(value)
-        if window.get("startTime") != window.get("endtime"):
-            window["duration"] = window_length(window["startTime"], window["endtime"])
+        window.update(startTime=start, endtime=end, duration=window_length(start, end))
+        note_schedule_write(self.coordinator)
         self.async_write_ha_state()
         schedule_refresh(self._hass, self.coordinator, 15, 20, 20)

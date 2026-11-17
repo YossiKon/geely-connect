@@ -65,7 +65,7 @@ class _Api:
         return {"code": "1000"}
 
     def scheduled_charging_set(self, *, command, start_time, end_time,
-                               rbc_target="2", rbc="2", charge_model="0", changed_time=None):
+                               rbc_target="2", rbc="2", charge_model="0"):
         self.calls.append(("scheduled_charging_set", {
             "command": command, "start_time": start_time,
             "end_time": end_time, "rbc_target": rbc_target,
@@ -74,8 +74,7 @@ class _Api:
             raise self.raise_
         return {"code": "1000"}
 
-    def scheduled_charging_set_slot_2(self, *, command, start_time, end_time, day,
-                                     changed_time=None):
+    def scheduled_charging_set_slot_2(self, *, command, start_time, end_time, day):
         self.calls.append(("slot_2", command, start_time, end_time, day))
         if self.raise_ is not None:
             raise self.raise_
@@ -1304,17 +1303,11 @@ def test_the_slot_2_times_refuse_what_the_app_could_not_send():
     assert start.native_value is None
     e = _expect_error(start.async_set_value(dtime(23, 0)))
     assert "set the start and end once in the Geely app" in str(e), e
-    # Equality is validated after the API merges pending peer intent. Exercise
-    # the real API here instead of a recorder that accepts every window.
-    from test_api_client import _client
-    real_api = _client()
-    sent = []
-    real_api._authed_apis_call = lambda *a: (sent.append(a) or {"code": 1000})
-    hass, b = _bundle(_status(sched=_slot_2("1")), api=real_api, caps=_SLOT_2_CAPS)
+    hass, b = _bundle(_status(sched=_slot_2("1")), api=api, caps=_SLOT_2_CAPS)
     start = _quiet(t.GeelyScheduledChargingTime(hass, b, "start"))
     e = _expect_error(start.async_set_value(dtime(17, 0)))
     assert "can't be the same" in str(e), e
-    assert sent == [] and api.calls == []
+    assert api.calls == []
     for err, text in ((api_mod.GeelyControlError("8070", "busy"), "Scheduled Charging time: "),
                       (RuntimeError("socket closed"), "time failure: socket closed")):
         hass, b = _bundle(_status(sched=_slot_2("1")), api=_Api(raise_=err), caps=_SLOT_2_CAPS)

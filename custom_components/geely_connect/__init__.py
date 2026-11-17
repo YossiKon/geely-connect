@@ -85,7 +85,7 @@ from .const import (
 )
 from .helpers import (api_can_send, api_reads_charge_server, api_serves,
                       password_decrypt, vehicle_metadata, schedule_refresh,
-                      speed_is_stale)
+                      speed_is_stale, schedule_read_result)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -939,10 +939,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     _LOGGER.debug("vehicle_status_state non-fatal failure: %s", e)
             if api_reads_charge_server(api):
                 try:
+                    schedule_read_started = monotonic()
                     sc = await _call_with_retry(api.charge_server_get,
                                                 poll_state["charge_slot"])
                     if sc.get("code") in _SUCCESS_CODES and isinstance(sc.get("data"), dict):
-                        data["_scheduled_charging"] = sc["data"]
+                        data["_scheduled_charging"] = schedule_read_result(
+                            coordinator, sc["data"], schedule_read_started)
                 except GeelyTLSPinError as e:
                     # A pin failure means the server key changed - an active
                     # MITM or a legitimate rotation. Never hide it at DEBUG.
