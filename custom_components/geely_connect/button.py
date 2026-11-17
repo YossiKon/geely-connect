@@ -129,7 +129,8 @@ class GeelyRefreshButton(ButtonEntity):
             # A new press may wake the car once more for a position fix (#95).
             self._poll_state.pop("force_woke", None)
         await self._coordinator.async_refresh()
-        if not self._coordinator.last_update_success:
+        if (not self._coordinator.last_update_success
+                or not getattr(self._coordinator, "geely_status_success", True)):
             err = self._coordinator.last_exception
             raise HomeAssistantError(
                 f"Geely sync failed: {err}" if err else "Geely sync failed"

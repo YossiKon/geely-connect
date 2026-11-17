@@ -85,3 +85,30 @@ def test_uncontacted_coordinator_and_legacy_test_double_do_not_invent_success():
     coord.last_update_success = True
     entity._stamp()
     assert entity.native_value is not None
+
+
+def test_explicit_refresh_surfaces_both_grace_failures_then_recovers():
+    m = _mod()
+    _, hass, _, api, coord, _ = _setup(m)
+    coord.last_update_success = True
+    coord.last_exception = None
+    coord.async_refresh = coord.refresh
+    good = api.vehicle_status
+    def failed():
+        raise ValueError("offline")
+    api.vehicle_status = failed
+    button_mod = load("button")
+    button = button_mod.GeelyRefreshButton(
+        hass, {"coordinator": coord, "vin": FAKE_VIN, "poll_state": {}})
+    for _ in range(2):
+        try:
+            asyncio.run(button.async_press())
+        except button_mod.HomeAssistantError as err:
+            assert str(err) == "Geely sync failed"
+        else:
+            raise AssertionError("failed explicit refresh was reported as successful")
+        assert coord.last_update_success, "general availability grace must remain"
+        assert not coord.geely_status_success
+    api.vehicle_status = good
+    asyncio.run(button.async_press())
+    assert coord.geely_status_success
