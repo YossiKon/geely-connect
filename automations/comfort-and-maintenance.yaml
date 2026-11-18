@@ -20,15 +20,17 @@
 #                                   Services > Geely Connect > any entity id)
 #   2. notify.mobile_app_your_phone -> your real notify service
 #                                   (Developer Tools > Actions > search "notify")
-#   3. climate_temperature_unit   -> "°C" or "°F" in BOTH climate automations,
-#                                   matching Settings > System > General >
-#                                   Unit system > Temperature. Climate services
-#                                   use this HA unit, regardless of sensor units.
-#      Targets and thresholds below stay in Celsius. Temperature thresholds
-#      convert each sensor's own displayed unit before comparing. A sensor
-#      that shows no unit, or one other than °C or °F, never passes them.
-#      The tiny offset at a 15.5 C target avoids HA rounding 59.9 F back to
-#      15.499999999999998 C and rejecting the vehicle's minimum setpoint.
+#
+# AND SET climate_temperature_unit in BOTH climate automations to the unit Home
+# Assistant uses: Settings > System > General > Unit system - Metric is "°C",
+# US customary is "°F". Climate services take this unit, whatever unit the
+# temperature sensors show. Keep the quotes.
+#   Targets and thresholds below stay in Celsius. Temperature thresholds
+#   convert each sensor's own displayed unit before comparing; a sensor that
+#   shows no unit, or one other than °C or °F, never passes them.
+#   A Fahrenheit target is moved a hair toward the middle of the range: Home
+#   Assistant converts it back to Celsius, and 59.9 F would arrive as
+#   15.499999999999998 C, which Home Assistant's range check refuses.
 #
 # Every automation checks has_value() first, so nothing can fire on a sensor
 # that is unavailable or has not reported yet after a restart.
@@ -62,7 +64,7 @@
     # Guard: skip if the outside temperature has not reported yet.
     - condition: template
       value_template: "{{ has_value('sensor.my_geely_ex5_exterior_temperature') }}"
-    # TUNE: cold threshold in degrees C.
+    # TUNE: cold threshold in degrees C. The sensor has to show °C or °F.
     - condition: numeric_state
       entity_id: sensor.my_geely_ex5_exterior_temperature
       value_template: >-
@@ -80,6 +82,16 @@
     - condition: template
       value_template: "{{ has_value('climate.my_geely_ex5_climate') }}"
   actions:
+    # Guard: Rapid Warming goes out first, so stop here when the setpoint that
+    # follows lies outside the range the climate entity shows - the unit above
+    # set wrongly, or a target out of range. Fahrenheit gets a degree's slack:
+    # Home Assistant shows the ends of the range in whole degrees there.
+    - condition: template
+      value_template: >-
+        {% set sent = target_temp_c * 9 / 5 + 32 if climate_temperature_unit == '°F' else target_temp_c %}
+        {% set slack = 1 if climate_temperature_unit == '°F' else 0 %}
+        {{ state_attr('climate.my_geely_ex5_climate', 'min_temp') - slack <= sent
+           <= state_attr('climate.my_geely_ex5_climate', 'max_temp') + slack }}
     # ORDER MATTERS - keep this step ABOVE set_temperature. The rapid_*
     # presets are a compound command that also forces the target temperature
     # to the entity's own max (warming) or min (cooling), so a preset fired
@@ -106,14 +118,14 @@
         entity_id: climate.my_geely_ex5_climate
       data:
         temperature: >-
-          {{ target_temp_c * 9 / 5 + 32 + (0.000000001 if target_temp_c == 15.5 else 0)
+          {{ target_temp_c * 9 / 5 + 32 + (0.000000001 if target_temp_c < 22 else -0.000000001)
              if climate_temperature_unit == '°F' else target_temp_c }}
     - action: notify.mobile_app_your_phone
       data:
         title: "Geely: pre-heating"
         message: >-
           It is {{ states('sensor.my_geely_ex5_exterior_temperature') }}
-          {{ state_attr('sensor.my_geely_ex5_exterior_temperature', 'unit_of_measurement') }}
+          {{ state_attr('sensor.my_geely_ex5_exterior_temperature', 'unit_of_measurement') or '' }}
           outside. Warming the cabin to {{ target_temp_c }} C.
 
 - id: geely_precool_hot_cabin
@@ -127,7 +139,7 @@
     target_temp_c: 22  # TUNE: cabin target in Celsius, valid range 15.5-28.5 C.
   triggers:
     # TUNE: hot-cabin threshold in degrees C. "for" avoids reacting to a single
-    # noisy reading.
+    # noisy reading. The sensor has to show °C or °F.
     - trigger: numeric_state
       entity_id: sensor.my_geely_ex5_interior_temperature
       value_template: >-
@@ -162,14 +174,14 @@
         entity_id: climate.my_geely_ex5_climate
       data:
         temperature: >-
-          {{ target_temp_c * 9 / 5 + 32 + (0.000000001 if target_temp_c == 15.5 else 0)
+          {{ target_temp_c * 9 / 5 + 32 + (0.000000001 if target_temp_c < 22 else -0.000000001)
              if climate_temperature_unit == '°F' else target_temp_c }}
     - action: notify.mobile_app_your_phone
       data:
         title: "Geely: pre-cooling"
         message: >-
           Cabin reported {{ states('sensor.my_geely_ex5_interior_temperature') }}
-          {{ state_attr('sensor.my_geely_ex5_interior_temperature', 'unit_of_measurement') }}.
+          {{ state_attr('sensor.my_geely_ex5_interior_temperature', 'unit_of_measurement') or '' }}.
           Requested AC cooling to {{ target_temp_c }} C; window venting was not requested.
 
 - id: geely_tire_pressure_low

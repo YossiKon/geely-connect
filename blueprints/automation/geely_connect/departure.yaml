@@ -32,9 +32,10 @@ blueprint:
     climate_temperature_unit:
       name: Home Assistant temperature unit
       description: >-
-        Match Settings > System > General > Unit system > Temperature.
-        The target above stays in Celsius; climate services use this HA unit,
-        which can differ from an individual temperature sensor's unit.
+        The unit Home Assistant uses: Settings > System > General > Unit
+        system - Metric is °C, US customary is °F. The target above stays in
+        Celsius; climate services use this HA unit, which can differ from an
+        individual temperature sensor's unit.
       default: "°C"
       selector:
         select:
@@ -72,9 +73,9 @@ action:
   - service: climate.set_temperature
     target: { entity_id: !input climate_entity }
     data:
-      # Nudge the lower endpoint inward: HA converts 59.9 F to
-      # 15.499999999999998 C and otherwise rejects a valid 15.5 C target.
+      # A Fahrenheit target is moved a hair toward mid-range: HA converts it
+      # back to Celsius, and 59.9 F would arrive as 15.499999999999998 C.
       temperature: >-
-        {{ target_temp_c * 9 / 5 + 32 + (0.000000001 if target_temp_c == 15.5 else 0)
+        {{ target_temp_c * 9 / 5 + 32 + (0.000000001 if target_temp_c < 22 else -0.000000001)
            if climate_temperature_unit == '°F' else target_temp_c }}
 mode: single

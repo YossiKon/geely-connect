@@ -253,3 +253,127 @@ def test_shipped_climate_templates_validate_in_ha_automation_schemas():
         await async_validate_trigger_config(hass, hot["triggers"][0])
 
     asyncio.run(_with_hass("°F", check))
+
+
+def test_the_shipped_unit_is_celsius_and_the_blueprints_offer_what_the_templates_compare():
+    """A paste left as shipped behaves as a Celsius install, and a blueprint can
+    only offer a unit its own template recognises."""
+    _ha()
+    from homeassistant.util.yaml import loader
+
+    configs = _comfort()
+    for name in ("geely_preheat_weekday_morning", "geely_precool_hot_cabin"):
+        assert configs[name]["variables"]["climate_temperature_unit"] == "°C", name
+    for name in ("precondition", "departure"):
+        path = ROOT / "blueprints" / "automation" / "geely_connect" / f"{name}.yaml"
+        unit = loader.load_yaml(str(path))["blueprint"]["input"]["climate_temperature_unit"]
+        assert unit["default"] == "°C", name
+        assert unit["selector"]["select"]["options"] == ["°C", "°F"], name
+        assert "climate_temperature_unit == '°F'" in path.read_text(encoding="utf-8"), name
+
+
+async def _run_preheat(hass, unit_setting, target=22, low=15.5, high=28.5):
+    """The pre-heat actions, delays left out, against Home Assistant's own
+    climate service handler and a climate state shown the way HA shows it:
+    a climate entity whose native range is `low`-`high` C. A setpoint the
+    handler refuses ends the run, recorded as REFUSED after what went out."""
+    from homeassistant.components.climate import (
+        SET_TEMPERATURE_SCHEMA, ClimateEntity, ClimateEntityFeature,
+        async_service_temperature_set)
+    from homeassistant.const import PRECISION_TENTHS, PRECISION_WHOLE, UnitOfTemperature
+    from homeassistant.core import Context
+    from homeassistant.helpers import config_validation as cv
+    from homeassistant.helpers.script import Script
+    from homeassistant.helpers.temperature import display_temp
+
+    class Recorder(ClimateEntity):
+        _attr_temperature_unit = UnitOfTemperature.CELSIUS
+        _attr_min_temp = low
+        _attr_max_temp = high
+        _attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE
+
+        async def async_set_temperature(self, **kwargs):
+            sent.append(("setpoint", round(kwargs["temperature"], 6)))
+
+    sent = []
+    entity = Recorder()
+    entity.hass = hass
+    precision = (PRECISION_TENTHS if hass.config.units.temperature_unit == "°C"
+                 else PRECISION_WHOLE)
+    hass.states.async_set(CLIMATE, "off", {
+        "min_temp": display_temp(hass, low, "°C", precision),
+        "max_temp": display_temp(hass, high, "°C", precision)})
+
+    async def set_temperature(call):
+        await async_service_temperature_set(entity, call)
+
+    async def record(call):
+        sent.append((call.service, call.data.get("preset_mode")))
+
+    for service in ("set_temperature", "set_preset_mode"):
+        if hass.services.has_service("climate", service):
+            hass.services.async_remove("climate", service)
+    hass.services.async_register("climate", "set_temperature", set_temperature,
+                                 schema=SET_TEMPERATURE_SCHEMA)
+    hass.services.async_register("climate", "set_preset_mode", record)
+    if not hass.services.has_service("notify", "mobile_app_your_phone"):
+        hass.services.async_register("notify", "mobile_app_your_phone", lambda call: None)
+    hass.states.async_set("sensor.my_geely_ex5_exterior_temperature", "5",
+                          {"unit_of_measurement": "°C"})
+
+    config = _comfort()["geely_preheat_weekday_morning"]
+    config["variables"]["climate_temperature_unit"] = unit_setting
+    config["variables"]["target_temp_c"] = target
+    steps = [step for step in config["actions"] if "delay" not in step]
+    variables = cv.SCRIPT_VARIABLES_SCHEMA(config["variables"]).async_render(hass, {})
+    script = Script(hass, cv.SCRIPT_SCHEMA(steps), "shipped pre-heat", "automation")
+    try:
+        await script.async_run(variables, context=Context())
+    except Exception as err:  # noqa: BLE001 - what went out before a refusal is the point
+        sent.append(("REFUSED", type(err).__name__))
+    return sent
+
+
+def test_preheat_sends_no_rapid_warming_when_the_unit_setting_does_not_match():
+    """Rapid Warming goes out before the setpoint. With the unit left at °C on
+    a Fahrenheit install, or set to °F on a Celsius one, the setpoint is
+    refused; the run used to send the preset first and stop on the refusal.
+    It now stops before the preset. Set right, both go out."""
+    _ha()
+    want = [("set_preset_mode", "Rapid Warming"), ("setpoint", 22.0)]
+    for install, setting, expected in (("°F", "°C", []), ("°F", "°F", want),
+                                       ("°C", "°F", []), ("°C", "°C", want)):
+        async def check(hass, setting=setting, expected=expected):
+            got = await _run_preheat(hass, setting)
+            assert got == expected, (hass.config.units.temperature_unit, setting, got)
+
+        asyncio.run(_with_hass(install, check))
+
+
+def test_preheat_reaches_both_ends_of_the_range_on_fahrenheit():
+    """Home Assistant shows the ends of the range in whole degrees on a
+    Fahrenheit install, and converts the target back to Celsius on its way
+    in: both ends of the shipped 15.5-28.5 range, and of a 16-28 entity (the
+    whole-degree request's), get through the guard and the range check."""
+    _ha()
+    for target, low, high in ((15.5, 15.5, 28.5), (28.5, 15.5, 28.5),
+                              (16, 16.0, 28.0), (28, 16.0, 28.0)):
+        async def check(hass, target=target, low=low, high=high):
+            got = await _run_preheat(hass, "°F", target, low, high)
+            assert got == [("set_preset_mode", "Rapid Warming"),
+                           ("setpoint", float(target))], (target, low, high, got)
+
+        asyncio.run(_with_hass("°F", check))
+
+
+def test_preheat_sends_nothing_for_a_target_outside_the_range_on_celsius():
+    """On a Celsius install the range is shown as it is, so the guard takes no
+    slack: half a degree outside it sends neither the preset nor the target."""
+    _ha()
+    for target, low, high in ((29, 15.5, 28.5), (15, 15.5, 28.5),
+                              (15.5, 16.0, 28.0), (28.5, 16.0, 28.0)):
+        async def check(hass, target=target, low=low, high=high):
+            got = await _run_preheat(hass, "°C", target, low, high)
+            assert got == [], (target, low, high, got)
+
+        asyncio.run(_with_hass("°C", check))
