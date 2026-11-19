@@ -84,13 +84,15 @@ def test_manual_mode_gives_the_coordinator_no_update_interval():
 
 
 def test_removing_the_entry_deletes_the_vehicle_key():
-    body = io.open(os.path.join(PKG, "__init__.py"), encoding="utf-8").read()
-    assert "async def async_remove_entry" in body, (
-        "without this the mTLS private key outlives the integration on disk"
-    )
-    assert "commonpath" in body, (
-        "removal must refuse any path outside the integration's own storage"
-    )
+    from types import SimpleNamespace
+    from tempfile import TemporaryDirectory
+    from conftest import FAKE_VIN
+    helpers = load("helpers")
+    with TemporaryDirectory() as root:
+        hass = SimpleNamespace(config=SimpleNamespace(path=lambda *p: os.path.join(root, *p)))
+        owned = os.path.join(root, ".storage", "geely_connect", FAKE_VIN)
+        assert helpers.legacy_material_dirs(hass, {"cert_path": os.path.join(owned, "cert.pem")}) == [os.path.realpath(owned)]
+        assert helpers.legacy_material_dirs(hass, {"cert_path": os.path.join(root, "foreign", "cert.pem")}) == []
 
 
 def test_fire_control_is_admin_only():

@@ -58,6 +58,18 @@
     "charging", "climate", "battery", "trunk", "doors", "speed", "hood",
   ].sort((a, b) => b.length - a.length);
 
+  // Entity ids older versions created, kept with their history by the entry
+  // migration rather than deleted: old spelling -> the suffix above it now
+  // answers to. Looked up only on the card's own car, and only when the
+  // current spelling is not there.
+  const LEGACY_SUFFIXES = {
+    sensor: { odometer: "total_mileage" },
+    binary_sensor: {
+      driver_door_open: "door_driver", passenger_door_open: "door_passenger",
+      rear_left_door_open: "door_rear_left", rear_right_door_open: "door_rear_right",
+    },
+  };
+
   /* Markets that drive on the left put the driver's door on the RIGHT of a
    * top-down drawing. The car's own door sensors are role-named (driver /
    * passenger), so the top view must know which side the role sits on. */
@@ -1557,10 +1569,11 @@
           const e = ents[id];
           if (e.platform !== "geely_connect" || !e.device_id) continue;
           cars.add(e.device_id);
-          const object = id.split(".")[1] || "";
+          const [dom, object = ""] = id.split(".");
           if (!object.startsWith(head)) continue;
-          (SUFFIXES.includes(object.slice(head.length)) ? exact : loose)
-            .add(e.device_id);
+          const rest = object.slice(head.length);
+          (SUFFIXES.includes(rest) || rest in (LEGACY_SUFFIXES[dom] || {})
+            ? exact : loose).add(e.device_id);
         }
         const only = (set) => (set.size === 1 ? [...set][0] : undefined);
         if (!device) device = only(exact) || (exact.size ? undefined : only(loose));
@@ -1580,6 +1593,19 @@
               const key = `${dom}.${s}`;
               if (!(key in this._map)) this._map[key] = id;
               break;
+            }
+          }
+        }
+        // A retained old id stands in only where no current one was found.
+        for (const id in ents) {
+          if (this._lost) break;
+          if (ents[id].platform !== "geely_connect") continue;
+          if (device && ents[id].device_id !== device) continue;
+          const [dom, object] = id.split(".");
+          for (const [old, current] of Object.entries(LEGACY_SUFFIXES[dom] || {})) {
+            const key = `${dom}.${current}`;
+            if ((object === old || object.endsWith("_" + old)) && !(key in this._map)) {
+              this._map[key] = id;
             }
           }
         }
