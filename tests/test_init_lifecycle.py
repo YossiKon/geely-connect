@@ -414,6 +414,7 @@ class _FakeApi:
         self.calls.append("position")
         if self.position_error is not None:
             raise self.position_error
+        return {"code": 1000, "success": True}
 
     def fetch_capabilities(self):
         self.calls.append("caps")
