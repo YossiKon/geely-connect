@@ -211,6 +211,10 @@ def mask_path(value: Any) -> str:
     return _VIN_LIKE_SEGMENT.sub(lambda m: f"...{m.group(0)[-4:]}", str(value))
 
 
+# The user id in a request's query, value and all (`?userId=...&`).
+_USER_ID_IN_QUERY = re.compile(r"(?i)([?&]userid=)[^&]*")
+
+
 def _looks_like_key_material(value: Any) -> bool:
     """True if a "key" field holds a credential rather than a parameter name.
 
@@ -286,7 +290,15 @@ def _is_auth_failure(resp: dict) -> bool:
     return resp.get("code") in _AUTH_FAILURE_CODES
 
 
-def _check_control_resp(resp: dict) -> dict:
+def _shorten_vin(text: Any, vin: str) -> Any:
+    """`text` with `vin` shortened to its last four characters, as the
+    command trail shows it; anything that is not text comes back as it was."""
+    if vin and isinstance(text, str) and vin in text:
+        return text.replace(vin, f"...{vin[-4:]}")
+    return text
+
+
+def _check_control_resp(resp: dict, vin: str = "") -> dict:
     """Raise GeelyControlError if the response is not a success.
 
     Note: a successful response (`code=1000, success=True`) means the
@@ -294,13 +306,18 @@ def _check_control_resp(resp: dict) -> dict:
     it. Status-field diff is the only way to verify execution. But this
     check at least catches obvious failures (wrong params, rate limit,
     unsupported feature).
+
+    The refusal's message is the gateway's own sentence, which the platforms
+    show as the error of the press (and an automation's log line repeats),
+    so `vin` is shortened in it to its last four characters, as the command
+    trail shortens it.
     """
     if _is_auth_failure(resp):
         raise GeelyAuthError(f"control rejected: {resp.get('code')}")
     code = resp.get("code")
     if code in _CONTROL_SUCCESS_CODES and resp.get("success") in (True, "true"):
         return resp
-    raise GeelyControlError(code, resp.get("message"))
+    raise GeelyControlError(code, _shorten_vin(resp.get("message"), vin))
 
 
 def window_length(start: str, end: str) -> str:
@@ -697,12 +714,14 @@ def _secure_tls_connect(host: str, port: int, *, pin_path: str | None,
         if spki in accepted:
             return ssock                          # pin matches → trusted
         ssock.close()
+        # The pin file sits in the car's own folder, named by its VIN, so the
+        # path is masked as in every other pin error.
         raise GeelyTLSPinError(
             f"{host}: server key {spki} does not match the expected key(s) "
             f"{sorted(accepted)} - possible man-in-the-middle; refusing to "
             "send credentials. If Geely has legitimately rotated this key, "
-            f"add the new one to {pin_path or 'server_pins.json'} and open an "
-            "issue so it can ship as the bundled pin."
+            f"add the new one to {mask_path(pin_path or 'server_pins.json')} "
+            "and open an issue so it can ship as the bundled pin."
         )
 
     # No bundled pin and nothing stored: first contact with a private-PKI
@@ -1208,7 +1227,12 @@ class GeelyApi(CommandTrail):
             )
             j = json.loads(resp)
         if _is_auth_failure(j):
-            raise GeelyAuthError(f"{method} {mask_path(path)} auth-rejected: {redact(j)}")
+            # mask_path takes out VIN-shaped segments only; the status read's
+            # query carries the user id, which can be any length. The answer
+            # is the gateway's, so a VIN it names is shortened as well.
+            where = mask_path(_USER_ID_IN_QUERY.sub(r"\1***", path))
+            said = _shorten_vin(str(redact(j)), self.vin)
+            raise GeelyAuthError(f"{method} {where} auth-rejected: {said}")
         return j
 
     def vehicle_status(self) -> dict:
@@ -1303,7 +1327,7 @@ class GeelyApi(CommandTrail):
             {"start": start_time, "end": end_time, "target": rbc_target,
              "chargeModel": charge_model},
             lambda: _check_control_resp(
-                self._authed_apis_call("POST", path, body_bytes)))
+                self._authed_apis_call("POST", path, body_bytes), self.vin))
 
     def scheduled_charging_set_slot_2(self, *, command: str, start_time: str,
                                       end_time: str,
@@ -1339,7 +1363,7 @@ class GeelyApi(CommandTrail):
             f"scheduled_charging {command}",
             {"start": start_time, "end": end_time, "slot": "2"},
             lambda: _check_control_resp(
-                self._authed_apis_call("POST", path, body_bytes)))
+                self._authed_apis_call("POST", path, body_bytes), self.vin))
 
     def scheduled_trip_set(self, *, command: str, scheduled_time_ms: str,
                            ac: str = "true", bw: str = "1", bwl: str = "1") -> dict:
@@ -1379,7 +1403,7 @@ class GeelyApi(CommandTrail):
             f"scheduled_trip {command}",
             {"scheduledTime": str(scheduled_time_ms), "ac": ac, "bw": bw, "bwl": bwl},
             lambda: _check_control_resp(
-                self._authed_apis_call("POST", path, body_bytes)))
+                self._authed_apis_call("POST", path, body_bytes), self.vin))
 
     # ---- WRITE (control) ----
 
@@ -1417,7 +1441,7 @@ class GeelyApi(CommandTrail):
         return self._recorded(
             f"{service_id} {command}", parameters or [],
             lambda: _check_control_resp(
-                self._authed_apis_call("PUT", path, body)))
+                self._authed_apis_call("PUT", path, body), self.vin))
 
     # ---- Compound rapid warm/cool (different endpoint) ----
 
@@ -1479,7 +1503,7 @@ class GeelyApi(CommandTrail):
              "ventilation": body.get("ventilation"), "vlt": body["vlt"],
              "sw": body.get("sw")},
             lambda: _check_control_resp(
-                self._authed_apis_call("POST", path, body_bytes)))
+                self._authed_apis_call("POST", path, body_bytes), self.vin))
 
     # ---- Capability discovery ----
 

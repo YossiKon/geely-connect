@@ -1400,3 +1400,79 @@ def test_a_charging_window_length_crosses_midnight_and_is_never_empty():
         pass
     else:
         raise AssertionError("a window with no length was accepted")
+
+
+# ------------------------------------------- identifiers in error text ---
+
+def test_a_key_that_matches_no_pin_names_no_vin_in_its_error():
+    """The pin store sits in the car's own folder, named by its VIN, and the
+    mismatch error - every poll's, after a key rotation - tells the owner
+    where to add the new key. It reaches the log and every press's error."""
+    pin_path = os.path.join(tempfile.mkdtemp(), FAKE_VIN, "server_pins.json")
+    with _patched(socket=_FakeSocketModule(),
+                  _strict_ctx=lambda: _FakeCtx(_verify_error(20)),
+                  _pinning_ctx=lambda: _FakeCtx(_FakeTLSSock(der=b"EVIL")),
+                  _spki_sha256_b64=lambda d: d.decode(),
+                  _BUNDLED_TLS_PINS={"apis.ecloudeu.com": ("PINA",)}):
+        try:
+            api._secure_tls_connect("apis.ecloudeu.com", 443, pin_path=pin_path)
+        except api.GeelyTLSPinError as e:
+            assert "man-in-the-middle" in str(e), str(e)
+            assert FAKE_VIN not in str(e), str(e)
+            assert f"...{FAKE_VIN[-4:]}" in str(e) and "server_pins.json" in str(e), str(e)
+        else:
+            raise AssertionError("trusted a key that matches no pin")
+
+
+def test_a_status_read_refused_for_its_session_names_no_user_id():
+    """The status read's query carries the user id, which mask_path cannot
+    see: it takes out VIN-shaped segments only, and a user id has any length.
+    A VIN the answer names is shortened as in the path."""
+    for user_id in ("98765", "user.12345", "0123456789abcdef0123456789abcdef"):
+        a = _client_with_jwt(user_id=user_id)
+        _scripted_mtls(a, [{"code": 60000001,
+                            "message": f"token invalid for {FAKE_VIN}"}])
+        try:
+            a.vehicle_status()
+        except api.GeelyAuthError as e:
+            assert user_id not in str(e) and FAKE_VIN not in str(e), str(e)
+            assert "userId=***" in str(e) and "latest=" in str(e), str(e)
+            assert f"token invalid for ...{FAKE_VIN[-4:]}" in str(e), str(e)
+        else:
+            raise AssertionError("a refused session read was taken as data")
+
+
+def test_a_refused_command_shows_the_vin_shortened():
+    """The platforms show a refusal's message as the error of the press -
+    from each of the five writes that check one."""
+    presses = (
+        lambda a: a.control("RDL", [{"key": "door", "value": "all"}]),
+        lambda a: a.scheduled_charging_set(command="start", start_time="23:00",
+                                           end_time="07:00"),
+        lambda a: a.scheduled_charging_set_slot_2(command="start", start_time="23:00",
+                                                  end_time="07:00"),
+        lambda a: a.scheduled_trip_set(command="start",
+                                       scheduled_time_ms="1750000000000"),
+        lambda a: a.rapid_climate(ac=True, temp="22", heat_seats=None,
+                                  vent_seats=None, vlt=False),
+    )
+    for n, press in enumerate(presses):
+        a = _client_with_jwt()
+        _scripted_mtls(a, [{"code": "8070", "success": False,
+                            "message": f"vehicle {FAKE_VIN} is busy"}])
+        try:
+            press(a)
+        except api.GeelyControlError as e:
+            assert e.code == "8070" and FAKE_VIN not in e.message, (n, e.message)
+            assert e.message == f"vehicle ...{FAKE_VIN[-4:]} is busy", (n, e.message)
+        else:
+            raise AssertionError(f"press {n}: a refusal was taken as accepted")
+    # No VIN to shorten, or no message at all, reads as before.
+    try:
+        api._check_control_resp({"code": "8070", "message": "busy"}, FAKE_VIN)
+    except api.GeelyControlError as e:
+        assert e.message == "busy"
+    try:
+        api._check_control_resp({"code": "8070"}, FAKE_VIN)
+    except api.GeelyControlError as e:
+        assert e.message == "Geely server returned code='8070'"
