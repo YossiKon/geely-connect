@@ -59,7 +59,9 @@ import ssl
 import string
 import time
 import uuid
+from collections.abc import Iterable
 from datetime import datetime, timezone
+from typing import Any
 from urllib.parse import urlparse, parse_qsl, quote
 
 from .api import redact
@@ -227,11 +229,16 @@ def _hf_request(method: str, path: str, *, query: str = "", body: bytes = b"",
                 token: str | None = None, vin: str | None = None,
                 vehicle_model: str = "", timezone: str = "UTC",
                 device_identifier: str | None = None,
-                gateway: str | None = None) -> dict:
+                gateway: str | None = None,
+                hide: Iterable[Any] = ()) -> dict:
     """Signed call to the old Ecarx platform (api.ecloudkr.com) with the HF
     identity (GEELY-APP-NEW + new-app secret + device headers), mirroring the
     new app's own HF client (HFOkHttpClientUtil.RequestInterceptor + SignUtil).
+
+    An error built from the answer leaves out the JWT and the VIN this call
+    sent, and each of `hide` (see hide_values).
     """
+    hide = (*hide, token, vin)
     nonce = _make_nonce()
     ts_ms = str(int(time.time() * 1000))
     headers = {
@@ -283,10 +290,10 @@ def _hf_request(method: str, path: str, *, query: str = "", body: bytes = b"",
         resp = conn.getresponse()
         raw = resp.read()
         if resp.status != 200:
-            raise ZeekrApiError(f"HF HTTP {resp.status}: {_safe_detail(raw)}")
+            raise ZeekrApiError(f"HF HTTP {resp.status}: {_safe_detail(raw, hide=hide)}")
         # Strict here: 1000 is capture-verified on this gateway, so a 200-wrapped
         # non-1000 code is a real error the adapter must see (renewal / reauth).
-        return _check_resp(json.loads(raw), ok_codes=_OK_CODES)
+        return _check_resp(json.loads(raw), ok_codes=_OK_CODES, hide=hide)
     finally:
         conn.close()
 
@@ -325,17 +332,60 @@ class ZeekrApiError(Exception):
     """Gateway rejected the request (signature, params, or server error)."""
 
 
-def _safe_detail(raw: bytes | str, limit: int = 200) -> str:
+# The values hide_values is given are longer in practice: a VIN has eight
+# characters at least, a token many more, an email address six or more. A
+# shorter one could be a piece of a word, and the error classifiers read
+# words ("token", "auth").
+_HIDE_MIN_LEN = 6
+
+
+def _mask(value: str) -> str:
+    """`value` masked character for character: a letter, digit or underscore
+    becomes an X, anything else an asterisk."""
+    return "".join("X" if ch.isalnum() or ch == "_" else "*" for ch in value)
+
+
+def hide_values(text: str, values: Iterable[Any]) -> str:
+    """`text` with each of `values` masked wherever it stands in it.
+
+    redact() masks by key name, which a value inside a sentence escapes: an
+    error message worded around the vehicle token, the VIN or a session token
+    would carry it whole into the log, an error Home Assistant shows or a
+    diagnostics report. So the error text built from an answer has those
+    values taken out here, before anything cuts it short - a cut through a
+    value leaves a prefix no replace can match.
+
+    The mask keeps the value's length and the kind of each character (_mask),
+    so nothing around it moves and no word boundary comes or goes: a cut
+    falls where it fell, and the error classifiers, which decide whether a
+    password login runs, read the same words outside the value as they did -
+    a code written right against a value (`code=401<token>`) included. The
+    longest value goes first, so one held inside another is not split; a
+    value under _HIDE_MIN_LEN characters is left."""
+    for value in sorted({str(v) for v in values if v and len(str(v)) >= _HIDE_MIN_LEN},
+                        key=len, reverse=True):
+        text = text.replace(value, _mask(value))
+    return text
+
+
+def _detail(obj: Any, hide: Iterable[Any] = (), limit: int = 200) -> str:
+    """An answer as exception text: redact() by key, hide_values() by value,
+    then the cut."""
+    return hide_values(str(redact(obj)), hide)[:limit]
+
+
+def _safe_detail(raw: bytes | str, limit: int = 200,
+                 hide: Iterable[Any] = ()) -> str:
     """A response body reduced to something safe to fold into an exception.
 
     Every raise in this module can surface on Home Assistant's re-auth card
     and in the log (the adapter maps our errors to GeelyAuthError /
     GeelyControlError, whose text renders there), so a raw body must never
     ride along verbatim - the same redact()-at-the-raise invariant the legacy
-    api.py holds. JSON is parsed and run through redact(); anything else is
-    dropped rather than guessed at."""
+    api.py holds. JSON is parsed and run through redact() and hide_values();
+    anything else is dropped rather than guessed at."""
     try:
-        return str(redact(json.loads(raw)))[:limit]
+        return _detail(json.loads(raw), hide, limit)
     except Exception:  # noqa: BLE001 - non-JSON / undecodable body: say nothing
         return "<non-JSON body omitted>"
 
@@ -448,7 +498,8 @@ def snc_sign(*, method: str, url: str, headers: dict, body: bytes,
 _OK_CODES: set = {"1000", 1000}
 
 
-def _check_resp(resp: dict, *, ok_codes: set | None = None) -> dict:
+def _check_resp(resp: dict, *, ok_codes: set | None = None,
+                hide: Iterable[Any] = ()) -> dict:
     """BaseResult shape: {code, success, message, data}. Raise on auth/gateway errors.
 
     Business failures (bad/expired token, rejected params) arrive inside an HTTP
@@ -464,17 +515,41 @@ def _check_resp(resp: dict, *, ok_codes: set | None = None) -> dict:
     the adapter's silent HF renewal retry and, failing that, the HA reauth flow.
     A 200-wrapped `{"code": 401}` from the HF gateway slipping through as success
     would wedge the integration on a stale token until a manual reconfigure.
+
+    The message is the gateway's own sentence, not a structure redact() can
+    walk, so the values the request sent (`hide`) are taken out of it - in
+    the error raised here and in an answer handed back (_without_echo).
     """
+    hide = tuple(hide)
     success = resp.get("success")
     if success in (True, "true", "1"):
-        return resp
+        return _without_echo(resp, hide)
     code = resp.get("code")
     if success in (False, "false", "0") or (
         ok_codes is not None and code is not None and code not in ok_codes
     ):
         msg = resp.get("message") or resp.get("msg") or "unknown"
-        raise ZeekrApiError(f"code={code} message={msg}")
-    return resp
+        raise ZeekrApiError(hide_values(f"code={code} message={msg}", hide))
+    return _without_echo(resp, hide)
+
+
+def _without_echo(resp: dict, hide: tuple) -> dict:
+    """The answer with its own sentences - `message` and `msg` - cleared of
+    the values the request sent.
+
+    An answer whose code is not a success is often handed on as it came
+    rather than raised: the coordinator words a failed poll around its
+    `msg`, and the diagnostics report carries a schedule read whole. A copy
+    is made only when something was taken out; no other field is touched,
+    since the data is read as data - the garage's VINs among it."""
+    out = resp
+    for key in ("message", "msg"):
+        text = resp.get(key)
+        if isinstance(text, str):
+            clean = hide_values(text, hide)
+            if clean != text:
+                out = {**out, key: clean}
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -560,11 +635,17 @@ def idaas_headers(method: str, path: str, body: bytes, query: str = "",
     return headers
 
 
-def _post_json(url: str, body: dict, headers: dict) -> dict:
-    return _post_raw_json(url, json.dumps(body).encode(), headers)
+def _post_json(url: str, body: dict, headers: dict,
+               hide: Iterable[Any] = ()) -> dict:
+    return _post_raw_json(url, json.dumps(body).encode(), headers, hide)
 
 
-def _post_raw_json(url: str, raw: bytes, headers: dict) -> dict:
+# The IDaaS transports: an error built from the answer leaves out the login
+# token the call sent in its Authorization header, and each of `hide` - the
+# account's email address, which the callers pass.
+
+def _post_raw_json(url: str, raw: bytes, headers: dict,
+                   hide: Iterable[Any] = ()) -> dict:
     p = urlparse(url)
     host = p.hostname or ""
     ctx = ssl.create_default_context()
@@ -574,13 +655,14 @@ def _post_raw_json(url: str, raw: bytes, headers: dict) -> dict:
         resp = conn.getresponse()
         resp_raw = resp.read()
         if resp.status != 200:
-            raise ZeekrApiError(f"HTTP {resp.status}: {_safe_detail(resp_raw)}")
+            detail = _safe_detail(resp_raw, hide=(*hide, headers.get("Authorization")))
+            raise ZeekrApiError(f"HTTP {resp.status}: {detail}")
         return json.loads(resp_raw)
     finally:
         conn.close()
 
 
-def _get_json(url: str, headers: dict) -> dict:
+def _get_json(url: str, headers: dict, hide: Iterable[Any] = ()) -> dict:
     p = urlparse(url)
     host = p.hostname or ""
     ctx = ssl.create_default_context()
@@ -590,7 +672,8 @@ def _get_json(url: str, headers: dict) -> dict:
         resp = conn.getresponse()
         raw = resp.read()
         if resp.status != 200:
-            raise ZeekrApiError(f"HTTP {resp.status}: {_safe_detail(raw)}")
+            detail = _safe_detail(raw, hide=(*hide, headers.get("Authorization")))
+            raise ZeekrApiError(f"HTTP {resp.status}: {detail}")
         return json.loads(raw)
     finally:
         conn.close()
@@ -616,27 +699,30 @@ class ZeekrIdaas:
     def check_user(self, email: str) -> dict:
         body = {"email": email, "checkType": "1"}
         resp = _post_json(f"{self.base}/auth/checkUserV2", body,
-                          self._headers("POST", f"/{self.path}/auth/checkUserV2", json.dumps(body).encode()))
-        return _check_resp(resp).get("data") or {}
+                          self._headers("POST", f"/{self.path}/auth/checkUserV2", json.dumps(body).encode()),
+                          (email,))
+        return _check_resp(resp, hide=(email,)).get("data") or {}
 
     def request_code(self, email: str, operation_type: str = "login") -> dict:
         """captcha/email: sends the OTP email, returns SendCodeResponse (codeId)."""
         body = {"email": email, "operationType": operation_type,
                 "humanMachineTicket": "", "language": "en"}
         resp = _post_json(f"{self.base}/captcha/email", body,
-                          self._headers("POST", f"/{self.path}/captcha/email", json.dumps(body).encode()))
-        return _check_resp(resp).get("data") or {}
+                          self._headers("POST", f"/{self.path}/captcha/email", json.dumps(body).encode()),
+                          (email,))
+        return _check_resp(resp, hide=(email,)).get("data") or {}
 
     def login_by_email(self, email: str, code_id: str, code: str) -> str:
         """loginByEmailEncrypt -> tokenValue. password omitted for OTP-only accounts."""
         body = {"email": email, "codeId": code_id, "code": code}
         resp = _post_json(f"{self.base}/auth/loginByEmailEncrypt", body,
                           self._headers("POST", f"/{self.path}/auth/loginByEmailEncrypt",
-                                        json.dumps(body).encode()))
-        data = _check_resp(resp).get("data") or {}
+                                        json.dumps(body).encode()),
+                          (email,))
+        data = _check_resp(resp, hide=(email,)).get("data") or {}
         token = data.get("tokenValue")
         if not token:
-            raise ZeekrAuthError(f"loginByEmailEncrypt returned no tokenValue: {str(redact(resp))[:200]}")
+            raise ZeekrAuthError(f"loginByEmailEncrypt returned no tokenValue: {_detail(resp, (email,))}")
         return token
 
     def login_by_email_password(self, email: str, password: str) -> str:
@@ -644,11 +730,12 @@ class ZeekrIdaas:
         body = {"email": email, "password": _rsa_encrypt_password(password)}
         resp = _post_json(f"{self.base}/auth/loginByEmailEncrypt", body,
                           self._headers("POST", f"/{self.path}/auth/loginByEmailEncrypt",
-                                        json.dumps(body).encode()))
-        data = _check_resp(resp).get("data") or {}
+                                        json.dumps(body).encode()),
+                          (email,))
+        data = _check_resp(resp, hide=(email,)).get("data") or {}
         token = data.get("tokenValue")
         if not token:
-            raise ZeekrAuthError(f"loginByEmailEncrypt(password) returned no tokenValue: {str(redact(resp))[:200]}")
+            raise ZeekrAuthError(f"loginByEmailEncrypt(password) returned no tokenValue: {_detail(resp, (email,))}")
         return token
 
     def edit_password(self, email: str, code_id: str, code: str, password: str) -> dict:
@@ -657,8 +744,9 @@ class ZeekrIdaas:
                 "password": _rsa_encrypt_password(password)}
         resp = _post_json(f"{self.base}/auth/editPasswordByEmailEncrypt", body,
                           self._headers("POST", f"/{self.path}/auth/editPasswordByEmailEncrypt",
-                                        json.dumps(body).encode()))
-        return _check_resp(resp).get("data") or {}
+                                        json.dumps(body).encode()),
+                          (email,))
+        return _check_resp(resp, hide=(email,)).get("data") or {}
 
     def verify_code(self, account: str, code_id: str, code: str,
                     operation_type: str = "addPassword") -> bool:
@@ -667,8 +755,9 @@ class ZeekrIdaas:
                 "operationType": operation_type}
         resp = _post_json(f"{self.base}/captcha/verify", body,
                           self._headers("POST", f"/{self.path}/captcha/verify",
-                                        json.dumps(body).encode()))
-        data = _check_resp(resp).get("data")
+                                        json.dumps(body).encode()),
+                          (account,))
+        data = _check_resp(resp, hide=(account,)).get("data")
         return data is True
 
     def complete_migration(self, email: str, code_id: str, code: str, password: str,
@@ -680,10 +769,11 @@ class ZeekrIdaas:
                 "firstName": first_name, "lastName": last_name}
         resp = _post_json(f"{self.base}/auth/completeMigration", body,
                           self._headers("POST", f"/{self.path}/auth/completeMigration",
-                                        json.dumps(body).encode()))
-        data = _check_resp(resp).get("data") or {}
+                                        json.dumps(body).encode()),
+                          (email,))
+        data = _check_resp(resp, hide=(email,)).get("data") or {}
         if not data.get("tokenValue"):
-            raise ZeekrAuthError(f"completeMigration returned no tokenValue: {str(redact(resp))[:200]}")
+            raise ZeekrAuthError(f"completeMigration returned no tokenValue: {_detail(resp, (email,))}")
         return data
 
     def user_info(self, token_value: str) -> dict:
@@ -692,7 +782,7 @@ class ZeekrIdaas:
             f"{self.base}/user/info", b"",
             self._headers("POST", f"/{self.path}/user/info", b"",
                           token=token_value))
-        return _check_resp(resp).get("data") or {}
+        return _check_resp(resp, hide=(token_value,)).get("data") or {}
 
     def tsp_code(self, token_value: str, client_id: str = _IDAAS_TSP_CLIENT) -> dict:
         """user/tspCode: exchange the IDaaS login token for a TSP auth code.
@@ -705,7 +795,7 @@ class ZeekrIdaas:
             f"{self.base}/user/tspCode?{query}",
             self._headers("GET", f"/{self.path}/user/tspCode", b"", query=query,
                           token=token_value))
-        return _check_resp(resp).get("data") or {}
+        return _check_resp(resp, hide=(token_value,)).get("data") or {}
 
 
 class ZeekrClient:
@@ -742,6 +832,28 @@ class ZeekrClient:
         # the car was not turned away; "" otherwise. Setup names it in the
         # warning it gives once it has read the garage.
         self.probe_summary: str = ""
+        # The plain VIN of the car this client serves, once known - the
+        # adapter sets it, and so does a probe. Nothing sends it from here:
+        # the old route's calls take theirs as an argument, and the new one
+        # addresses the car by its token. But that gateway resolves the token
+        # to this VIN and could name it back, so error text leaves it out.
+        self.vin: str = ""
+
+    def hidden(self) -> tuple:
+        """What error text built here leaves out (hide_values): the vehicle
+        token in use - a probe's candidate too, since the probe sets each one
+        here - the VIN, the session tokens and the account's email address.
+        A transport reads it as its call goes out, so the values are the ones
+        the call sent even if another sign-in replaces the session meanwhile;
+        the sign-in that replaces one keeps what it sent as well
+        (_ms_user_auth_login)."""
+        return (self.enc_vin, self.vin, self.access_token, self.refresh_token,
+                self.hf_token, self.email)
+
+    def without_secrets(self, text: Any) -> str:
+        """`text` with what hidden() names taken out, for a caller that words
+        an error of its own around one of this client's."""
+        return hide_values(str(text), self.hidden())
 
     @property
     def profile(self) -> ZeekrRegion | None:
@@ -769,18 +881,26 @@ class ZeekrClient:
         # it, and the command trail scrubs the token by this same string.
         self._enc_vin = clean_x_vin(value)
 
-    def _hf_request(self, method: str, path: str, **kwargs) -> dict:
+    def _hf_request(self, method: str, path: str, *, hide: Iterable[Any] = (),
+                    **kwargs) -> dict:
+        """The HF transport, its error text leaving out what hidden() names
+        and each of `hide` - a one-time code the call's body carries."""
         profile = self.profile
         if profile:
             kwargs["gateway"] = profile.hf_gateway
-        return _hf_request(method, path, **kwargs)
+        return _hf_request(method, path, hide=(*hide, *self.hidden()), **kwargs)
 
     # ---- transport ----------------------------------------------------------
 
     def _request(self, method: str, path: str, *, body: bytes = b"",
                  signed: bool = True, urlname: str | None = None,
                  query: str = "", extra: dict | None = None,
-                 signer: str = "v2", bearer: bool = False) -> dict:
+                 signer: str = "v2", bearer: bool = False,
+                 hide: Iterable[Any] = ()) -> dict:
+        """One call to the new gateway. Its error text leaves out what
+        hidden() names as the call goes out, and each of `hide` - a sign-in
+        code the body carries."""
+        hide = (*hide, *self.hidden())
         p = urlparse(self.gateway)
         port = p.port or (443 if p.scheme == "https" else 80)
         nonce = _make_nonce()
@@ -852,8 +972,8 @@ class ZeekrClient:
             resp = conn.getresponse()
             raw = resp.read()
             if resp.status != 200:
-                raise ZeekrApiError(f"HTTP {resp.status}: {_safe_detail(raw)}")
-            return _check_resp(json.loads(raw))
+                raise ZeekrApiError(f"HTTP {resp.status}: {_safe_detail(raw, hide=hide)}")
+            return _check_resp(json.loads(raw), hide=hide)
         finally:
             conn.close()
 
@@ -873,13 +993,18 @@ class ZeekrClient:
             "loginSystem": "Android 17",
         }).encode()
         auth = self._request("POST", "/ms-user-auth/v1.0/auth/login",
-                             body=login_body, signed=False, signer="snc")
+                             body=login_body, signed=False, signer="snc",
+                             hide=(identifier,))
+        # The session this call went out with, before the answer replaces it:
+        # an error worded around it must leave it out as well.
+        sent = self.hidden()
         data = auth.get("data") or {}
         self.access_token = data.get("accessToken")
         self.refresh_token = data.get("refreshToken")
         self.user_id = data.get("userId")
         if not self.access_token:
-            raise ZeekrAuthError(f"login returned no accessToken: {str(redact(auth))[:200]}")
+            raise ZeekrAuthError("login returned no accessToken: "
+                                 f"{_detail(auth, (*sent, *self.hidden(), identifier))}")
 
     def login(self) -> None:
         """email+password -> DDC (signed) -> ms-user-auth (unsigned) -> tokens."""
@@ -888,7 +1013,7 @@ class ZeekrClient:
                             urlname="user-api")
         ddc_code = (ddc.get("data") or {}).get("ddcCode")
         if not ddc_code:
-            raise ZeekrAuthError(f"device/code returned no ddcCode: {str(redact(ddc))[:200]}")
+            raise ZeekrAuthError(f"device/code returned no ddcCode: {_detail(ddc, self.hidden())}")
         self._ms_user_auth_login(ddc_code)
 
     def login_otp(self, token_value: str) -> None:
@@ -907,7 +1032,8 @@ class ZeekrClient:
         tsp = idaas.tsp_code(token_value)
         code = tsp.get("code")
         if not code:
-            raise ZeekrAuthError(f"tspCode returned no code: {str(redact(tsp))[:200]}")
+            raise ZeekrAuthError(
+                f"tspCode returned no code: {_detail(tsp, (*self.hidden(), token_value))}")
         self._ms_user_auth_login(code)
         self.login_hf(token_value)
 
@@ -918,17 +1044,19 @@ class ZeekrClient:
         tsp2 = idaas.tsp_code(token_value, client_id=HF_CLIENT2)
         code2 = tsp2.get("code")
         if not code2:
-            raise ZeekrAuthError(f"tspCode(client2) returned no code: {str(redact(tsp2))[:200]}")
+            raise ZeekrAuthError(
+                f"tspCode(client2) returned no code: {_detail(tsp2, (*self.hidden(), token_value))}")
         body = json.dumps({"area": self.profile.area if self.profile else "SEA", "authCode": code2},
                           separators=(",", ":")).encode()
         resp = self._hf_request("POST", "/auth/account/session/secure",
                            query="identity_type=geelynos", body=body,
                            timezone=self.timezone,
-                           device_identifier=self.hf_device_id)
+                           device_identifier=self.hf_device_id, hide=(code2,))
         data = resp.get("data") or {}
         hf_token = data.get("accessToken")
         if not hf_token:
-            raise ZeekrAuthError(f"HF exchange returned no accessToken: {str(redact(resp))[:200]}")
+            raise ZeekrAuthError("HF exchange returned no accessToken: "
+                                 f"{_detail(resp, (*self.hidden(), token_value, code2))}")
         self.hf_token = hf_token
         # Read raw, a null or a non-numeric lifetime broke the adapter's
         # arithmetic after both sessions had been re-minted and before the
@@ -1101,12 +1229,15 @@ class ZeekrClient:
         the car, which the probe cannot tell: for a car its garage does not
         list, a pasted token turns every read into `079001`. So the advice to
         paste one is setup's to give, once it has read the garage. No log line
-        carries the VIN or a candidate value.
+        carries the VIN or a candidate value, nor does a gateway answer quoted
+        in one: the VIN is set here first, and each candidate is the token in
+        use while it is tried (hidden()).
         """
         self.car_refused = False
         self.probe_summary = ""
         if not self.access_token or not vin:
             return ""
+        self.vin = vin
         saved = self.enc_vin
         profile = self.profile
         materials = (

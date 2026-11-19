@@ -603,7 +603,7 @@ def test_a_failed_login_never_leaks_a_token_into_the_exception_text():
     leaky = {"code": "1000", "success": True,
              "data": {"accessToken": "eyJLEAK.header.sig", "refreshToken": "RT-LEAK-9"}}
     orig = zc._post_json
-    zc._post_json = lambda url, body, headers: leaky
+    zc._post_json = lambda url, body, headers, hide=(): leaky
     try:
         raised = None
         try:
@@ -657,7 +657,7 @@ def test_the_account_country_reaches_the_request_headers():
     captured: dict = {}
     orig = zc._post_json
 
-    def _cap(url, body, headers):
+    def _cap(url, body, headers, hide=()):
         captured.update(headers)
         return {"data": {"tokenValue": "t"}}
 

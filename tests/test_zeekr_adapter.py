@@ -960,7 +960,7 @@ def test_neither_the_vin_nor_the_vehicle_token_reaches_the_trail():
     assert token not in blob and FAKE_VIN not in blob, blob
     note, = a.command_trail
     assert note["code"] == "079025"
-    assert "***redacted***" in note["message"]
+    assert zc._mask(token) in note["message"], "masked, not dropped"
     assert f"...{FAKE_VIN[-4:]}" in note["message"], "the tail keeps it readable"
 
 

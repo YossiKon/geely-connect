@@ -55,13 +55,13 @@ def test_europe_headers_match_fixed_protocol_vector():
 def test_every_idaas_operation_signs_its_actual_path():
     calls = []
 
-    def post(url, raw, headers):
+    def post(url, raw, headers, hide=()):
         calls.append(("POST", url))
         _assert_idaas_signature("POST", url, raw, headers)
         data = True if url.endswith("/captcha/verify") else {"tokenValue": "fake-token"}
         return {"success": True, "data": data}
 
-    def get(url, headers):
+    def get(url, headers, hide=()):
         calls.append(("GET", url))
         _assert_idaas_signature("GET", url, b"", headers)
         return {"success": True, "data": {"code": "fake-tsp-code"}}

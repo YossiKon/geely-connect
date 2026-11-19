@@ -38,7 +38,7 @@ from typing import Any
 from .api import CommandTrail, GeelyAuthError, GeelyControlError
 from .zeekr_client import (
     ZeekrApiError, ZeekrAuthError, ZeekrClient, ZeekrIdaas, _car_refused,
-    vehicle_vin,
+    hide_values, vehicle_vin,
 )
 
 from .zeekr_regions import ZeekrRegion
@@ -364,6 +364,8 @@ class ZeekrAdapter(CommandTrail):
         # Set only for vehicles that live on the new platform; selects the
         # new-gateway status path in vehicle_status() below.
         self._client.enc_vin = enc_vin or ""
+        # So the client's error text leaves the VIN out (ZeekrClient.vin).
+        self._client.vin = vin or ""
         # Set when a silent HF renewal happened; the coordinator persists the
         # new tokens + expiry into the config entry after the next poll.
         self.hf_dirty = False
@@ -459,13 +461,15 @@ class ZeekrAdapter(CommandTrail):
                 raise GeelyAuthError(str(exc2)) from exc2
 
     def _note_text(self, text: Any) -> str:
-        """The trail's own scrub, after taking the vehicle token out as well:
-        it addresses and controls the car, and the new route sends it on every
-        command."""
-        out = str(text)
-        token = self._client.enc_vin
-        if token and token in out:
-            out = out.replace(token, "***redacted***")
+        """The trail's own scrub, after taking out what the client's error
+        text leaves out (ZeekrClient.hidden): the vehicle token above all,
+        which addresses and controls the car and goes out with every command
+        on the new route. Text that did not come from the client - a timeout,
+        say - passes this way too. The VIN is left to the trail, which
+        shortens it to its last four characters, as on the original
+        platform."""
+        vin = self._client.vin
+        out = hide_values(str(text), [v for v in self._client.hidden() if v != vin])
         return super()._note_text(out)
 
     # ---- x-vin -------------------------------------------------------------
@@ -706,10 +710,12 @@ class ZeekrAdapter(CommandTrail):
             raise
 
     def _stop_charge_reads(self, what: str, exc: Exception) -> None:
+        # The reason is any exception the call raised, so it goes through the
+        # client's scrub here: a warning is on a default install's log.
         if not self._charge_refused:
             _LOGGER.warning(
                 "%s (%s): the schedule is not read again this session",
-                what, exc)
+                what, self._client.without_secrets(exc))
         self._charge_refused = True
 
     def charge_server_get(self, biz_type: str) -> dict:

@@ -99,16 +99,22 @@ def _clean(data: Any) -> Any:
     return async_redact_data(redact(data), _REDACT)
 
 
-def _scrub(text: Any, vin: str | None) -> str:
-    """Take the VIN out of a free-text field.
+def _scrub(text: Any, vin: str | None, api: Any = None) -> str:
+    """Take the VIN out of a free-text field, and on a Geely EM entry the
+    vehicle token its client sends.
 
     Both redaction passes match on key names, which is enough for structured
     payloads and no help at all inside a sentence. Exception messages are
-    supposed to be VIN-free already - that was fixed deliberately - but a
-    report is the wrong place to rely on every future `raise` remembering it.
+    supposed to be VIN-free already - that was fixed deliberately, and the
+    Geely EM client words its errors without the token either - but a report
+    is the wrong place to rely on every future `raise` remembering it.
     """
     out = "" if text is None else str(text)
-    return out.replace(vin, "***redacted***") if vin and vin in out else out
+    token = getattr(api, "enc_vin", "")
+    for value in (token if isinstance(token, str) else "", vin):
+        if value and value in out:
+            out = out.replace(value, "***redacted***")
+    return out
 
 
 async def async_get_config_entry_diagnostics(
@@ -189,7 +195,7 @@ async def _charge_server(hass: HomeAssistant, api: Any,
             try:
                 out[slot] = _clean(await hass.async_add_executor_job(get, slot))
             except Exception as e:  # noqa: BLE001 - diagnostics must never raise
-                out[slot] = {"error": _scrub(f"{type(e).__name__}: {e}", vin)[:300]}
+                out[slot] = {"error": _scrub(f"{type(e).__name__}: {e}", vin, api)[:300]}
 
     try:
         await asyncio.wait_for(_sweep(), _SWEEP_TIMEOUT_S)
@@ -241,7 +247,7 @@ def _polling(bundle: dict, coordinator: Any, vin: str | None) -> dict[str, Any]:
                              if interval is not None else None),
         "last_update_success": getattr(coordinator, "last_update_success", None),
         "last_exception": _scrub(getattr(coordinator, "last_exception", None),
-                                 vin)[:300],
+                                 vin, bundle.get("api"))[:300],
     }
 
 
