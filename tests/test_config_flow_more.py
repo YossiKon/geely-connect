@@ -384,7 +384,9 @@ def test_a_single_new_vehicle_goes_straight_to_a_created_entry():
     cf.geely_api.provision_user_cert = lambda **kw: None
     res = asyncio.run(flow.async_step_code({"code": "123456"}))
     assert res["type"] == "create_entry"
-    assert res["title"] == f"My EX5 ({FAKE_VIN})"
+    # The VIN's last four characters only: Home Assistant's own log lines
+    # name an entry by its title.
+    assert res["title"] == f"My EX5 ({FAKE_VIN[-4:]})"
     data = res["data"]
     assert set(data) == {
         "email", "country_code", "region", "cidpsso_token", "user_id", "vin",
@@ -430,7 +432,7 @@ def test_multiple_vehicles_offer_a_picker_then_finish_with_the_choice():
     picked = asyncio.run(flow.async_step_pick_vehicle({"vin": FAKE_VIN_2}))
     assert picked["type"] == "create_entry"
     assert picked["data"]["vin"] == FAKE_VIN_2
-    assert picked["title"] == f"Geely ({FAKE_VIN_2})"
+    assert picked["title"] == f"Geely ({FAKE_VIN_2[-4:]})"
     assert picked["data"]["vehicle_nickname"] == ""
 
 

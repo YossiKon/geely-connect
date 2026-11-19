@@ -151,6 +151,9 @@ def test_zeekr_login_creates_a_stamped_entry_without_storing_the_password():
     assert res["step_id"] == "zeekr_login"
     res = asyncio.run(flow.async_step_zeekr_login(_zeekr_login_input()))
     assert res["type"] == "create_entry", res
+    # Home Assistant's own log lines name an entry by its title.
+    assert FAKE_VIN not in res["title"], res["title"]
+    assert res["title"].endswith(f" ({FAKE_VIN[-4:]})"), res["title"]
     data = res["data"]
     assert data["platform"] == "zeekr", "entry must be stamped zeekr"
     assert data["email"] == "user@example.com"

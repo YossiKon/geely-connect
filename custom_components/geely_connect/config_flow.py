@@ -581,8 +581,9 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         metadata = vehicle_metadata(vehicle)
         # The title needs something to show even for a car with neither a
         # nickname nor a model; the stored field stays empty so the device name
-        # can fall through to the model code.
-        title = f"{metadata[CONF_VEHICLE_NICKNAME] or 'Geely'} ({vin})"
+        # can fall through to the model code. The VIN's last four characters
+        # only: Home Assistant's own log lines name an entry by its title.
+        title = f"{metadata[CONF_VEHICLE_NICKNAME] or 'Geely'} ({vin[-4:]})"
         return self.async_create_entry(
             title=title,
             data={
@@ -844,7 +845,7 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._abort_if_unique_id_configured()
 
         metadata = vehicle_metadata(vehicle)
-        title = f"{metadata[CONF_VEHICLE_NICKNAME] or 'Geely'} ({vin})"
+        title = f"{metadata[CONF_VEHICLE_NICKNAME] or 'Geely'} ({vin[-4:]})"
         return self.async_create_entry(
             title=title,
             data={
