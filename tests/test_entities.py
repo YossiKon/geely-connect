@@ -220,24 +220,64 @@ def _new_platform_entry():
 
 
 def test_the_reported_charging_booleans_are_retired_everywhere():
-    """`isCharging` / `isPluggedIn` read false through a 6.8 kW AC charge that
-    the Charging switch, Charger Plug and Charging Power all reported (#88),
-    and nobody had ever seen either read true. Not built on any platform, and
-    purged from installs that have them."""
+    """On the new platform `isCharging` / `isPluggedIn` read false through a
+    6.8 kW AC charge that the Charging switch, Charger Plug and Charging Power
+    all reported (#88). Not built under their old keys on any platform, the
+    E2's included, and purged from installs that have them."""
     if not have_homeassistant():
         skip("homeassistant not installed")
-    for entry in (None, _new_platform_entry()):
-        leaked = _keys(_build_all(entry=entry)) & _RETIRED_KEYS
-        assert leaked == set(), leaked
+    for extra in ({}, {"entry": _new_platform_entry()},
+                  {"capabilities": _E2_CATALOGUE}):
+        leaked = _keys(_build_all(**extra)) & _RETIRED_KEYS
+        assert leaked == set(), (extra, leaked)
+    patterns = _obsolete_patterns()
+    for key in _RETIRED_KEYS:
+        uid = f"geely_{FAKE_VIN}_{key}"
+        assert any(p in uid for p in patterns), uid
+
+
+def _obsolete_patterns():
+    """__init__'s _OBSOLETE_UNIQUE_ID_PATTERNS, read from its source."""
     import ast
     import io
     import os
     src = io.open(os.path.join(PKG, "__init__.py"), encoding="utf-8").read()
     block = src.split("_OBSOLETE_UNIQUE_ID_PATTERNS: tuple[str, ...] = ", 1)[1]
-    patterns = ast.literal_eval(block[:block.index("\n)\n") + 2])
-    for key in _RETIRED_KEYS:
-        uid = f"geely_{FAKE_VIN}_{key}"
-        assert any(p in uid for p in patterns), uid
+    return ast.literal_eval(block[:block.index("\n)\n") + 2])
+
+
+# The catalogue flags that add entities when present: Unlock Frunk, the rear
+# seat selects, the steering-wheel heat switch, and - with the E2's charging
+# flags - Plugged In (reported).
+_EVERY_SEAT = ["front-left", "front-right", "rear-left", "rear-right"]
+_FULL_CATALOGUE = {"frunk.enabled": True, "steering_wheel_heat.enabled": True,
+                   "seat.heat.enabled": True, "seat.heat.positions": _EVERY_SEAT,
+                   "seat.vent.enabled": True, "seat.vent.positions": _EVERY_SEAT}
+
+
+def test_no_entity_built_is_purged_at_the_next_start():
+    """The obsolete list is matched by substring at the start of every setup,
+    before the platforms build anything, so an entity whose unique_id holds one
+    of its patterns would be deleted and registered again on every start. The
+    retired `is_plugged_in` is on that list; Plugged In (reported) must not
+    fall under it, nor may any other entity an EX5, an E2-scheme car or a PHEV
+    gets, with every catalogue flag that adds one."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    p = load("propulsion")
+    phev = p.Verdict(kind=p.Propulsion.HYBRID, has_tank=True, has_plug=True,
+                     source="declared", declared_raw="phev")
+    patterns = _obsolete_patterns()
+    for extra in ({}, {"capabilities": _E2_CATALOGUE},
+                  {"capabilities": {**_E2_CATALOGUE, "frunk.enabled": True}},
+                  {"capabilities": _FULL_CATALOGUE},
+                  {"capabilities": {**_FULL_CATALOGUE, **_E2_CATALOGUE}},
+                  {"capabilities": _FULL_CATALOGUE, "propulsion": phev}):
+        for entities in _build_all(**extra).values():
+            for e in entities:
+                uid = getattr(e, "_attr_unique_id", "")
+                hit = [p for p in patterns if p in uid]
+                assert not hit, (uid, hit)
 
 
 def test_the_promoted_fields_stay_on_both_platforms():
@@ -246,6 +286,69 @@ def test_the_promoted_fields_stay_on_both_platforms():
         skip("homeassistant not installed")
     got = _keys(_build_all())          # the default entry is an old-platform one
     assert _BOTH_PLATFORM_KEYS <= got, _BOTH_PLATFORM_KEYS - got
+
+
+# What a South African E2's catalogue parses to (capabilities.py): the 1.0
+# charge entry, no start/stop switch.
+_E2_CATALOGUE = {"charging.enabled": False, "charging.code_3_is_plugged": True}
+_REPORTED_PLUG = "bs_plugged_in_reported"
+
+
+def _reported_plug(value, *, drop=False):
+    """The E2's Plugged In (reported) over a payload whose `isPluggedIn` is
+    `value`, or that has no such field when `drop` is set."""
+    import copy
+    data = copy.deepcopy(STATUS)
+    ev = data["vehicleStatus"]["additionalVehicleStatus"]["electricVehicleStatus"]
+    if not drop:
+        ev["isPluggedIn"] = value
+
+    class C(_Coord):
+        pass
+    C.data = data
+    bs = load("binary_sensor")
+    return bs.GeelyBinarySensor(C(), FAKE_VIN, "Geely E2 (0000)",
+                                *bs._PLUGGED_IN_REPORTED)
+
+
+def test_the_e2s_plug_flag_is_built_where_its_catalogue_declares_that_scheme():
+    """`isPluggedIn` has followed the cable on the E2s whose catalogue
+    declares that charging scheme (#129, #72), so a car with that catalogue
+    builds it. A catalogue that declares the EX5's scheme, an empty one - a
+    failed fetch, or a migrated car whose old-platform read fails - and a car
+    with no socket build none."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    p = load("propulsion")
+    assert _REPORTED_PLUG in _keys(_build_all(capabilities=_E2_CATALOGUE))
+    assert _REPORTED_PLUG not in _keys(_build_all())
+    assert _REPORTED_PLUG not in _keys(_build_all(capabilities={"charging.enabled": True}))
+    no_socket = p.Verdict(kind=p.Propulsion.FUEL, has_tank=True, has_plug=False,
+                          source="declared", declared_raw="x")
+    assert _REPORTED_PLUG not in _keys(_build_all(capabilities=_E2_CATALOGUE,
+                                                  propulsion=no_socket))
+
+
+def test_the_e2s_plug_flag_reads_the_cable_and_nothing_else():
+    """Only the strings the car sends: "true" is the cable in and "false" the
+    cable out (#129). Anything else - a number or a JSON boolean, which tuple
+    membership would match by 1 == True - or no field, is unknown rather than
+    a confident Unplugged: a false Unplugged is what retired the new
+    platform's flag (#88)."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    from homeassistant.components.binary_sensor import BinarySensorDeviceClass
+    assert _reported_plug("true").is_on is True
+    assert _reported_plug("True").is_on is True
+    assert _reported_plug("false").is_on is False
+    assert _reported_plug("False").is_on is False
+    for odd in (True, False, 1, 0, 1.0, 0.0, "1", "0", "", "unknown", None):
+        assert _reported_plug(odd).is_on is None, odd
+    assert _reported_plug(None, drop=True).is_on is None
+    e = _reported_plug("true")
+    assert e._attr_device_class is BinarySensorDeviceClass.PLUG
+    assert e._attr_name == "Plugged In (reported)"
+    assert e._attr_unique_id == f"geely_{FAKE_VIN}_{_REPORTED_PLUG}"
 
 
 # Live only on the secondary status block or the charge-server - or, for

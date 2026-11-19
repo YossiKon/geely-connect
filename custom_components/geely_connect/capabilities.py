@@ -294,7 +294,8 @@ def parse(items: list[dict]) -> dict[str, Any]:
         # (#10, #17), and on a token-served Geely EM car `isCharging` read
         # false through a real charge (#88), so this reading applies only
         # where the catalogue declares the 1.0 charge scheme - the poller and
-        # sensor._is_charging read the flag.
+        # sensor._is_charging read the flag, and binary_sensor builds Plugged
+        # In (reported) on it (#129).
         out["charging.code_3_is_plugged"] = True
     # Parking Comfort, by the same evidence standard. The 1.0 catalogue
     # enumerates its remote controls one by one (lock, trunk, windows, window

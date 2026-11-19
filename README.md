@@ -415,6 +415,7 @@ All of these are created **enabled** - nothing to switch on by hand.
 | Electric Range | Remaining driving range (km) |
 | Charger Connection | Disconnected / Plugged in / Charging. Reads *Charging* whenever the car actually is, including DC fast charges - some cars leave the underlying field on "Plugged in" for the whole session |
 | Charger Plug | Binary - cable connected |
+| Plugged In (reported) | Binary - the car's own word that the cable is in. Only on cars whose capability catalogue declares the E2's charging scheme (the South African E2, the Colombian EX2, the EX2 Max). On a South African E2 whose wallbox a relay switches off, Charger Plug read unplugged while the car's own field said plugged in ([#129](https://github.com/YossiKon/geely-connect/issues/129)). So far it has been right on two South African E2s; the only EX2 Max file seen reads unplugged |
 | Time To Full Charge | Minutes remaining while charging (the car's own countdown, blank when it has no estimate) |
 | Average Consumption | Energy use (kWh / 100 km), lifetime |
 | Trip Consumption | kWh/100 km for the current trip, next to the lifetime figure |

@@ -137,12 +137,13 @@ SPECS: tuple[tuple[str, str, tuple[str, ...], BinarySensorDeviceClass | None, tu
     ("door_lock_rear_left",  "Door Lock Rear Left", (*_SAFE, "doorLockStatusDriverRear"),    BinarySensorDeviceClass.LOCK,    ("0", 0)),
     ("door_lock_rear_right", "Door Lock Rear Right", (*_SAFE, "doorLockStatusPassengerRear"), BinarySensorDeviceClass.LOCK,   ("0", 0)),
     # Charging (reported) and Plugged In (reported) - the new platform's
-    # `isCharging` / `isPluggedIn` booleans - were retired in #88. Nobody had
-    # seen either read true, and the first payload taken during a charge has
-    # both false while statusOfChargerConnection reads 3 and the AC pair
-    # carries 227.5 V at 30 A: Charger Plug, the Charging switch and Charging
-    # Power all said charging, from fields verified on real sessions (#10,
-    # #17), and these two said not. Purged by __init__'s obsolete list.
+    # `isCharging` / `isPluggedIn` booleans - were retired in #88. The first
+    # payload taken there during a charge has both false while
+    # statusOfChargerConnection reads 3 and the AC pair carries 227.5 V at
+    # 30 A: Charger Plug, the Charging switch and Charging Power all said
+    # charging, from fields verified on real sessions (#10, #17), and these two
+    # said not. Purged by __init__'s obsolete list under their old keys. The
+    # E2's own `isPluggedIn` is another matter - see _PLUGGED_IN_REPORTED.
     # Park brake, on/off beside the mapped text sensor that names the code -
     # the same pairing `statusOfChargerConnection` already has (Charger Plug
     # here, Charger Connection there), and for the same reason: an automation
@@ -199,6 +200,34 @@ HYBRID_SPECS: tuple[tuple[str, str, tuple[str, ...], BinarySensorDeviceClass | N
 )
 
 
+# `isPluggedIn`, built only for a car whose catalogue declares the E2's charging
+# scheme (charging.code_3_is_plugged, capabilities.py). On a South African E2
+# it follows the cable itself. That car's wallbox is switched by a relay, and
+# with the relay off `statusOfChargerConnection` reads 0 - Charger Plug says
+# unplugged with the cable in - while this field read true; it read false
+# within seconds of the cable coming out, and true again in the next report
+# after it went back in (#129). In the 22 diagnostics files on #72, 21 from
+# another South African E2 and one from a Brazilian EX2 Max, it agrees with
+# the connection code in every one: false beside 0 in four, the EX2 Max's
+# among them, and true beside 3 in the other eighteen, all from the E2, two
+# of them while charging. So it has been seen true only on the E2s.
+#
+# Only the old platform's catalogue can declare that scheme - the new
+# gateway's translation has no remote_charge_1 row - so the token route,
+# where this field read false through a real charge (#88), never builds it.
+# Neither does a start whose catalogue fetch failed; the registry keeps the
+# entity's row and settings until the next start that reads one. A new key:
+# the retired `is_plugged_in` is in __init__'s obsolete list, which purges
+# any unique_id containing it on every start. Only the strings "true" and
+# "false" (or "True" and "False") are read, as the car sends them: anything
+# else - a number or a JSON boolean included, which would otherwise match by
+# Python's 1 == True - or no field at all, is unknown.
+_PLUGGED_IN_REPORTED = (
+    "plugged_in_reported", "Plugged In (reported)", (*_EV, "isPluggedIn"),
+    BinarySensorDeviceClass.PLUG, ("true", "True"), (), ("false", "False"),
+)
+
+
 # Read from the secondary status block, which the new platform does not serve
 # yet: there they could only ever read unknown (#88) - a tile that never says
 # anything is worse than no tile. See helpers.api_serves.
@@ -227,6 +256,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
         and (serves_state or s[0] not in _STATE_ONLY)
         and (reads_trip or s[0] not in _TRIP_ONLY)
     ]
+    # The cable's own flag, on a car whose catalogue declares the E2's
+    # charging scheme - see _PLUGGED_IN_REPORTED.
+    if charges and (bundle.get("capabilities") or {}).get("charging.code_3_is_plugged"):
+        entities.append(GeelyBinarySensor(coordinator, vin, device_name, *_PLUGGED_IN_REPORTED))
     # Connectivity: is the integration currently reaching the car's cloud?
     entities.append(GeelyConnectivity(coordinator, vin, device_name))
     add_entities(entities)

@@ -106,3 +106,32 @@ def test_wheel_heat_needs_its_own_code():
     assert "steering_wheel_heat.enabled" not in without
     with_it = _view([_row("remote_climate_control"), _row("C_PAA_6")])
     assert with_it.get("steering_wheel_heat.enabled") is True
+
+
+def test_no_catalogue_on_this_platform_declares_the_e2_charging_scheme():
+    """Plugged In (reported) is built where the catalogue declares the E2's
+    charging scheme (`charging.code_3_is_plugged`), and on this platform's
+    token route `isPluggedIn` read false through a real charge (#88). The gate
+    holds there because the translation emits no `remote_charge_1` row.
+
+    An enabled `remote_charge_2` would hide one - the parser reads the EX5's
+    scheme first - so none is in these rows: each code the table knows on its
+    own and beside a stray `remote_charge_1` row, and all of them at once."""
+    codes = [c for c in (*adapter._CAPABILITY_CODES, *adapter._SEAT_HEAT_POSITIONS,
+                         adapter._WHEEL_HEAT_CODE, "C_RDU_2_1")
+             if c != "remote_charge_2"]
+    stray = _row("remote_charge_1")
+    cases = [[stray], [_row(c) for c in codes], [*(_row(c) for c in codes), stray]]
+    cases += [[_row(c)] for c in codes] + [[_row(c), stray] for c in codes]
+    for rows in cases:
+        assert "charging.code_3_is_plugged" not in _view(rows), rows
+        out = adapter.translate_capabilities(rows)
+        assert "remote_charge_1" not in {e.get("functionId") for e in out}, rows
+    # And on every path, codes nobody has seen included: the adapter never
+    # names the row at all.
+    import io
+    import os
+    from conftest import PKG
+    src = io.open(os.path.join(PKG, "zeekr_adapter.py"), encoding="utf-8").read()
+    assert "remote_charge_1" not in src, \
+        "a token-served car would build Plugged In (reported) from that row (#88)"

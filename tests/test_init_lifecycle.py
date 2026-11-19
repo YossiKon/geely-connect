@@ -172,6 +172,25 @@ def test_only_obsolete_unique_ids_are_purged():
     assert n == 1 and reg.removed == ["switch.old"]
 
 
+def test_the_e2s_plug_sensor_survives_the_purge_of_its_retired_namesake():
+    """Plugged In (reported) is back for the E2-scheme cars (#129) under a new
+    key. The retired `is_plugged_in` is purged by substring at the start of
+    every setup, before the platforms build anything, so a key containing it
+    would have the sensor deleted and registered again on every start. The
+    key is the one binary_sensor builds the sensor with."""
+    m = _mod()
+    key = load("binary_sensor")._PLUGGED_IN_REPORTED[0]
+    mk = lambda eid, uid: types.SimpleNamespace(
+        entity_id=eid, unique_id=uid, platform="geely_connect")
+    reg = _EntityRegistry([
+        mk("binary_sensor.retired", f"geely_{FAKE_VIN}_bs_is_plugged_in"),
+        mk("binary_sensor.e2", f"geely_{FAKE_VIN}_bs_{key}"),
+    ])
+    with _Patched(m, er=_er_module(reg)):
+        n = m._purge_obsolete_entities(object(), types.SimpleNamespace(entry_id="e1"))
+    assert n == 1 and reg.removed == ["binary_sensor.retired"], reg.removed
+
+
 def test_the_device_name_updates_unless_the_user_renamed_it():
     m = _mod()
     entry = types.SimpleNamespace(entry_id="e1", data={
