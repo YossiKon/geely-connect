@@ -1,0 +1,74 @@
+blueprint:
+  name: Geely Connect - Native one-off departure
+  description: >-
+    Store or cancel a one-off departure in the car. Select an entity of the
+    intended Geely and a date-and-time helper for departure, then run the
+    script with Start or Stop. This uses the existing administrator-only
+    scheduled-trip action; run it as an administrator.
+
+    Supported on the original backend with the captured 2.0 trip request.
+    EM trip writes and E2/EX2 1.0 trips are not mapped and are refused.
+    Existing cabin and battery settings are preserved by the action. This
+    does not edit the official app's weekly schedule or independently select
+    battery heating. Check the result in the official app: an acknowledgement
+    does not prove execution. Unlike the HA preconditioning blueprints, the
+    car stores this departure; HA does not wait until departure to turn on AC.
+  domain: script
+  homeassistant:
+    min_version: 2024.12.0
+  input:
+    vehicle:
+      name: Vehicle
+      description: Any entity belonging to the intended Geely vehicle.
+      selector:
+        entity:
+          integration: geely_connect
+    departure_helper:
+      name: Departure helper
+      description: A date and time helper, in Home Assistant's time zone.
+      selector:
+        entity:
+          domain: input_datetime
+mode: single
+fields:
+  command:
+    name: Command
+    default: start
+    selector:
+      select:
+        options:
+          - label: Start
+            value: start
+          - label: Stop
+            value: stop
+variables:
+  departure_helper: !input departure_helper
+sequence:
+  - if:
+      - condition: template
+        value_template: "{{ command | default('start') not in ['start', 'stop'] }}"
+    then:
+      - stop: Command must be start or stop.
+        error: true
+  - choose:
+      - conditions: "{{ command | default('start') == 'stop' }}"
+        sequence:
+          - action: geely_connect.set_scheduled_trip
+            data:
+              entity_id: !input vehicle
+              command: stop
+    default:
+      - if:
+          - condition: template
+            value_template: >-
+              {{ not state_attr(departure_helper, 'has_date')
+                 or not state_attr(departure_helper, 'has_time')
+                 or state_attr(departure_helper, 'timestamp') | float(0) <= as_timestamp(now()) }}
+        then:
+          - stop: Choose a future departure date and time before starting the trip.
+            error: true
+      - action: geely_connect.set_scheduled_trip
+        data:
+          entity_id: !input vehicle
+          command: start
+          departure: "{{ states(departure_helper) }}"

@@ -626,6 +626,13 @@ back off removes the generated entities again.
 | **Cabin purge (G-Clean)** | On/off |
 | **Find Car** | Horn + lights |
 
+See the [control support and evidence guide](docs/CONTROL_SUPPORT.md) for the
+full API inventory, model/backend limits and the quiet seat/wheel/schedule
+observations. The new [native departure script blueprint](blueprints/script/geely_connect/native_departure.yaml)
+provides Start/Stop for an original-backend one-off trip, with a vehicle entity
+selector and a date-and-time helper. It preserves the trip's cabin/battery
+settings; EM writes and native weekly editing remain unavailable.
+
 ---
 
 ## ⚡ Efficient, adaptive polling

@@ -120,9 +120,16 @@ set_scheduled_trip:
       example: "2026-10-02 07:00:00"
       selector:
         datetime:
+    entity_id:
+      name: Vehicle entity
+      description: Select any entity of the target Geely vehicle. If VIN is also supplied, both must select the same car.
+      required: false
+      selector:
+        entity:
+          integration: geely_connect
     vin:
       name: VIN
-      description: VIN of the target vehicle. Optional if you have only one vehicle configured.
+      description: VIN of the target vehicle. Optional if a vehicle entity is selected or only one vehicle is configured.
       required: false
       example: L6T00000000000000
       selector:
