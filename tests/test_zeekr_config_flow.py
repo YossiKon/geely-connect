@@ -236,6 +236,8 @@ def test_zeekr_migration_restamps_and_purges_legacy_keys():
     cf._zeekr_login_password = lambda e, p, c: _FakeClient()
     asyncio.run(flow.async_step_user({"platform": "zeekr"}))
     res = asyncio.run(flow.async_step_zeekr_login(_zeekr_login_input()))
+    assert res["step_id"] == "zeekr_pick", res
+    res = asyncio.run(flow.async_step_zeekr_pick({"vin": FAKE_VIN}))
     assert res["type"] == "abort" and res["reason"] == "reauth_successful", res
     data = entry.data
     assert data["platform"] == "zeekr", "migration must stamp the platform"
@@ -255,6 +257,8 @@ def test_zeekr_reconfigure_aborts_with_reconfigure_successful():
     cf._zeekr_login_password = lambda e, p, c: _FakeClient()
     asyncio.run(flow.async_step_user({"platform": "zeekr"}))
     res = asyncio.run(flow.async_step_zeekr_login(_zeekr_login_input()))
+    assert res["step_id"] == "zeekr_pick", res
+    res = asyncio.run(flow.async_step_zeekr_pick({"vin": FAKE_VIN}))
     assert res["type"] == "abort" and res["reason"] == "reconfigure_successful", res
 
 
@@ -276,6 +280,8 @@ def test_zeekr_reauth_prefills_and_persists_the_form_defaults():
     assert defaults.get("poll_mode") == "manual", defaults
     res = asyncio.run(flow.async_step_zeekr_login(
         _zeekr_login_input({"pressure_unit": "bar", "poll_mode": "eco"})))
+    assert res["step_id"] == "zeekr_pick", res
+    res = asyncio.run(flow.async_step_zeekr_pick({"vin": FAKE_VIN}))
     assert res["reason"] == "reauth_successful", res
     assert entry.data["pressure_unit"] == "bar", "changed unit must persist"
     assert entry.data["poll_mode"] == "eco", "changed mode must persist"
@@ -343,13 +349,14 @@ def test_zeekr_reauth_never_lands_on_a_car_another_entry_holds():
 
 
 def test_a_zeekr_reauth_that_renumbers_the_car_moves_the_unique_id_with_it():
-    """When the account lists only a renumbered car, the entry follows it -
-    and so must its unique id, or the old VIN stays claimed for ever."""
+    """After explicitly choosing a renumbered car, move the unique id too."""
     cf, flow = _flow()
     entry = _legacy_entry()                 # its VIN is not the one listed
     flow._reauth_entry = entry
     cf._zeekr_login_password = lambda e, p, c: _FakeClient()
     res = asyncio.run(flow.async_step_zeekr_login(_zeekr_login_input()))
+    assert res["step_id"] == "zeekr_pick", res
+    res = asyncio.run(flow.async_step_zeekr_pick({"vin": FAKE_VIN}))
     assert res["reason"] == "reauth_successful", res
     assert entry.data["vin"] == FAKE_VIN
     assert entry.unique_id == f"zeekr:user@example.com:{FAKE_VIN}"
@@ -550,6 +557,8 @@ def test_zeekr_migration_stores_the_derived_x_vin():
     cf._zeekr_login_password = lambda e, p, c: _DerivingClient()
     asyncio.run(flow.async_step_user({"platform": "zeekr"}))
     res = asyncio.run(flow.async_step_zeekr_login(_zeekr_login_input()))
+    assert res["step_id"] == "zeekr_pick", res
+    res = asyncio.run(flow.async_step_zeekr_pick({"vin": FAKE_VIN}))
     assert res["type"] == "abort" and res["reason"] == "reauth_successful", res
     assert entry.data["zeekr_enc_vin"] == "DERIVED-XVIN=="
 
@@ -577,6 +586,8 @@ def test_european_setup_and_reauth_load_local_keys_without_persisting_them():
             login.assert_called_once_with(
                 "user@example.com", "hunter2", "ES", FAKE_PROFILE)
         if reauth:
+            assert result["step_id"] == "zeekr_pick", result
+            result = asyncio.run(flow.async_step_zeekr_pick({"vin": FAKE_VIN}))
             assert result["reason"] == "reauth_successful", result
             stored = entry.data
         else:
@@ -668,6 +679,8 @@ def test_reauth_and_reconfigure_remember_explicit_region_and_preserve_old_sea_en
             else:
                 loader.assert_not_called()
                 login.assert_called_once_with("user@example.com", "hunter2", "GB")
+            assert result["step_id"] == "zeekr_pick", result
+            result = asyncio.run(flow.async_step_zeekr_pick({"vin": FAKE_VIN}))
             assert result["reason"] == source + "_successful", result
             assert entry.data["zeekr_region"] == (saved_region or "SEA")
 
@@ -678,7 +691,7 @@ def test_switching_servers_replaces_derived_vehicle_token_but_keeps_manual_overr
 
     for probe_result, manual in (("new-eu-token", ""), ("", ""), ("unused", "manual-token")):
         entry = _legacy_entry()
-        entry.data.update({"platform": "zeekr", "country_code": "GB",
+        entry.data.update({"platform": "zeekr", "country_code": "GB", "vin": FAKE_VIN,
                            "zeekr_enc_vin": "old-sea-token"})
         if manual:
             entry.options["zeekr_enc_vin"] = manual

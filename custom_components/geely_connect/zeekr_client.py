@@ -1507,7 +1507,7 @@ def vehicle_vin(v: dict) -> str | None:
     shape is not yet verified live, so several spellings are accepted."""
     if not isinstance(v, dict):
         return None
-    for k in ("vin", "VIN", "vehicleVin", "vinCode", "tboxVin"):
+    for k in ("vin", "VIN", "vehicleVin", "vinCode"):
         val = v.get(k)
         if isinstance(val, str) and val:
             return val
@@ -1517,7 +1517,10 @@ def vehicle_vin(v: dict) -> str | None:
             found = vehicle_vin(nested)
             if found:
                 return found
-    return None
+    # A telematics identifier can differ from the vehicle's VIN. Prefer an
+    # explicit VIN, including nested vehicle records, over this older alias.
+    val = v.get("tboxVin")
+    return val if isinstance(val, str) and val else None
 
 
 def vehicle_nickname(v: dict) -> str:
