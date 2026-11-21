@@ -1476,3 +1476,262 @@ def test_a_refused_command_shows_the_vin_shortened():
         api._check_control_resp({"code": "8070"}, FAKE_VIN)
     except api.GeelyControlError as e:
         assert e.message == "Geely server returned code='8070'"
+
+
+# ------------------------------------------- the session in a gateway's words ---
+
+# Invented values, each long enough to be taken out (api._HIDE_MIN_LEN), and
+# none of them a word the error wording uses.
+_JWT = "jwt-session-0001-abcdef"
+_CIDPSSO = "cidpsso-token-0001"
+_USER = "uid-000123456"
+_EMAIL = "owner@example.com"
+_ONE_TIME = "AC-onetime-0001"
+
+
+def _session_client(**over):
+    a = _client(user_id=_USER, cidpsso_token=_CIDPSSO, email=_EMAIL, **over)
+    a._jwt = _JWT
+    a._jwt_exp = int(time.time()) + 3600
+    return a
+
+
+def _echo(*values):
+    """A gateway's refusal worded around what it was sent."""
+    return "denied for " + " / ".join(values)
+
+
+def _left_out(text, values):
+    """Each value masked where it stood, at its own length, so nothing around
+    it moves."""
+    for v in values:
+        assert v not in text, (v, text)
+        assert api._mask(v) in text, (v, text)
+
+
+def test_a_status_read_refused_in_words_that_repeat_the_session_leaves_it_out():
+    """redact() goes by key name, so a refusal worded around the token, the
+    user id or the e-mail it was sent carried them whole into the log and the
+    re-authentication card."""
+    secret = (_JWT, _CIDPSSO, _USER, _EMAIL)
+    a = _session_client()
+    _scripted_mtls(a, [{"code": 60000001, "message": _echo(*secret)}])
+    try:
+        a.vehicle_status()
+    except api.GeelyAuthError as e:
+        _left_out(str(e), secret)
+    else:
+        raise AssertionError("a refused session read was taken as data")
+
+
+def test_a_refusal_that_repeats_the_session_leaves_it_out_of_the_press_and_the_trail():
+    """The platforms show a refusal's message as the error of the press, and
+    the trail keeps it for the diagnostics report."""
+    secret = (_JWT, _CIDPSSO, _USER, _EMAIL)
+    a = _session_client()
+    _scripted_mtls(a, [{"code": "8070", "success": False,
+                        "message": _echo(*secret) + f" on {FAKE_VIN}"}])
+    try:
+        a.control("RDL", [{"key": "door", "value": "all"}])
+    except api.GeelyControlError as e:
+        _left_out(e.message, secret)
+        assert f"...{FAKE_VIN[-4:]}" in e.message and FAKE_VIN not in e.message, e.message
+    else:
+        raise AssertionError("a refusal was taken as accepted")
+    note = a.command_trail[-1]
+    assert note["outcome"] == "rejected", note
+    for v in secret:
+        assert v not in note["message"], (v, note)
+    # Any other failure the trail notes - a socket's, a parser's - goes the
+    # same way, and is masked before the trail cuts it short.
+    a = _session_client()
+
+    def broken(*args, **kw):
+        raise OSError(_echo(*secret))
+
+    a._mtls_send = broken
+    try:
+        a.control("RDL", [{"key": "door", "value": "all"}])
+    except OSError:
+        pass
+    note = a.command_trail[-1]
+    assert note["outcome"] == "error", note
+    for v in secret:
+        assert v not in note["message"], (v, note)
+
+
+def test_a_sign_in_refused_in_words_that_repeat_what_it_sent_leaves_it_out():
+    """The one-time code is fetched with the long-lived token and exchanged
+    for the session; a refusal of either, worded around what it was sent, is
+    a re-authentication card or a warning in the log. Both regions' exchanges,
+    and their server faults as well as their refusals."""
+    for code, exc in ((60000000, api.GeelyAuthError), (500, RuntimeError)):
+        a = _session_client()
+        reply = json.dumps({"code": code, "message": _echo(_CIDPSSO, _USER)}).encode()
+        with _patched(_raw_https=lambda *a_, **k: reply):
+            try:
+                a._get_access_code()
+            except exc as e:
+                _left_out(str(e), (_CIDPSSO, _USER))
+            else:
+                raise AssertionError(f"getCode {code} was taken as a code")
+    for code, exc in ((60000000, api.GeelyAuthError), (8500, RuntimeError)):
+        a = _session_client()
+        a._jwt = None
+        a._get_access_code = lambda host=None: _ONE_TIME
+        _scripted_mtls(a, [{"code": code, "message": _echo(_ONE_TIME, _CIDPSSO, _USER)}])
+        try:
+            a.refresh_jwt()
+        except exc as e:
+            _left_out(str(e), (_ONE_TIME, _CIDPSSO, _USER))
+        else:
+            raise AssertionError(f"session/secure {code} was taken as a session")
+    for code, exc in (("60000000", api.GeelyAuthError), ("8500", RuntimeError)):
+        a = _session_client(control_host="apis.ecloudkr.com")
+        a._get_access_code = lambda host=None: _ONE_TIME
+        reply = json.dumps({"resultCode": code,
+                            "resultMessage": _echo(_ONE_TIME, _CIDPSSO, _USER, _EMAIL,
+                                                   FAKE_VIN)}).encode()
+        with _patched(_raw_https=lambda *a_, **k: reply):
+            try:
+                a._apac_session_exchange()
+            except exc as e:
+                _left_out(str(e), (_ONE_TIME, _CIDPSSO, _USER, _EMAIL))
+                assert FAKE_VIN not in str(e) and f"...{FAKE_VIN[-4:]}" in str(e), str(e)
+            else:
+                raise AssertionError(f"APAC exchange {code} was taken as a session")
+
+
+def test_a_cert_server_refusal_that_repeats_the_account_leaves_it_out():
+    """Certificate provisioning sends the user id and the long-lived token;
+    its refusals - a fault, and the region refusal said in words - reach the
+    setup form and the log."""
+    import importlib.util
+    if importlib.util.find_spec("cryptography") is None:
+        skip("cryptography not installed")
+    for info, file in (({"code": 500, "message": _echo(_USER, _CIDPSSO)}, None),
+                       ({"code": 1000, "data": {"checkCode": "chk"}},
+                        {"code": 500, "message": _echo(_USER, _CIDPSSO)}),
+                       ({"code": "1501", "message": _echo(_USER, _CIDPSSO)}, None),
+                       ({"code": 1000, "data": {"checkCode": "chk"}},
+                        {"code": "1501", "message": _echo(_USER, _CIDPSSO)})):
+        def fake_raw(host, method, path, headers, body, **kw):
+            return json.dumps(info if path.endswith("/info") else file).encode()
+
+        with tempfile.TemporaryDirectory() as d, _patched(_raw_https=fake_raw):
+            try:
+                api.provision_user_cert(
+                    app_id="a", app_secret="s", user_id=_USER, cidpsso_token=_CIDPSSO,
+                    cert_out_path=os.path.join(d, "cert.pem"),
+                    key_out_path=os.path.join(d, "key.pem"))
+            except (RuntimeError, api.GeelyRegionError) as e:
+                _left_out(str(e), (_USER, _CIDPSSO))
+            else:
+                raise AssertionError("a refused certificate was taken as issued")
+
+
+
+def test_each_of_the_five_writes_leaves_the_session_out_of_its_refusal():
+    """Each write checks its answer with the client's values, the user id the
+    session was issued to included - it is the userId control() sends. A message that is not a sentence is redacted by key and then
+    masked as text."""
+    tsp = "tsp-uid-000987"
+    secret = (_JWT, _CIDPSSO, _USER, _EMAIL, tsp)
+    presses = (
+        lambda a: a.control("RDL", [{"key": "door", "value": "all"}]),
+        lambda a: a.scheduled_charging_set(command="start", start_time="23:00",
+                                           end_time="07:00"),
+        lambda a: a.scheduled_charging_set_slot_2(command="start", start_time="23:00",
+                                                  end_time="07:00"),
+        lambda a: a.scheduled_trip_set(command="start",
+                                       scheduled_time_ms="1750000000000"),
+        lambda a: a.rapid_climate(ac=True, temp="22", heat_seats=None,
+                                  vent_seats=None, vlt=False),
+    )
+    for n, press in enumerate(presses):
+        a = _session_client()
+        a._jwt_uid = tsp
+        _scripted_mtls(a, [{"code": "8070", "success": False, "message": _echo(*secret)}])
+        try:
+            press(a)
+        except api.GeelyControlError as e:
+            _left_out(e.message, secret)
+        else:
+            raise AssertionError(f"press {n}: a refusal was taken as accepted")
+    a = _session_client()
+    _scripted_mtls(a, [{"code": "8070", "success": False,
+                        "message": {"accessToken": "other-token-0001",
+                                    "why": _echo(_CIDPSSO, _USER)}}])
+    try:
+        a.control("RDL", [{"key": "door", "value": "all"}])
+    except api.GeelyControlError as e:
+        assert "other-token-0001" not in e.message, e.message
+        _left_out(e.message, (_CIDPSSO, _USER))
+    else:
+        raise AssertionError("a refusal was taken as accepted")
+
+
+def test_an_auth_refusal_leaves_out_every_token_the_call_carried():
+    """A 1402 renews the session and the call goes again with the new token.
+    A refusal that repeats the token it was sent must not show it whole, even
+    when another call has cleared the cached one meanwhile - before a retry
+    and after one."""
+    a = _session_client()
+
+    def refused(host, method, path, body, extra_headers=None):
+        a._jwt = None        # another call's recovery cleared the cache
+        return 200, json.dumps({"code": 60000001, "message":
+                                _echo(extra_headers["Authorization"])}).encode()
+
+    a._mtls_send = refused
+    try:
+        a.vehicle_status()
+    except api.GeelyAuthError as e:
+        _left_out(str(e), (_JWT,))
+    else:
+        raise AssertionError("a refused read was taken as data")
+
+    a = _session_client()
+    renewed = "jwt-session-0002-renewed"
+    sent = []
+
+    def send(host, method, path, body, extra_headers=None):
+        sent.append(extra_headers["Authorization"])
+        if len(sent) == 1:
+            return 200, json.dumps({"code": 1402}).encode()
+        a._jwt = None
+        return 200, json.dumps({"code": 60000001, "message":
+                                _echo(extra_headers["Authorization"])}).encode()
+
+    def refresh():
+        a._jwt = renewed
+        a._jwt_exp = int(time.time()) + 3600
+
+    a._mtls_send = send
+    a.refresh_jwt = refresh
+    try:
+        a.vehicle_status()
+    except api.GeelyAuthError as e:
+        assert sent == [_JWT, renewed], sent
+        _left_out(str(e), (renewed,))
+    else:
+        raise AssertionError("a refused retry was taken as data")
+
+
+def test_a_client_built_without_the_constructor_still_sends_and_refuses():
+    """Instances are also made through __new__ (the trail builds its deque
+    lazily for them): reading the session values for a refusal must not turn
+    a working command, or a refused one, into an AttributeError."""
+    a = api.GeelyApi.__new__(api.GeelyApi)
+    a.vin = FAKE_VIN
+    a._authed_apis_call = lambda method, path, body: {"code": 1000, "success": True}
+    assert a.rapid_climate(ac=True, temp="22", heat_seats=None, vent_seats=None,
+                           vlt=False)["code"] == 1000
+    a._authed_apis_call = lambda method, path, body: {"code": "8070", "success": False,
+                                                      "message": "busy"}
+    try:
+        a.rapid_climate(ac=True, temp="22", heat_seats=None, vent_seats=None, vlt=False)
+    except api.GeelyControlError as e:
+        assert e.message == "busy", e.message
+    else:
+        raise AssertionError("a refusal was taken as accepted")

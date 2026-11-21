@@ -30,6 +30,7 @@ import string
 import threading
 import time
 import uuid
+from collections.abc import Iterable
 from typing import Any
 from urllib.parse import parse_qsl, quote, urlparse
 
@@ -290,6 +291,43 @@ def _is_auth_failure(resp: dict) -> bool:
     return resp.get("code") in _AUTH_FAILURE_CODES
 
 
+# The values hide_values is given are longer in practice: a VIN has eight
+# characters at least, a token many more, an email address six or more. A
+# shorter one could be a piece of a word, and the error classifiers read
+# words ("token", "auth").
+_HIDE_MIN_LEN = 6
+
+
+def _mask(value: str) -> str:
+    """`value` masked character for character: a letter, digit or underscore
+    becomes an X, anything else an asterisk."""
+    return "".join("X" if ch.isalnum() or ch == "_" else "*" for ch in value)
+
+
+def hide_values(text: str, values: Iterable[Any]) -> str:
+    """`text` with each of `values` masked wherever it stands in it.
+
+    redact() masks by key name, which a value inside a sentence escapes: an
+    error message worded around the vehicle token, the VIN or a session token
+    would carry it whole into the log, an error Home Assistant shows or a
+    diagnostics report. So the error text built from an answer has those
+    values taken out here, before anything cuts it short - a cut through a
+    value leaves a prefix no replace can match. Both platforms' clients run
+    it (GeelyApi.hidden, ZeekrClient.hidden).
+
+    The mask keeps the value's length and the kind of each character (_mask),
+    so nothing around it moves and no word boundary comes or goes: a cut
+    falls where it fell, and the error classifiers, which decide whether a
+    password login runs, read the same words outside the value as they did -
+    a code written right against a value (`code=401<token>`) included. The
+    longest value goes first, so one held inside another is not split; a
+    value under _HIDE_MIN_LEN characters is left."""
+    for value in sorted({str(v) for v in values if v and len(str(v)) >= _HIDE_MIN_LEN},
+                        key=len, reverse=True):
+        text = text.replace(value, _mask(value))
+    return text
+
+
 def _shorten_vin(text: Any, vin: str) -> Any:
     """`text` with `vin` shortened to its last four characters, as the
     command trail shows it; anything that is not text comes back as it was."""
@@ -298,7 +336,8 @@ def _shorten_vin(text: Any, vin: str) -> Any:
     return text
 
 
-def _check_control_resp(resp: dict, vin: str = "") -> dict:
+def _check_control_resp(resp: dict, vin: str = "",
+                        hide: Iterable[Any] = ()) -> dict:
     """Raise GeelyControlError if the response is not a success.
 
     Note: a successful response (`code=1000, success=True`) means the
@@ -310,14 +349,20 @@ def _check_control_resp(resp: dict, vin: str = "") -> dict:
     The refusal's message is the gateway's own sentence, which the platforms
     show as the error of the press (and an automation's log line repeats),
     so `vin` is shortened in it to its last four characters, as the command
-    trail shortens it.
+    trail shortens it, and each of `hide` - the client's session values
+    (GeelyApi.hidden) - is masked where the sentence repeats it.
     """
     if _is_auth_failure(resp):
         raise GeelyAuthError(f"control rejected: {resp.get('code')}")
     code = resp.get("code")
     if code in _CONTROL_SUCCESS_CODES and resp.get("success") in (True, "true"):
         return resp
-    raise GeelyControlError(code, _shorten_vin(resp.get("message"), vin))
+    message = resp.get("message")
+    if message and not isinstance(message, str):
+        message = str(redact(message))
+    if isinstance(message, str):
+        message = hide_values(message, hide)
+    raise GeelyControlError(code, _shorten_vin(message, vin))
 
 
 def window_length(start: str, end: str) -> str:
@@ -924,6 +969,37 @@ class GeelyApi(CommandTrail):
         self._jwt_exp: int = 0   # unix ms
         self._jwt_lock = threading.Lock()
 
+    # ---- what error text leaves out ----
+
+    def hidden(self) -> tuple:
+        """What error text built from a gateway's answer leaves out
+        (hide_values): the session token, the long-lived cidpsso token, the
+        user id - the account's and the one the session was issued to - and
+        the e-mail address. The VIN is shortened instead, to its last four
+        characters, as the command trail shows it (_shorten_vin). A user id
+        shorter than six characters is left, as everywhere hide_values runs:
+        that short, it cannot be told from a code or a count. Read with
+        getattr, as the trail reads the VIN: a client built without the
+        constructor must not turn a working command into an exception."""
+        return tuple(getattr(self, name, None) for name in
+                     ("_jwt", "cidpsso_token", "user_id", "_jwt_uid", "email"))
+
+    def _said(self, j: dict, *sent: Any) -> str:
+        """An answer as error text: redact() by key, then hide_values() by
+        value for hidden() and anything else the request sent - the one-time
+        code of a session exchange, the token a refused call carried - and
+        the VIN shortened to its last four characters."""
+        return _shorten_vin(hide_values(str(redact(j)), self.hidden() + sent),
+                            getattr(self, "vin", "") or "")
+
+    def _note_text(self, text: Any) -> str:
+        """The trail's own scrub (CommandTrail), after taking out what
+        hidden() names - before the trail cuts the line short, since a cut
+        through a value leaves a prefix no replace can match. Text that did
+        not come from an answer - a socket's, a parser's - passes this way
+        too."""
+        return super()._note_text(hide_values(str(text), self.hidden()))
+
     # ---- low-level helpers ----
 
     def _sign_headers(self, method: str, url: str, body: bytes) -> dict:
@@ -1027,9 +1103,9 @@ class GeelyApi(CommandTrail):
         )
         j = json.loads(resp_bytes)
         if _is_auth_failure(j):
-            raise GeelyAuthError(f"cidpsso token rejected: {redact(j)}")
+            raise GeelyAuthError(f"cidpsso token rejected: {self._said(j)}")
         if j.get("code") != 10000000:
-            raise RuntimeError(f"getCode failed: {redact(j)}")
+            raise RuntimeError(f"getCode failed: {self._said(j)}")
         return j["data"]["accessCode"]
 
     # ---- APAC session exchange (api.ecloudkr.com, NO mTLS) ----
@@ -1103,8 +1179,8 @@ class GeelyApi(CommandTrail):
         # is the session service's problem, not a dead credential. RuntimeError
         # surfaces as UpdateFailed instead: retried, last snapshot kept.
         if _is_auth_failure({"code": code}):
-            raise GeelyAuthError(f"APAC session exchange rejected our auth: {redact(j)}")
-        raise RuntimeError(f"APAC session exchange failed: {redact(j)}")
+            raise GeelyAuthError(f"APAC session exchange rejected our auth: {self._said(j, ac)}")
+        raise RuntimeError(f"APAC session exchange failed: {self._said(j, ac)}")
 
     def refresh_jwt(self) -> dict:
         """Exchange a cidpsso accessCode for an apis.ecloudeu.com JWT.
@@ -1136,7 +1212,7 @@ class GeelyApi(CommandTrail):
         )
         j = json.loads(resp)
         if _is_auth_failure(j):
-            raise GeelyAuthError(f"session/secure rejected our auth: {redact(j)}")
+            raise GeelyAuthError(f"session/secure rejected our auth: {self._said(j, ac)}")
         if j.get("code") not in (1000, "1000"):
             # Still retryable, never GeelyAuthError: 8500 also shows up as a
             # plain transient fault on healthy EU accounts, and escalating it
@@ -1152,7 +1228,7 @@ class GeelyApi(CommandTrail):
                 "live on an unsupported regional backend such as South "
                 "America - see issue #9)"
             ) if j.get("code") in (8500, "8500") else ""
-            raise RuntimeError(f"session/secure failed{hint}: {redact(j)}")
+            raise RuntimeError(f"session/secure failed{hint}: {self._said(j, ac)}")
         d = j["data"]
         self._jwt = d["accessToken"]
         self._jwt_uid = d["userId"]
@@ -1202,6 +1278,8 @@ class GeelyApi(CommandTrail):
         in), auto-refresh the JWT once and retry. Only escalates to
         GeelyAuthError when the cidpsso token itself has been revoked."""
         headers = self._headers_with_jwt()
+        # Every token this call carries, for a refusal that repeats one.
+        sent = [headers["Authorization"]]
         status, resp = self._mtls_send(
             self.control_host, method, path, body, extra_headers=headers,
         )
@@ -1221,9 +1299,10 @@ class GeelyApi(CommandTrail):
                     self._jwt = None
                     self._jwt_exp = 0
                     self.refresh_jwt()
+            retry = self._headers_with_jwt()
+            sent.append(retry["Authorization"])
             status, resp = self._mtls_send(
-                self.control_host, method, path, body,
-                extra_headers=self._headers_with_jwt(),
+                self.control_host, method, path, body, extra_headers=retry,
             )
             j = json.loads(resp)
         if _is_auth_failure(j):
@@ -1231,8 +1310,7 @@ class GeelyApi(CommandTrail):
             # query carries the user id, which can be any length. The answer
             # is the gateway's, so a VIN it names is shortened as well.
             where = mask_path(_USER_ID_IN_QUERY.sub(r"\1***", path))
-            said = _shorten_vin(str(redact(j)), self.vin)
-            raise GeelyAuthError(f"{method} {where} auth-rejected: {said}")
+            raise GeelyAuthError(f"{method} {where} auth-rejected: {self._said(j, *sent)}")
         return j
 
     def vehicle_status(self) -> dict:
@@ -1327,7 +1405,8 @@ class GeelyApi(CommandTrail):
             {"start": start_time, "end": end_time, "target": rbc_target,
              "chargeModel": charge_model},
             lambda: _check_control_resp(
-                self._authed_apis_call("POST", path, body_bytes), self.vin))
+                self._authed_apis_call("POST", path, body_bytes), self.vin,
+                self.hidden()))
 
     def scheduled_charging_set_slot_2(self, *, command: str, start_time: str,
                                       end_time: str,
@@ -1363,7 +1442,8 @@ class GeelyApi(CommandTrail):
             f"scheduled_charging {command}",
             {"start": start_time, "end": end_time, "slot": "2"},
             lambda: _check_control_resp(
-                self._authed_apis_call("POST", path, body_bytes), self.vin))
+                self._authed_apis_call("POST", path, body_bytes), self.vin,
+                self.hidden()))
 
     def scheduled_trip_set(self, *, command: str, scheduled_time_ms: str,
                            ac: str = "true", bw: str = "1", bwl: str = "1") -> dict:
@@ -1403,7 +1483,8 @@ class GeelyApi(CommandTrail):
             f"scheduled_trip {command}",
             {"scheduledTime": str(scheduled_time_ms), "ac": ac, "bw": bw, "bwl": bwl},
             lambda: _check_control_resp(
-                self._authed_apis_call("POST", path, body_bytes), self.vin))
+                self._authed_apis_call("POST", path, body_bytes), self.vin,
+                self.hidden()))
 
     # ---- WRITE (control) ----
 
@@ -1441,7 +1522,8 @@ class GeelyApi(CommandTrail):
         return self._recorded(
             f"{service_id} {command}", parameters or [],
             lambda: _check_control_resp(
-                self._authed_apis_call("PUT", path, body), self.vin))
+                self._authed_apis_call("PUT", path, body), self.vin,
+                self.hidden()))
 
     # ---- Compound rapid warm/cool (different endpoint) ----
 
@@ -1503,7 +1585,8 @@ class GeelyApi(CommandTrail):
              "ventilation": body.get("ventilation"), "vlt": body["vlt"],
              "sw": body.get("sw")},
             lambda: _check_control_resp(
-                self._authed_apis_call("POST", path, body_bytes), self.vin))
+                self._authed_apis_call("POST", path, body_bytes), self.vin,
+                self.hidden()))
 
     # ---- Capability discovery ----
 
@@ -1560,17 +1643,20 @@ def _sign_request_for_api_ecloudeu(app_id: str, app_secret: str,
     }
 
 
-def _region_refusal(cert_host: str, j: dict) -> GeelyRegionError:
+def _region_refusal(cert_host: str, j: dict,
+                    hide: Iterable[Any] = ()) -> GeelyRegionError:
     """A region-mismatch code, said in words. It names the server that refused
     and no particular other backend: APAC and North America are signed for
     now, so an account refused here is on one there are no credentials for,
     or on one its vehicle record did not lead to (a record that names only a
     market no backend here matches is signed for EU). On a UAE car set up with
     owner-supplied keys (#105) it is the UAE cert server refusing, and those
-    keys are the first thing to check."""
+    keys are the first thing to check. The server's own words are quoted with
+    each of `hide` - what the request sent - masked in them."""
+    said = hide_values(str(j.get("hint") or j.get("message")), hide)
     return GeelyRegionError(
         f"Geely's cert server ({cert_host}) rejected this account "
-        f"(code {j.get('code')}: {j.get('hint') or j.get('message')}). "
+        f"(code {j.get('code')}: {said}). "
         "The car is registered with another regional backend: one this "
         "integration has no app credentials for, or one the vehicle record "
         "did not name."
@@ -1590,6 +1676,8 @@ def provision_user_cert(*, app_id: str, app_secret: str, user_id: str,
 
     # Pin store lives alongside the cert we're about to write.
     pin_path = os.path.join(os.path.dirname(cert_out_path), "server_pins.json")
+    # What the requests below send that an answer could repeat (hide_values).
+    sent = (cidpsso_token, user_id)
 
     # 1. Generate keypair
     priv = ec.generate_private_key(ec.SECP256R1())
@@ -1618,8 +1706,8 @@ def provision_user_cert(*, app_id: str, app_secret: str, user_id: str,
     j = json.loads(resp_bytes)
     if j.get("code") != 1000:
         if str(j.get("code")) in _REGION_MISMATCH_CODES:
-            raise _region_refusal(cert_host, j)
-        raise RuntimeError(f"cert/info failed: {redact(j)}")
+            raise _region_refusal(cert_host, j, sent)
+        raise RuntimeError(f"cert/info failed: {hide_values(str(redact(j)), sent)}")
     check_code = j["data"]["checkCode"]
 
     # 3. POST /auth/cert/file → signed cert
@@ -1677,8 +1765,8 @@ def provision_user_cert(*, app_id: str, app_secret: str, user_id: str,
         # this point succeeds, so say what it means instead of dumping the
         # response.
         if str(j.get("code")) in _REGION_MISMATCH_CODES:
-            raise _region_refusal(cert_host, j)
-        raise RuntimeError(f"cert/file failed: {redact(j)}")
+            raise _region_refusal(cert_host, j, sent)
+        raise RuntimeError(f"cert/file failed: {hide_values(str(redact(j)), sent)}")
     cert_pem = j["data"]["cert"]
 
     # 4. Save to disk with owner-only permissions.

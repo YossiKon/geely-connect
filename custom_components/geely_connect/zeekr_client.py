@@ -64,7 +64,9 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse, parse_qsl, quote
 
-from .api import redact
+# The value scrub lives in api.py, which the original platform's client
+# shares; it is imported here under its own names.
+from .api import _HIDE_MIN_LEN, _mask, hide_values, redact  # noqa: F401
 from .zeekr_regions import ZeekrRegion
 
 _LOGGER = logging.getLogger(__name__)
@@ -330,42 +332,6 @@ class ZeekrAuthError(Exception):
 
 class ZeekrApiError(Exception):
     """Gateway rejected the request (signature, params, or server error)."""
-
-
-# The values hide_values is given are longer in practice: a VIN has eight
-# characters at least, a token many more, an email address six or more. A
-# shorter one could be a piece of a word, and the error classifiers read
-# words ("token", "auth").
-_HIDE_MIN_LEN = 6
-
-
-def _mask(value: str) -> str:
-    """`value` masked character for character: a letter, digit or underscore
-    becomes an X, anything else an asterisk."""
-    return "".join("X" if ch.isalnum() or ch == "_" else "*" for ch in value)
-
-
-def hide_values(text: str, values: Iterable[Any]) -> str:
-    """`text` with each of `values` masked wherever it stands in it.
-
-    redact() masks by key name, which a value inside a sentence escapes: an
-    error message worded around the vehicle token, the VIN or a session token
-    would carry it whole into the log, an error Home Assistant shows or a
-    diagnostics report. So the error text built from an answer has those
-    values taken out here, before anything cuts it short - a cut through a
-    value leaves a prefix no replace can match.
-
-    The mask keeps the value's length and the kind of each character (_mask),
-    so nothing around it moves and no word boundary comes or goes: a cut
-    falls where it fell, and the error classifiers, which decide whether a
-    password login runs, read the same words outside the value as they did -
-    a code written right against a value (`code=401<token>`) included. The
-    longest value goes first, so one held inside another is not split; a
-    value under _HIDE_MIN_LEN characters is left."""
-    for value in sorted({str(v) for v in values if v and len(str(v)) >= _HIDE_MIN_LEN},
-                        key=len, reverse=True):
-        text = text.replace(value, _mask(value))
-    return text
 
 
 def _detail(obj: Any, hide: Iterable[Any] = (), limit: int = 200) -> str:
