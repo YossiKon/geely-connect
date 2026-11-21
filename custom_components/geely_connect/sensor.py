@@ -493,6 +493,16 @@ def _prettify(path: str) -> str:
     return spaced[:1].upper() + spaced[1:]
 
 
+# A value the cloud sends in place of a reading, on a car whose catalogue
+# declares the E2's charging scheme (#129). There `daysToService` is a constant
+# 1 beside `serviceWarningStatus` 0 (#130), while one owner's car showed about
+# 220 days at the time. In #72, another E2's diagnostics held 1 for 46 days
+# while its odometer went from 532 to 3,883 km and `distanceToService` counted
+# down with it. An EX2 Max's file read 1 as well. So on these cars a 1 reads
+# unknown, and a real 1 is hidden only for as long as it lasts.
+_E2_PLACEHOLDERS: dict[str, Any] = {"days_to_service": 1}
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entities: AddEntitiesCallback) -> None:
     bundle = hass.data[DOMAIN][entry.entry_id]
     coordinator = bundle["coordinator"]
@@ -523,6 +533,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
     verdict = bundle.get("propulsion")
     has_tank = bool(verdict and verdict.has_tank)
     charges = verdict.charges if verdict else True
+    placeholders = (_E2_PLACEHOLDERS
+                    if (bundle.get("capabilities") or {}).get("charging.code_3_is_plugged")
+                    else {})
 
     # 1) Curated, nicely-named sensors. A car with no socket - a non-plug
     #    hybrid or a petrol car - skips the charging rows rather than carrying
@@ -530,7 +543,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
     add_entities(GeelySensor(coordinator, vin, device_name, *spec,
                              pressure_unit=pressure_unit,
                              value_offset=(ext_offset if spec[0] == "exterior_temp"
-                                           else 0.0))
+                                           else 0.0),
+                             placeholder=placeholders.get(spec[0]))
                  for spec in SENSOR_SPECS
                  if charges or spec[0] not in _PLUG_ONLY_KEYS)
 
@@ -626,7 +640,8 @@ class GeelySensor(CoordinatorEntity, _AutoPrecision):
                  unit: str | None, device_class: SensorDeviceClass | None,
                  kind: str, value_map: dict | None = None,
                  pressure_unit: str = DEFAULT_PRESSURE_UNIT,
-                 value_offset: float = 0.0) -> None:
+                 value_offset: float = 0.0,
+                 placeholder: Any = None) -> None:
         super().__init__(coordinator)
         self._key = key
         self._path = path
@@ -634,6 +649,7 @@ class GeelySensor(CoordinatorEntity, _AutoPrecision):
         self._value_map = value_map
         self._pressure_unit = pressure_unit
         self._value_offset = value_offset
+        self._placeholder = placeholder
         self._attr_unique_id = f"geely_{vin}_{key}"
         self._attr_name = friendly_name
         # Tire pressures: report the raw kPa the car sends and let Home
@@ -690,6 +706,11 @@ class GeelySensor(CoordinatorEntity, _AutoPrecision):
     def native_value(self) -> Any:
         v = _walk(self.coordinator.data or {}, self._path)
         val = _coerce(v, self._value_kind, self._value_map)
+        # A stand-in this car's cloud sends instead of a reading - see
+        # _E2_PLACEHOLDERS.
+        if (self._placeholder is not None and type(val) is type(self._placeholder)
+                and val == self._placeholder):
+            return None
         # The car publishes exteriorTempValidity beside the reading, and a
         # false flag means the number is whatever was last in that slot - 130
         # on a car sitting in 25-28 °C air (#24). Gated before the offset

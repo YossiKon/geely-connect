@@ -351,6 +351,64 @@ def test_the_e2s_plug_flag_reads_the_cable_and_nothing_else():
     assert e._attr_unique_id == f"geely_{FAKE_VIN}_{_REPORTED_PLUG}"
 
 
+def _service(raw_days, capabilities):
+    """(Days To Service, Distance To Service) as setup builds them for a car
+    with `capabilities`, over a payload whose `daysToService` is `raw_days`."""
+    import copy
+    data = copy.deepcopy(STATUS)
+    data["vehicleStatus"]["additionalVehicleStatus"]["maintenanceStatus"]["daysToService"] = raw_days
+
+    class C(_Coord):
+        pass
+    C.data = data
+    hass = _Hass()
+    hass.data["geely_connect"] = {"e1": {
+        "api": object(), "coordinator": C(), "vin": FAKE_VIN,
+        "device_name": "Geely E2 (0000)", "capabilities": capabilities}}
+    got = []
+    asyncio.run(load("sensor").async_setup_entry(
+        hass, _Entry(), lambda e, *a, **k: got.extend(list(e))))
+    by_key = {e._attr_unique_id.rsplit(f"{FAKE_VIN}_", 1)[-1]: e for e in got}
+    return (by_key["days_to_service"].native_value,
+            by_key["distance_to_service"].native_value)
+
+
+def test_an_e2s_constant_one_day_to_service_reads_unknown():
+    """On a car whose catalogue declares the E2's charging scheme, the cloud's
+    `daysToService` is a constant 1 while the car itself counts about 220 days
+    (#130). Each of 22 diagnostics from two more such cars in #72 reads 1, so
+    there a 1 is unknown. A real count and the distance still pass through."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    assert _service("1", _E2_CATALOGUE) == (None, 9000)
+    assert _service(1, _E2_CATALOGUE) == (None, 9000)
+    assert _service("1.0", _E2_CATALOGUE) == (None, 9000)
+    assert _service("220", _E2_CATALOGUE) == (220, 9000)
+    assert _service("2", _E2_CATALOGUE) == (2, 9000)
+
+
+def test_only_days_to_service_takes_the_e2_placeholder():
+    """The stand-in belongs to one field. On an E2-scheme car, no other curated
+    sensor may read a 1 as unknown: a 1.0 °C outside, a 1 km trip and a 1 %
+    12 V reading are all real."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    built = _build_all(capabilities=_E2_CATALOGUE)
+    holders = {e._attr_unique_id.rsplit(f"{FAKE_VIN}_", 1)[-1]
+               for e in built["sensor"] if getattr(e, "_placeholder", None) is not None}
+    assert holders == {"days_to_service"}, holders
+
+
+def test_one_day_to_service_stays_one_on_every_other_car():
+    """The stand-in belongs to the E2 scheme alone. An EX5's catalogue, an
+    empty one (a failed fetch) and a catalogue that says the scheme is absent
+    all keep a 1 as a 1."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    for caps in ({}, {"charging.enabled": True}, {"charging.code_3_is_plugged": False}):
+        assert _service("1", caps) == (1, 9000), caps
+
+
 # Live only on the secondary status block or the charge-server - or, for
 # Parking Comfort, behind a command the new route does not map (#88).
 _UNSERVED_KEYS = frozenset({

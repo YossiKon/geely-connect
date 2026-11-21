@@ -119,6 +119,11 @@ window.mkHass = (opts) => {
     S[`device_tracker.${P}_location`] = { entity_id: `device_tracker.${P}_location`,
       state: "not_home", attributes: { latitude: opts.at[0], longitude: opts.at[1] } };
   }
+  // Absent unless asked for, so the rest of the suite renders exactly as before.
+  if (opts.service) {
+    if (opts.service.days !== undefined) put(`sensor.${P}_days_to_service`, opts.service.days, { unit_of_measurement: "d" });
+    if (opts.service.km !== undefined) put(`sensor.${P}_distance_to_service`, opts.service.km, { unit_of_measurement: "km" });
+  }
   put(`sensor.${P}_engine_state`, opts.engine || "Off");
   if (opts.parkBrake !== undefined) {
     put(`binary_sensor.${P}_park_brake_engaged`, opts.parkBrake);
@@ -3413,3 +3418,27 @@ def test_compact_windows_chip_opens_an_open_close_menu_that_acts():
         })()""", covers={"windows": "open", "windowsPos": 8})
     assert got["labels"] == ["Open", "Close"], got
     assert ["cover", "open_cover", {"entity_id": "cover.car_all_windows"}] in got["calls"], got
+
+
+# ------------------------------------------- #130: an E2's placeholder day
+
+_SERVICE_ROW = """[...el.shadowRoot.querySelectorAll('.row')]
+        .filter((r) => r.querySelector('span') && r.querySelector('span').textContent === 'Service in')
+        .map((r) => ({ text: r.querySelector('b').textContent, warn: r.classList.contains('warn') }))"""
+
+
+def test_the_service_row_keeps_the_distance_when_the_days_are_unknown():
+    """An E2's cloud sends a constant 1 for the days to service, which the
+    integration reads as unknown on those cars (#130). The row used to read
+    just "—" then, dropping a distance that is real; before the fix it read
+    "1 d" and lit amber on a car with about 220 days left. Both cards that
+    carry the row are held to it."""
+    for tag in ("geely-card", "geely-card-top"):
+        assert _mount(tag, _SERVICE_ROW, service={"days": "unknown", "km": "17898"}) == [
+            {"text": "— / 17898 km", "warn": False}], tag
+        assert _mount(tag, _SERVICE_ROW, service={"days": "220", "km": "17898"}) == [
+            {"text": "220 d / 17898 km", "warn": False}], tag
+        assert _mount(tag, _SERVICE_ROW, service={"days": "12", "km": "unknown"}) == [
+            {"text": "12 d / —", "warn": True}], tag
+        assert _mount(tag, _SERVICE_ROW, service={"days": "unknown", "km": "unavailable"}) == [
+            {"text": "—", "warn": False}], tag

@@ -555,7 +555,7 @@ brake state cannot be determined must not report the reading that looks safe
 | Entity | Description |
 |---|---|
 | 12V Battery / 12V Voltage | Auxiliary battery level & voltage |
-| Days To Service / Distance To Service | Maintenance intervals |
+| Days To Service / Distance To Service | Maintenance intervals. On cars whose capability catalogue declares the E2's charging scheme, the cloud sends a constant 1 for the days (one owner's car showed about 220 at the time), so there a 1 reads unknown. The distance is real and still shows ([#130](https://github.com/YossiKon/geely-connect/issues/130)) |
 
 ### Location
 Location (device tracker) - GPS position on the map, with altitude.

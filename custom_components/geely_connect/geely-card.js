@@ -2277,6 +2277,16 @@
       return { value: digits == null ? st.state : n.toFixed(digits), unit };
     }
 
+    /* Days and distance to the next service. Each half shows on its own: an
+     * E2's cloud sends a placeholder day count that the integration reads as
+     * unknown (#130), while its distance stays real, so the row keeps the
+     * distance. Before that, the whole row read "—". */
+    _serviceIn(days) {
+      const dist = this._st("sensor.distance_to_service");
+      if (!OK(days) && !OK(dist)) return "—";
+      return `${OK(days) ? this._fmt(days) : "—"} / ${OK(dist) ? this._fmt(dist) : "—"}`;
+    }
+
     _row(label, st, opts = {}) {
       if (!st && !opts.value) return "";
       const value = opts.value != null ? opts.value
@@ -3111,8 +3121,7 @@
             ${this._row(this._t("row.battery_12v", "12 V battery"), this._st("sensor.12v_battery"))}
             ${this._row(this._t("row.service_in", "Service in"), days, {
               warn: OK(days) && NUM(days) != null && NUM(days) <= 30,
-              value: OK(days) ? `${this._fmt(days)} / ${OK(this._st("sensor.distance_to_service"))
-                ? this._fmt(this._st("sensor.distance_to_service")) : "—"}` : "—" })}
+              value: this._serviceIn(days) })}
           </div>
 
           <div class="footer">
@@ -3587,8 +3596,7 @@
             ${this._row(this._t("row.battery_12v", "12 V battery"), this._st("sensor.12v_battery"))}
             ${this._row(this._t("row.service_in", "Service in"), days, {
               warn: OK(days) && NUM(days) != null && NUM(days) <= 30,
-              value: OK(days) ? `${this._fmt(days)} / ${OK(this._st("sensor.distance_to_service"))
-                ? this._fmt(this._st("sensor.distance_to_service")) : "—"}` : "—" })}
+              value: this._serviceIn(days) })}
           </div>
 
           <div class="footer">
