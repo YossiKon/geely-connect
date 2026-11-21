@@ -40,6 +40,9 @@
     // unresolved, a car on its park brake read as driving the moment the engine
     // ran, and every control locked during remote climate (#72).
     "park_brake_engaged",
+    // Read for the photo's charge port and the top view's cable (#129), so a
+    // renamed one has to resolve too.
+    "plugged_in_reported",
     "tire_rear_left", "door_rear_left", "combined_range", "charge_complete",
     "charge_voltage", "electric_range", "charge_current", "door_passenger",
     "charger_plug", "total_mileage", "refresh_data", "unlock_trunk",
@@ -666,7 +669,7 @@
    * photo is shown - a drawn card keeps its existing signature. The overlay
    * reads the park brake too, which every card watches for the driving lock. */
   const PHOTO_WATCHED = ["binary_sensor.charger_plug",
-    "binary_sensor.is_plugged_in"];
+    "binary_sensor.plugged_in_reported"];
 
   const ACCENT = "var(--geely-accent, #2fd6a4)";
   const AMBER = "var(--geely-warn, #e8a13a)";
@@ -1911,6 +1914,13 @@
             const a = st.attributes || {};
             return `${st.state}~${a.latitude}~${a.longitude}`;
           }
+          // And a cover's: the windows stay "open" while a second one opens
+          // or one goes further down, and the cards draw both.
+          if (e.startsWith("cover.")) {
+            const a = st.attributes || {};
+            const wins = Array.isArray(a.open_windows) ? a.open_windows.join(",") : "";
+            return `${st.state}~${a.current_position}~${wins}`;
+          }
           return st.state;
         })
         .join("|") + `|${this._armed || ""}|${this._pendingTemp}`
@@ -2712,7 +2722,9 @@
         return !!st && st.state === "on";
       };
       const driving = this._isDriving();
-      const plugged = on("charger_plug") || on("is_plugged_in");
+      // The car's own cable flag counts too: on an E2 whose wallbox a relay
+      // switches off, Charger Plug reads unplugged with the cable in (#129).
+      const plugged = on("charger_plug") || on("plugged_in_reported");
       // Two levels, the same shape as the charge port: full while the car is
       // moving, a dim ember while it sits on the park brake. The brake is
       // engaged the whole time a car is parked, so lighting it fully would
@@ -3036,10 +3048,18 @@
         "sensor.charging_power", "lock.doors", "climate.climate", "switch.defrost",
         "binary_sensor.door_driver", "binary_sensor.door_passenger",
         "binary_sensor.door_rear_left", "binary_sensor.door_rear_right",
-        "binary_sensor.trunk", "binary_sensor.hood", "binary_sensor.connected"];
+        "binary_sensor.trunk", "binary_sensor.hood", "binary_sensor.connected",
+        // The windows chip and its percentage read this cover.
+        "cover.all_windows"];
       // Only the opt-in countdown reads the finish time, so it is only watched
       // when that option is on - default cards keep their existing signature.
       if (this._config.charging_countdown) w.push("sensor.charge_complete");
+      // Likewise a charging button: it reads the Charging switch (#83, #87).
+      // Matched the way the buttons are drawn, whatever the case.
+      if (Array.isArray(this._config.buttons) &&
+          this._config.buttons.some((k) => String(k).toLowerCase() === "charging")) {
+        w.push("switch.charging");
+      }
       return w;
     }
 
@@ -3205,7 +3225,8 @@
         "switch.window_ventilation", "switch.scheduled_charging",
         "select.seat_heat_driver", "select.seat_heat_passenger",
         "select.seat_vent_driver", "select.seat_vent_passenger",
-        "cover.sunroof", "cover.sunshade", "switch.g_clean",
+        "cover.sunroof", "cover.sunshade", "cover.all_windows", "switch.g_clean",
+        "switch.steering_wheel_heat",
         "time.scheduled_charging_start", "time.scheduled_charging_end",
         "binary_sensor.door_driver", "binary_sensor.door_passenger",
         "binary_sensor.door_rear_left", "binary_sensor.door_rear_right",
@@ -3662,7 +3683,7 @@
         "select.seat_heat_driver", "select.seat_heat_passenger",
         "select.seat_vent_driver", "select.seat_vent_passenger",
         "time.scheduled_charging_start", "time.scheduled_charging_end",
-        "cover.sunroof", "cover.sunshade", "switch.g_clean",
+        "cover.sunroof", "cover.sunshade", "switch.g_clean", "switch.steering_wheel_heat",
         "binary_sensor.door_driver", "binary_sensor.door_passenger",
         "binary_sensor.door_rear_left", "binary_sensor.door_rear_right",
         "binary_sensor.trunk", "binary_sensor.hood", "binary_sensor.connected",

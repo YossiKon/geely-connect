@@ -2966,15 +2966,15 @@ def test_a_malformed_hotspot_falls_back_instead_of_breaking_the_card():
 def test_the_photo_only_states_are_watched_when_a_photo_is_shown():
     """_carBody reads the plug and the park brake for the photo overlay; a
     state the card draws but does not watch freezes on screen, because the
-    render is skipped while the signature is unchanged. The new platform's
-    plug flag is watched only with a photo. The park brake is watched by
-    every card, since the driving lock reads it too (#72)."""
+    render is skipped while the signature is unchanged. The car's own cable
+    flag, Plugged In (reported), is watched only with a photo (#129). The park
+    brake is watched by every card, since the driving lock reads it too (#72)."""
     got = _evaluate(r"""() => {
         const out = {};
         for (const [tag, cfg] of [["geely-card", {car_image: "x.webp"}],
                                   ["geely-card-compact", {car_image: "x.webp"}],
                                   ["geely-card", {}]]) {
-            for (const name of ["is_plugged_in", "park_brake_engaged"]) {
+            for (const name of ["plugged_in_reported", "park_brake_engaged"]) {
                 const el = document.createElement(tag);
                 document.body.appendChild(el);
                 el.setConfig(cfg);
@@ -2991,13 +2991,141 @@ def test_the_photo_only_states_are_watched_when_a_photo_is_shown():
         }
         return out;
     }""")
-    assert got == {"geely-card+photo:is_plugged_in": True,
+    assert got == {"geely-card+photo:plugged_in_reported": True,
                    "geely-card+photo:park_brake_engaged": True,
-                   "geely-card-compact+photo:is_plugged_in": True,
+                   "geely-card-compact+photo:plugged_in_reported": True,
                    "geely-card-compact+photo:park_brake_engaged": True,
                    # a drawn card keeps its signature for the plug flag
-                   "geely-card:is_plugged_in": False,
+                   "geely-card:plugged_in_reported": False,
                    "geely-card:park_brake_engaged": True}, got
+
+
+def test_a_car_photo_glows_its_port_by_the_cars_own_cable_flag():
+    """The photo overlay read a plug entity no version creates any more. On an
+    E2 whose wallbox a relay switches off, Charger Plug reads unplugged with
+    the cable in while Plugged In (reported) says plugged (#129): the port
+    glows by either, and a change of the flag alone redraws the photo."""
+    got = _evaluate(r"""() => {
+        const el = document.createElement("geely-card");
+        document.body.appendChild(el);
+        el.setConfig({ car_image: "x.webp" });
+        const put = (suffix, state) => {
+            const h = window.mkHass({});
+            const id = `binary_sensor.car_${suffix}`;
+            h.states[id] = { entity_id: id, state, attributes: {} };
+            return h;
+        };
+        const cls = () => el.shadowRoot.querySelector(".photo").className.split(/\s+/);
+        el.hass = put("plugged_in_reported", "off");
+        const off = cls();
+        el.hass = put("plugged_in_reported", "on");
+        const on = cls();
+        el.hass = put("charger_plug", "on");
+        const byPlug = cls();
+        el.remove();
+        return { off, on, byPlug };
+    }""")
+    assert "plugged" not in got["off"], got
+    assert "plugged" in got["on"], got
+    assert "plugged" in got["byPlug"], got
+
+
+def test_a_renamed_cable_flag_still_lights_the_photos_port():
+    """A renamed entity is found only through the card's suffix list, as the
+    park brake's had to be (#72); the cable flag was missing from it (#129)."""
+    got = _evaluate(r"""() => {
+        const el = document.createElement("geely-card");
+        document.body.appendChild(el);
+        el.setConfig({ car_image: "x.webp" });
+        const hass = window.mkHass({});
+        const eid = "binary_sensor.my_ex5_plugged_in_reported";
+        hass.states[eid] = { entity_id: eid, state: "on", attributes: {} };
+        hass.entities[eid] = { platform: "geely_connect", device_id: "d" };
+        el.hass = hass;
+        const out = { resolved: el._eid("binary_sensor", "plugged_in_reported"),
+                      plugged: el.shadowRoot.querySelector(".photo").classList.contains("plugged") };
+        el.remove();
+        return out;
+    }""")
+    assert got == {"resolved": "binary_sensor.my_ex5_plugged_in_reported",
+                   "plugged": True}, got
+
+
+def test_a_tap_on_wheel_heat_or_a_charging_button_shows_without_waiting_for_a_poll():
+    """The full and top cards draw the Wheel heat button and the compact card
+    can draw a Charging button, but none of them watched the switch behind it,
+    so the state written after a tap showed only at the next poll."""
+    got = _evaluate(r"""() => {
+        const out = {};
+        for (const tag of ["geely-card", "geely-card-top"]) {
+            const el = document.createElement(tag);
+            document.body.appendChild(el);
+            el.setConfig({});
+            const lit = () => el.shadowRoot.querySelector('[data-act="swheel"]').classList.contains("on");
+            el.hass = window.mkHass({ steeringWheelHeat: "off" });
+            const before = lit();
+            el.hass = window.mkHass({ steeringWheelHeat: "on" });
+            out[tag] = [before, lit()];
+            el.remove();
+        }
+        for (const name of ["charging", "Charging"]) {
+            const c = document.createElement("geely-card-compact");
+            document.body.appendChild(c);
+            c.setConfig({ buttons: ["lock", name] });
+            const word = () => c.shadowRoot.querySelector('[data-act="charging_sw"]').textContent.trim();
+            c.hass = window.mkHass({ charging: "off" });
+            const start = word();
+            c.hass = window.mkHass({ charging: "on" });
+            out[`compact:${name}`] = [start, word()];
+            c.remove();
+        }
+        return out;
+    }""")
+    assert got["geely-card"] == [False, True], got
+    assert got["geely-card-top"] == [False, True], got
+    assert got["compact:charging"] == ["Start charging", "Stop charging"], got
+    assert got["compact:Charging"] == ["Start charging", "Stop charging"], got
+
+
+def test_a_change_inside_a_cover_redraws_the_card():
+    """The windows cover stays "open" while a second window opens or one goes
+    further down, so a card that compared its state alone kept drawing the
+    first window and the old percentage until something else changed. The
+    full and compact cards did not watch the cover at all."""
+    got = _evaluate(r"""() => {
+        const mount = (tag) => {
+            const el = document.createElement(tag);
+            document.body.appendChild(el);
+            el.setConfig({});
+            return el;
+        };
+        const top = mount("geely-card-top");
+        top.hass = window.mkHass({ covers: { windows: "open", openWindows: ["driver"] } });
+        top.hass = window.mkHass({ covers: { windows: "open", openWindows: ["driver", "rear_right"] } });
+        const wins = [...top.shadowRoot.querySelectorAll(".cartop .win.open")]
+            .map((w) => w.closest(".door").classList[1]).sort();
+        const full = mount("geely-card");
+        const pct = () => [...full.shadowRoot.querySelectorAll(".cpair span")]
+            .map((s) => s.textContent.trim()).filter((s) => s.startsWith("Windows"));
+        full.hass = window.mkHass({ covers: { windows: "open", windowsPos: 20 } });
+        const before = pct();
+        full.hass = window.mkHass({ covers: { windows: "open", windowsPos: 60 } });
+        const after = pct();
+        const compact = mount("geely-card-compact");
+        const chip = () => {
+            const c = compact.shadowRoot.querySelector('[data-act="windows_menu"]');
+            return c ? c.textContent.trim() : null;
+        };
+        compact.hass = window.mkHass({ covers: { windows: "open", windowsPos: 20 } });
+        const chipBefore = chip();
+        compact.hass = window.mkHass({ covers: { windows: "open", windowsPos: 60 } });
+        const chipAfter = chip();
+        top.remove(); full.remove(); compact.remove();
+        return { wins, before, after, chipBefore, chipAfter };
+    }""")
+    assert got["wins"] == ["fl", "rr"], got
+    assert got["before"] == ["Windows 20%"] and got["after"] == ["Windows 60%"], got
+    assert got["chipBefore"] == "Windows 20%" and got["chipAfter"] == "Windows 60%", got
 
 
 def test_the_summary_card_makes_the_car_a_button_that_opens_the_full_card():
