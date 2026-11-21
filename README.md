@@ -8,60 +8,50 @@
 > by, or supported by Geely. Use at your own risk.
 
 A **security-hardened** [Home Assistant](https://www.home-assistant.io/)
-integration for Geely vehicles that use the **Geely Global / International**
-mobile app. Owner-tested on the **Geely EX5** (Europe, Australia and Brazil -
-battery-only), the **Geely EX2** (battery-only: Australia on the [new Geely EM
+integration for Geely cars that use the **Geely Global / International** app.
+It talks directly to Geely's own cloud, the same servers the official app uses,
+and adds a hardened transport, full data exposure, efficient polling and a set
+of dashboard cards on top.
+
+**Tested by owners on** the **Geely EX5** (Europe, Australia and Brazil), the
+**EX2** (Australia on the [new Geely EM
 platform](#the-new-geely-em-zeekr-platform--a-different-experimental-model),
-South Africa - where it is sold as the **E2** - and Colombia) and the **Geely
-Starray PHEV** (Australia, petrol + plug-in); it
-is capability-driven, so other Geely models should work too - only the entities
-your specific car reports are created, and a car with a tank gets the fuel and
-engine ones on top.
+South Africa, where it is sold as the **E2**, and Colombia) and the **Starray
+PHEV** (Australia). The integration is capability-driven, so other Geely models
+should work too: only the entities your car reports are created, and a car with
+a tank gets the fuel and engine ones on top.
 
-It talks directly to Geely's own cloud - the same servers the official app uses
-- and adds a hardened transport, full data exposure, efficient polling and a
-polished setup on top.
-
-> **What the app cannot do remotely, this cannot either.** Every command here
-> goes through the same cloud the official app talks to, so the app is the
-> ceiling rather than a starting point. The powered tailgate is the worked
-> example: the car opens it from the key fob and its own screen, and neither
-> the app nor this integration can - the module that would execute it has no
-> handler for the command at all ([#20](https://github.com/YossiKon/geely-connect/issues/20)).
-> Anything the car offers only on its own touchscreen is likely to be in the
-> same position.
+> **What the app cannot do remotely, this cannot either.** Every command goes
+> through the same cloud the official app talks to, so the app is the ceiling.
+> The powered tailgate is the example: the car opens it from the key fob and its
+> own screen, and neither the app nor this integration can
+> ([#20](https://github.com/YossiKon/geely-connect/issues/20)).
 
 ---
 
 ## ✨ Highlights
 
-- 🔒 **Security-first** - verified TLS plus public-key pinning.
+- 🔒 **Security-first** - verified TLS plus public-key pinning, and secrets
+  masked in logs and in the diagnostics report.
 - 📊 **Everything enabled** - all 88 entities are on from the start (101 on a
   hybrid), no duplicates, nothing to switch on by hand.
 - 🧮 **Computed extras** - charging power, charge completion time, range at full
   charge and efficiency, none of which the car reports itself.
 - ⛽ **Hybrids and PHEVs** - fuel level and range, engine state, oil and coolant,
-  the tank flap, and the lifetime split between petrol and battery kilometres,
-  all added automatically when the car has a tank.
-- 🔋 **Efficient polling** with selectable modes (Super Eco / Eco / Normal / Live / Manual),
-  changeable at any time.
-- 🌍 **EU, North-American and APAC** backends, detected from the vehicle.
-- 🗣️ **Translated setup** - the configuration dialogs are in English, Hebrew,
-  Arabic, Russian, French, Thai, Bulgarian and Brazilian Portuguese, and the
-  dashboard cards follow
-  Home Assistant's UI language. Entity names follow Home Assistant's own
-  language.
-- 🖥️ **Five built-in dashboard cards** - a full cockpit with a complete climate panel, a top-down status view, a compact tile, a mini square and a one-row strip - registered automatically, plus ready-made automations and Blueprints
-- 🚗 **The cards stand down while you drive** - a banner instead of buttons the
-  car would refuse, keyed on the ignition rather than a speed field that reads
-  zero at every red light.
-- 🧭 **Navigate to the car** in Google Maps, Waze, Apple Maps or HERE WeGo,
-  straight from the card.
-- ⛽ **A car with a tank reads differently** - combined range as the headline
-  with the two halves under it, a second bar for the tank, and the engine state.
-- ⏱️ **One command at a time** - the car drops a command that arrives while it
-  is still working, so the cards space them out and the temperature stepper
-  sends once you stop tapping instead of once per tap.
+  the fuel flap, and the split of the odometer between petrol and battery, added
+  automatically when the car has a tank.
+- 🔋 **Efficient polling** - Super Eco, Eco, Normal, Live or Manual, changeable
+  at any time.
+- 🌍 **EU, North-American and APAC** backends, detected from the vehicle, plus
+  the new Geely EM platform as an experimental option.
+- 🖥️ **Five built-in dashboard cards**, registered automatically. The top view
+  opens each door, window, the hood, the tailgate and the sunroof as the car
+  reports them, and flags a low or flat tire.
+- 🚗 **Cards that know the car** - they stand down while you drive, space
+  commands out because the car drops one that arrives while it is busy, and link
+  to the car in Google Maps, Waze, Apple Maps or HERE WeGo.
+- 🗣️ **Translated** - setup in eight languages; the cards follow Home
+  Assistant's language.
 - 🩺 **A diagnostics report worth reading** - poll health, the last 25 commands
   with their outcomes, and the raw capability catalogue, all redacted.
 - 📈 **Long-term statistics** on every numeric entity, so history survives the
@@ -72,76 +62,83 @@ polished setup on top.
 ## 📚 Contents
 
 - [Installation](#-installation-hacs) · [Updating](#-updating)
-- [The built-in dashboard cards](#%EF%B8%8F-dashboards--cards)
+- [Dashboard cards](#%EF%B8%8F-dashboards--cards)
 - [Sensors](#-what-you-can-see-sensors) · [Controls](#%EF%B8%8F-what-you-can-do-controls)
-- [Polling modes](#-efficient-adaptive-polling)
+- [Polling modes](#-efficient-adaptive-polling) · [Changing settings later](#%EF%B8%8F-changing-settings-later)
 - [Automations, dashboards & widgets](#-automations-dashboards--widgets)
-- [Troubleshooting & debugging](#-troubleshooting--debugging)
-- [Security](#-security) · [Supported regions](#-supported-regions)
-- [Changing settings later](#%EF%B8%8F-changing-settings-later) · [Known limitations](#%EF%B8%8F-known-limitations)
-- [Repository structure](#-repository-structure) · [License & credits](#-license--credits)
+- [The Geely EM platform](#the-new-geely-em-zeekr-platform--a-different-experimental-model) · [Supported regions](#-supported-regions)
+- [Security](#-security) · [Troubleshooting & debugging](#-troubleshooting--debugging)
+- [Known limitations](#%EF%B8%8F-known-limitations) · [Repository structure](#-repository-structure) · [License & credits](#-license--credits)
 
 ---
 
 ## 📥 Installation (HACS)
 
-Geely Connect is in the **HACS default store**, so there is no repository URL
-to add.
+Geely Connect is in the **HACS default store**, so there is no repository URL to
+add.
 
-**One-click:** [![Add to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=YossiKon&repository=geely-connect&category=integration)
+**One click:** [![Add to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=YossiKon&repository=geely-connect&category=integration)
 
-Or manually:
+Or step by step:
 
-1. HACS → search **Geely Connect** → open it → **Download**, then **restart
-   Home Assistant**
-2. Settings → Devices & Services → **Add Integration** → **Geely Connect**
-3. Enter your email, pick **country / tire-pressure unit / polling mode**, then
-   enter the 6-digit code sent to your inbox
+1. HACS → search **Geely Connect** → open it → **Download**, then **restart Home
+   Assistant**.
+2. Settings → Devices & Services → **Add Integration** → **Geely Connect**.
+3. Pick the platform (the existing Geely backend unless your account uses the
+   new Geely EM app), enter your email, choose **country / tire-pressure unit /
+   polling mode**, then enter the 6-digit code sent to your inbox. A **Geely EM**
+   entry asks for your Geely account password instead of a code, and stores it
+   unless you untick that option; to have it encrypted, add a
+   `geely_password_key` to `secrets.yaml` before this step (see
+   [its section](#the-new-geely-em-zeekr-platform--a-different-experimental-model)).
 
 ### The repository doesn't show up in HACS?
 
-- Clear any active filters in the HACS search box, and make sure you are
-  looking under **Integrations**.
+- Clear any active filters in the HACS search box, and make sure you are looking
+  under **Integrations**.
 - HACS caches its repository list. Force a refresh with ⋮ → **Reload data** on
   the HACS main page.
-
-> **Added it as a custom repository before?** It still works, but you can tidy
-> up: HACS → ⋮ → **Custom repositories** → 🗑 next to this repository. Removing
-> the *custom repository entry* does not uninstall the integration - the store
-> copy takes over and updates continue normally.
+- Added it as a custom repository before? It still works. To tidy up, open HACS
+  → ⋮ → **Custom repositories** → 🗑 next to this repository. Removing the
+  *custom repository entry* does not uninstall the integration: the store copy
+  takes over and updates continue normally.
 
 ### Manual installation
+
 Copy `custom_components/geely_connect/` into `config/custom_components/` and
 restart.
 
 ### 🛜 Setup times out? Check these hosts are reachable
 
-The whole setup flow runs **from the Home Assistant machine** - not from your
-browser - so VPNs or DNS settings on the laptop don't matter, only the network
-the HA box itself is on. During setup it must reach:
+Setup runs **from the Home Assistant machine**, not from your browser, so only
+the network the Home Assistant box is on matters. On the existing platform it
+must reach these hosts; a Geely EM entry talks to a different set.
 
 | Host | Where | When |
 |---|---|---|
 | `captcha4.geely.com` | 🇨🇳 China (Alibaba, Hangzhou) | **Login only** - the captcha that runs before the email code |
 | `access-app-global.geely.com` | 🇩🇪 Frankfurt | Login only - sends the email code, exchanges the OTP |
-| `m-lcmsam-eu.geely.com` | 🇩🇪 Frankfurt | Login only - the vehicle list |
+| `m-lcmsam-eu.geely.com` | 🇩🇪 Frankfurt | Login - the vehicle list. On a car on the EU backend (South African accounts included) also **ongoing**: every session renewal takes a one-time code from it |
 | `api.ecloudeu.com` | 🇩🇪 Frankfurt (AWS) | Once at setup - provisions the certificate |
 | `apis.ecloudeu.com` | 🇩🇪 Frankfurt (AWS) | **Ongoing** - every poll and every command |
 
 An APAC-market car uses the Korean pair instead: `api.ecloudkr.com` and
-`apis.ecloudkr.com` (AWS, Seoul/Incheon) plus `m-lcmsam-kr.geely.com`.
+`apis.ecloudkr.com` (AWS, Seoul/Incheon), plus `m-lcmsam-kr.geely.com`. Its
+session renewals go to `m-lcmsam-kr.geely.com` and `api.ecloudkr.com`, so both
+stay in use after setup. A North-American car, and a Brazilian account, which
+resolves there, uses `api.ecloudus.com` and `apis.ecloudus.com`, and renews its
+session through `m-lcmsam-us.geely.com`.
 
 **Blocking China after setup is fine.** Only the captcha lives there, and only
-the login touches it - day-to-day polling and commands never do. Lift the block
-when you add a car, or if Home Assistant ever asks you to re-authenticate.
-Note the captcha host resolves through `*.geely-auto-gtm.com` to rotating
-Alibaba addresses, so a static IP allowlist will not hold; scope a firewall
-rule to the Home Assistant machine instead.
+the login touches it. Lift the block when you add a car, or if Home Assistant
+asks you to re-authenticate. The captcha host resolves through
+`*.geely-auto-gtm.com` to rotating Alibaba addresses, so a static IP allowlist
+will not hold; scope a firewall rule to the Home Assistant machine instead.
 
-If the form spins and then reports the captcha server as unreachable, the
-usual culprits are DNS filtering (Pi-hole / AdGuard / router blocklists that
-include Chinese domains) or firewall geo-blocking of Chinese IP ranges. Test
-from the HA box itself:
+If the form spins and then reports the captcha server as unreachable, the usual
+culprits are DNS filtering (Pi-hole, AdGuard or router blocklists that include
+Chinese domains) or firewall geo-blocking. Test from the Home Assistant box
+itself:
 
 ```sh
 curl -sv --connect-timeout 10 https://captcha4.geely.com/ -o /dev/null
@@ -150,9 +147,9 @@ python3 -c "import socket;s=socket.create_connection(('captcha4.geely.com',443),
 ```
 
 A healthy DNS answer chains through `geely-auto-gtm.com` to
-`*.cn-shanghai.alb.aliyuncsslb.com`; if your resolver returns `0.0.0.0` or a
-private address instead, allowlist `captcha4.geely.com`,
-`*.geely-auto-gtm.com` and `*.aliyuncsslb.com` and try again.
+`*.cn-shanghai.alb.aliyuncsslb.com`. If your resolver returns `0.0.0.0` or a
+private address instead, allowlist `captcha4.geely.com`, `*.geely-auto-gtm.com`
+and `*.aliyuncsslb.com` and try again.
 
 ---
 
@@ -161,117 +158,44 @@ private address instead, allowlist `captcha4.geely.com`,
 **You never need to remove and re-add the integration.** Your vehicle, history,
 automations and dashboards all survive an update.
 
-1. HACS → **Geely Connect** → **Update**
-2. **Restart Home Assistant** - always required. Python caches modules it has
-   already imported, so *Reload* on the integration rebuilds the entities from
-   the code already in memory and will not pick up a new version.
+1. HACS → **Geely Connect** → **Update**.
+2. **Restart Home Assistant** - always required. *Reload* on the integration
+   rebuilds the entities from the code already in memory and does not pick up a
+   new version.
 
 Turn on HACS → ⋮ → **Settings** → *Show notification when a new version is
-available* and updates also appear under Settings → **Updates** alongside
-everything else.
+available*, and updates also appear under Settings → **Updates**.
 
 ### No update showing?
 
-- HACS refreshes repository data on a timer. Force it: HACS → **Geely Connect**
-  → ⋮ → **Update information**, or ⋮ → **Reload data** on the HACS main page.
-- If you installed before the first release existed, HACS is tracking the
-  **branch**, not releases, and has no version to compare against. Fix it once:
-  ⋮ → **Redownload** → pick a version such as `v1.4.0` from the dropdown. Every
-  later release then shows up as a normal update.
-- **A tagged release is the reliable way to update.** Older HACS also let you
-  pick **main** from that dropdown to track the branch ahead of a release, but
-  HACS 2.x is release-oriented and that option may not be there - if your
-  Redownload list stops at a version older than the newest tag, that is why,
-  not a fault in your setup. When a fix lands on `main` and you need it before
-  the next release, the honest answer is that it ships with that release;
-  ping the issue if you are blocked on one.
+HACS refreshes repository data on a timer. Force it with HACS → **Geely
+Connect** → ⋮ → **Update information**, or ⋮ → **Reload data** on the HACS main
+page. Updates arrive as tagged releases: a fix that has landed on `main` reaches
+you with the next release.
 
 ---
 
 ## 🖥️ Dashboards & cards
 
-> **The big cards link straight to the car in your map app.** Google Maps and
-> Waze by default, with Apple Maps and HERE WeGo available through `nav:` -
-> links under the actions, from the position the car reported. Not commands, so
-> they keep working while the car is being driven, which is exactly when someone
-> wants them, and absent until the car has actually reported where it is.
-
-> **One command at a time.** The car refuses a command that arrives while it is
-> still executing the last one, and the refused command is *dropped, not queued* -
-> so the tap is lost and Home Assistant raises "the last request has not yet been
-> executed". The cards hold every control for three seconds after each command and
-> grey them out while they wait, then hand them all back at once. The greying is
-> done on the buttons themselves, not by redrawing the card, so nothing moves on
-> screen. The temperature stepper does not send per tap at all: it writes the new
-> number straight into the display and tells the car once you stop tapping, and it
-> keeps showing your number until the car confirms it - so it never flicks back to
-> the old target while the command is in flight. A temperature that ends up not
-> being sent, because another button was holding the controls when its moment
-> came, does not stay on screen: the number goes back to the car's. Switching the
-> climate off or tapping a rapid preset gives up one that has not gone yet, since
-> it would reach the car as a start. A command refused because the car was busy
-> is retried once, quietly, since it never ran - except a temperature given up
-> in the meantime (Climate off, a rapid preset), or followed by a newer number
-> the stepper has already tried to send.
-> `cooldown:` in the card config changes the wait (seconds; 0 turns it off).
-> Nothing can report when the car has actually *finished* - the gateway
-> acknowledges receipt, not execution - so this is a spacing, not a status.
-
-> **The cards read a car with a tank differently from a battery-only one.** The
-> integration only creates the fuel entities when it has decided the car has a
-> tank, so their presence is what the cards go by - no configuration. On a hybrid
-> or plug-in hybrid the headline becomes the **combined** range, because the
-> electric range alone understates how far the car can go by hundreds of
-> kilometres, with the two halves spelled out under it (*"256 EV · 480 fuel"*).
-> There is a second bar for the tank - one bar cannot say which tank it means -
-> both percentages in the header, and a Fuel section carrying the level, the fuel
-> range and whether the engine is running. A trim that reports only some of those
-> figures falls back through them rather than showing a dash, and a car with a
-> tank but no traction battery gets the fuel bar on its own instead of an empty
-> battery bar implying it cannot move. The mini card shows no bar or percentage on
-> any car by design, so there the difference is the number itself.
-> [See both side by side](#%EF%B8%8F-dashboards--cards).
-
-> **While the car is being driven, every card locks itself.** The three larger
-> cards show a banner - *"Driving · remote actions are unavailable until the car
-> is parked"* - and the two one-row cards say the same thing on their status
-> line; every button and time field is greyed out, and the handler refuses the
-> command even if a button is reached another way. **Refresh Data stays live**,
-> because it reads the car rather than commanding it, and a moving car is when
-> fresh data is worth most. Driving means *engine running or any speed*, the same
-> test the poller uses - speed alone reads 0 at every red light, and a lock keyed
-> on it would hand the buttons back at each stop. A car that reports neither
-> field is never locked. One exception: an E2 reports its engine running for as
-> long as remote climate runs, so with no speed, the park brake engaged and
-> remote climate on, the car counts as parked and the controls stay live,
-> Climate off included ([#72](https://github.com/YossiKon/geely-connect/issues/72)).
+This section covers the cards built into the integration. Full dashboards,
+automations and blueprints are under [Automations, dashboards & widgets](#-automations-dashboards--widgets).
 
 ### 🚙 The built-in cards - zero setup
 
-The integration ships **five custom cards** and registers them by itself - no
-HACS frontend package, no resource to add, nothing to copy. A page that was
-already open when you set the integration up needs one hard refresh first
-(Ctrl+F5, Cmd+Shift+R in Chrome or Firefox on a Mac, or *Reset frontend
-cache* in the companion app): it reads the dashboard resources only when it
-loads
-([#115](https://github.com/YossiKon/geely-connect/issues/115)). Then open any
-dashboard, **Add card**, and search "Geely":
-
-> 🌐 **The cards speak your language.** Every label follows Home Assistant's
-> UI language automatically - English, Thai, Italian and Bulgarian ship
-> today - and falls back to
-> English wherever a translation has a gap, so a partial dictionary never
-> blanks a button. A Lovelace card can never read `translations/*.json` (the
-> frontend only loads its fixed set of translation categories), so the card
-> carries its own table: adding a language is one `STR` block in
-> `geely-card.js`, and a PR for yours is welcome.
+The integration ships **five cards** and registers them by itself - no HACS
+frontend package, no resource to add, nothing to copy. Open any dashboard, **Add
+card**, and search "Geely". A page that was already open when you set the
+integration up needs one hard refresh first (Ctrl+F5, Cmd+Shift+R in Chrome or Firefox on a Mac, or
+*Reset frontend cache* in the companion app), because it reads the dashboard
+resources only when it loads
+([#115](https://github.com/YossiKon/geely-connect/issues/115)).
 
 | Card | What it is |
 |---|---|
-| **Geely Card** (`custom:geely-card`) | The full cockpit: range and battery up top, the EX5 silhouette that glows while charging and flags every opening, one-tap Lock / Unlock / Climate / Defrost / Vent / Trunk / Find / Sync, a full climate panel (temperature, rapid heat / cool, seat heating and cooling, fresh air, windows, sunroof and shade), charging and schedule toggles with editable start / end times, links that navigate you to wherever the car is parked, then charging, tires, trip and service health - each block hides itself when the car doesn't report it |
-| **Geely Card (top view)** (`custom:geely-card-top`) | The car from above, drawn as it stands. Each door swings open on its own side, an open window is outlined in amber, the hood and the tailgate lift, and the sunroof slides back. The lamps light while driving, the charging cable shows while the car is plugged in, the mirrors fold while it is locked, and Find flashes the indicators. Tire pressure sits beside each wheel: a low tire (under 190 kPa) turns amber and a puncture (under 100 kPa) red. A puncture also leads the status line, and a low tire is named there whenever nothing more pressing is. Changes move rather than jump (`animations: false` keeps it still). It has the same header, actions and climate panel as the full card. The driver's door follows your market automatically (right-hand-drive countries show it on the right; `rhd: true/false` in the card config overrides) |
-| **Geely Card (compact)** (`custom:geely-card-compact`) | The essentials in one tile: battery and cabin temperature in the header, range, status chips - and Lock, Unlock, rapid Heat / Cool, Defrost and Trunk, or the buttons you pick with `buttons:` |
-| **Geely Card (mini)** (`custom:geely-card-mini`) | A small square: range, battery and cabin temperature in the header, status, a lock button that follows the car (locked offers Unlock, unlocked offers Lock), and one-tap quick heat / quick cool |
+| **Geely Card** (`custom:geely-card`) | The full cockpit: range and battery up top, the car that glows while charging and flags every opening, one-tap Lock / Unlock / Climate / Defrost / Vent / Trunk / Find / Sync, a full climate panel, charging and schedule controls, links to the car in your map app, then charging, tires, trip and service health. Each block hides itself when the car doesn't report it |
+| **Geely Card (top view)** (`custom:geely-card-top`) | The car from above, drawn as it stands. Each door swings open on its own side, an open window is outlined in amber, the hood and the tailgate lift, and the sunroof slides back. The lamps light while driving, the charging cable shows while the car is plugged in, the mirrors fold while it is parked and locked, and Find flashes the indicators. Tire pressure sits beside each wheel: a low tire (under 190 kPa) turns amber and a puncture (under 100 kPa) red. A puncture also leads the status line, and a low tire is named there whenever nothing more pressing is. Changes move rather than jump (`animations: false` keeps it still). It has the same header, actions and climate panel as the full card. The driver's door follows your market automatically (right-hand-drive countries show it on the right; `rhd: true/false` in the card config overrides) |
+| **Geely Card (compact)** (`custom:geely-card-compact`) | The essentials in one tile: battery and cabin temperature, range, status chips, and Lock, Unlock, rapid Heat / Cool, Defrost and Trunk, or the buttons you pick with `buttons:`. Tapping the car opens the full card in a pop-up |
+| **Geely Card (mini)** (`custom:geely-card-mini`) | A small square: range, battery and cabin temperature, status, a lock button that follows the car (locked offers Unlock, unlocked offers Lock), and one-tap quick heat / quick cool |
 | **Geely Card (strip)** (`custom:geely-card-strip`) | One row: range, battery and lock state, with lock, rapid heat / cool, trunk and find as icon buttons - for the top of a dashboard or a narrow column |
 
 | Full | Top view |
@@ -284,24 +208,50 @@ dashboard, **Add card**, and search "Geely":
 
 ![Geely Card strip](docs/images/card-strip.png)
 
-**And the same card while the car is being driven.** The banner replaces the
-guesswork, every control is greyed out, and Sync stays live because it reads the
-car rather than commanding it. The navigation links keep working too - they open
-a map, they do not touch the car.
+### How the cards behave
+
+- **One command at a time.** The car drops a command that arrives while it is
+  still executing the last one, so the cards hold every control for three
+  seconds after each command and grey them out meanwhile (`cooldown:` changes
+  the wait). The temperature stepper shows your number at once and tells the car
+  when you stop tapping. A command refused because the car was busy is retried
+  once, quietly. Nothing reports when the car has actually *finished* - the
+  gateway acknowledges receipt, not execution - so this is a spacing, not a
+  status.
+- **Locked while driving.** While the car is being driven, the larger cards show
+  a banner instead of buttons the car would refuse, and the one-row cards say so
+  on their status line. **Refresh Data stays live**, because it reads the car
+  rather than commanding it, and so do the map links. Driving means *engine
+  running or any speed*: speed alone reads 0 at every red light. An E2 reports
+  its engine running while remote climate runs, so with no speed, the park brake
+  on and remote climate on, it counts as parked
+  ([#72](https://github.com/YossiKon/geely-connect/issues/72)).
+- **A car with a tank reads differently.** On a hybrid or plug-in hybrid the
+  headline becomes the **combined** range, with the two halves under it
+  (*"256 EV · 480 fuel"*), a second bar for the tank and a Fuel section. Nothing
+  to configure: the cards go by whether the fuel entities exist.
+- **Two taps for the doors.** Unlock and Trunk arm on the first tap and fire on
+  the second, so a stray touch on a wall tablet can't open the car.
+- **Colours with meaning.** The accent is teal while charging and amber when
+  something needs a look; the `--geely-accent` and `--geely-warn` theme
+  variables override both.
+- **Your language.** Every label follows Home Assistant's UI language (English,
+  Thai, Italian and Bulgarian today) and falls back to English wherever a
+  translation has a gap. A Lovelace card cannot read the integration's
+  `translations/` files, so the cards carry their own table: adding a language
+  is one `STR` block in `geely-card.js`, and a PR for yours is welcome.
+
+**The full card while the car is being driven**, and **the same card on a
+battery-only car and on a plug-in hybrid**:
 
 ![The full card while the car is being driven](docs/images/card-driving.png)
 
-**The same card, two different cars.** Nothing is configured: the integration only
-creates the fuel entities once it has decided the car has a tank, so the cards go
-by whether those entities exist. On the right the headline is the **combined**
-range with the two halves under it, there is a second bar for the tank, the header
-carries both percentages, and a Fuel section reports the level, the fuel range and
-whether the engine is running.
-
 ![The full card on a battery-only car and on a plug-in hybrid](docs/images/card-propulsion.png)
 
-With one Geely on the account the cards find their entities on their own -
-even after you rename them. With several cars, point each card at one:
+### Card options
+
+With one Geely on the account the cards find their entities on their own, even
+after you rename them. With several cars, point each card at one:
 
 ```yaml
 type: custom:geely-card
@@ -312,97 +262,64 @@ Everything else is optional:
 
 | Option | Default | What it does |
 |---|---|---|
-| `nav:` | `[maps, waze]` | Which navigate-to-the-car links to show, in this order. Any of **`maps`** (Google Maps), **`waze`**, **`apple`** (Apple Maps), **`here`** (HERE WeGo). An empty list hides the row |
-| `nav_travel:` | *the app's own default* | `walking`, `driving`, `transit` or `bicycling`, passed to the apps that accept it. Left unset on purpose: you walk to a car parked round the corner and drive to one left at the airport, and the app guesses better than the card can |
-| `nav_mode:` | `navigate` | `locate` makes every map link - the full card's row and any map button - show the car as a pin instead of a route to it. Apple Maps does this from iOS 18.4 |
-| `cooldown:` | `3` | Seconds to hold the controls after a command, so the next one does not arrive while the car is still executing the last. Everything is handed back in one go, and the card is not redrawn to do it. `0` turns the wait off |
-| `driving_lock:` | `true` | Set `false` to keep the controls live while the car reports itself moving. Worth knowing about: the engine flag can stick on, and this is how you get the buttons back if it does. The top view then draws no lamps either |
+| `nav:` | `[maps, waze]` | Which navigate-to-the-car links to show, in this order: any of **`maps`** (Google Maps), **`waze`**, **`apple`** (Apple Maps), **`here`** (HERE WeGo). An empty list hides the row |
+| `nav_travel:` | *the app's own default* | `walking`, `driving`, `transit` or `bicycling`. Google Maps gets it as given; Apple Maps gets walking or transit, and driving for anything else; HERE gets walking, and driving otherwise; Waze takes no mode |
+| `nav_mode:` | `navigate` | `locate` shows the car as a pin instead of a route to it. Apple Maps does this from iOS 18.4 |
+| `cooldown:` | `3` | Seconds to hold the controls after a command. `0` turns the wait off |
+| `driving_lock:` | `true` | `false` keeps the controls live while the car reports itself moving - the way to get the buttons back if the engine flag ever sticks on. The top view then draws no lamps either |
 | `boot:` | by country | `true` labels the tailgate *Boot*, `false` *Trunk* |
 | `rhd:` | by country | `true` draws the driver on the right in the top view, `false` on the left |
 | `animations:` | `true` | `false` keeps the top view still: doors, hood, tailgate and roof show their state without moving, and nothing blinks or flows. A system set to reduce motion gets the same |
 | `tire_low:` / `tire_flat:` | `190` / `100` | The pressures in kPa under which the top view marks a tire low (amber) or flat (red). They are compared in kPa whatever unit the tire sensors show, and a reading of 0 is never a puncture. `0` turns that alarm off |
 | `name:` | the device name | A different title for this card |
-| `hide_name:` | `false` | `true` removes the vehicle name **and the status dot** from the header |
-| `battery_size:` | *unset* | Compact card only. A pixel size (e.g. `26`) shows the battery **percentage as a headline above the range** at that size (with the cabin temperature beside it), instead of small in the top-right - tune it to taste |
-| `battery_bold:` | `true` | Set `false` to draw the battery-% headline in a regular weight instead of bold |
-| `charge_time_format:` | `min` | How **Time to full** reads while charging: `min` (e.g. `249 min`) or `hm` for hours + minutes (e.g. `4h 9m`) |
-| `show_parked:` | `false` | Compact card only. `true` adds a **Parked** chip next to Locked while the car is stationary, matching the full card's status |
-| `charging_countdown:` | `false` | Compact card only. `true` moves the live charging power up to a **status line under the title** (as the full card shows it) and turns the charging chip into a **ready-by time + countdown** (e.g. `Ready 10:22 · 2h 15m left`) that ticks down each minute |
-| `buttons:` | strip `[lock, heat, cool, trunk, find]`, mini `[lock, heat, cool]`, compact Lock, Unlock, heat, cool, defrost, trunk | Strip, mini and compact cards. Which buttons to draw, in this order: any of **`lock`** (follows the car - Lock or Unlock), **`heat`**, **`cool`**, **`defrost`**, **`trunk`**, **`find`**, **`charging`** (Stop / Start charging, only on a car that has the Charging switch), **`climate`**, **`refresh`** - and the map apps **`maps`**, **`waze`**, **`apple`**, **`here`**, each a link that opens the car's position in that app (see `nav_mode:`). `defrost`, `charging` and `climate` are skipped on a car that has no such entity, rather than drawn dead, and a map link until the car has reported where it is; an unknown name is skipped too. The compact card's separate Lock and Unlock are its default only - in a list, `lock` follows the car as it does everywhere. On the strip and mini the labels are hidden, so two map buttons look alike. `buttons: [lock, charging]` is the morning strip from [#83](https://github.com/YossiKon/geely-connect/issues/83) |
-| `hide:` | *none* | Full and top cards. What to leave off this card: any of the action row's **`lock`**, **`unlock`**, **`climate`**, **`defrost`**, **`vent`**, **`trunk`**, **`find`**, **`refresh`**, and the climate panel's **`seat_heating`** and **`seat_cooling`** rows. `hide: [trunk, seat_heating]` is the card from [#92](https://github.com/YossiKon/geely-connect/issues/92), for a car without heated seats. Nothing is hidden unless you list it, and an unknown name is ignored. The entities stay in Home Assistant |
-| `car_image:` | *none* | Path or URL to your own photo of the car (e.g. `/local/geely/mycar.png` for a file in `config/www/geely/`). It replaces the drawn car while keeping the live overlay - headlights, tail lights, charge port and the open-panel markers. Transparent PNG/WebP, side-on, cropped at the tyres. It stands on the same shadow as the drawing, tinted while charging |
-| `car_image_facing:` | `left` | Which way the car in your image points. The overlay positions are measured on a car facing left; set `right` for an image facing the other way (as the drawn car does) and they are mirrored to match. Positions you set in `car_image_hotspots` are used as given |
-| `car_image_hotspots:` | *sensible defaults* | Fine-tune where the overlay lights sit on your image, as percentages, if a different crop needs it - e.g. `{headlight: [8, 46], taillight: [94, 37], port: [86, 40]}`. `ground` (default `[50, 100]`, the bottom edge) is where the shadow sits |
+| `hide_name:` | `false` | `true` removes the vehicle name **and the status dot** from the header (the mini card hides the name only) |
+| `battery_size:` | *unset* | Compact card only. A pixel size (e.g. `26`) shows the battery **percentage as a headline above the range** at that size, instead of small in the top-right |
+| `battery_bold:` | `true` | `false` draws that battery headline in a regular weight |
+| `charge_time_format:` | `min` | How **Time to full** reads while charging: `min` (e.g. `249 min`) or `hm` (e.g. `4h 9m`) |
+| `show_parked:` | `false` | Compact card only. `true` adds a **Parked** chip next to Locked while the car is stationary |
+| `charging_countdown:` | `false` | Compact card only. `true` moves the charging power to a status line under the title and turns the charging chip into a **ready-by time and countdown** (e.g. `Ready 10:22 · 2h 15m left`) |
+| `buttons:` | strip `[lock, heat, cool, trunk, find]`, mini `[lock, heat, cool]`, compact Lock, Unlock, heat, cool, defrost, trunk | Strip, mini and compact cards. Which buttons to draw, in order: any of **`lock`** (follows the car - Lock or Unlock), **`heat`**, **`cool`**, **`defrost`**, **`trunk`**, **`find`**, **`charging`** (Stop / Start charging, on a car that has the Charging switch), **`climate`**, **`refresh`**, and the map apps **`maps`**, **`waze`**, **`apple`**, **`here`**. `defrost`, `charging` and `climate` are skipped on a car that has no such entity, rather than drawn dead, and a map link until the car has reported where it is; an unknown name is skipped too. `buttons: [lock, charging]` is the morning strip from [#83](https://github.com/YossiKon/geely-connect/issues/83) |
+| `hide:` | *none* | Full and top cards. What to leave off: any of the action row's **`lock`**, **`unlock`**, **`climate`**, **`defrost`**, **`vent`**, **`trunk`**, **`find`**, **`refresh`**, and the climate panel's **`seat_heating`** and **`seat_cooling`** rows. `hide: [trunk, seat_heating]` suits a car without heated seats ([#92](https://github.com/YossiKon/geely-connect/issues/92)). The entities stay in Home Assistant |
+| `car_image:` | *none* | Path or URL to your own photo of the car (e.g. `/local/geely/mycar.png` for a file in `config/www/geely/`). It replaces the drawn car on the side-view cards and keeps the live overlay: headlights, tail lights, charge port and the open-panel markers. Use a transparent PNG/WebP, side-on, cropped at the tyres |
+| `car_image_facing:` | `left` | Which way the car in your image points. Set `right` for an image facing the other way, and the overlay is mirrored to match. Positions you set in `car_image_hotspots` are used as given |
+| `car_image_hotspots:` | *sensible defaults* | Fine-tune where the overlay lights sit on your image, as percentages - e.g. `{headlight: [8, 46], taillight: [94, 37], port: [86, 40]}`. `ground` (default `[50, 100]`, the bottom edge) is where the shadow sits |
 
 ```yaml
 type: custom:geely-card
-nav: [apple, here]        # an iPhone with HERE WeGo on it
-nav_travel: walking       # you are walking to the car
-```
-
-**Your own car, and tap to expand.** By default the card draws a generic
-electric crossover. Point `car_image` at a photo of your actual car - colour and
-all - and it shows that instead, with the live indicators (lamps, charge port,
-open-panel markers) drawn on top so nothing is lost. Because the image is your
-own file under `config/www/`, it is untouched by add-on updates. On the compact
-summary card, tapping the car opens the full card in a pop-up, so a small tile
-can still reach every control.
-
-```yaml
-type: custom:geely-card-compact
 car_image: /local/geely/mycar.webp   # your photo in config/www/geely/
 car_image_facing: right              # only if your car points to the right
+nav: [apple, here]                   # an iPhone with HERE WeGo on it
 ```
 
-#### The climate panel
+### The climate panel
 
 The full and top-view cards carry a complete **Climate** section:
 
 - **Temperature stepper** - bound to the climate entity's own min / max / step
-  (15.5-28.5 °C in 0.5° steps on the EX5), so it can never send a value the
-  car refuses.
+  (15.5-28.5 °C in 0.5° steps on the EX5), so it can never send a value the car
+  refuses.
 - **Rapid heat / Rapid cool** - the car's own *Rapid Warming* / *Rapid Cooling*
   presets, which drive the setpoint to its maximum or minimum and run the seats
-  too, exactly as the official app does. They are labelled *rapid* because they
-  are not a plain "start heating", and an owner reasonably read the old labels
-  that way.
-- **Seat heating / Seat cooling** per front seat - each tap steps
-  Off → Low → Medium → High → Off.
-- **Fresh air** (G-Clean), **Parking comfort**, **Wheel heat** (on cars that
-  have a heated steering wheel), and **Open / Close** for the windows, the
-  sunroof and the sunshade - each pair lights while that opening is open.
-  Parking comfort lights while the car reports it on (`parkComfortState` 2,
-  [#45](https://github.com/YossiKon/geely-connect/issues/45)); a car whose
-  payload has no such field leaves it unlit.
-- Every block hides itself on a trim that lacks the entity - and there is no
-  fan-speed control because the car's cloud API simply has none.
+  too, exactly as the official app does.
+- **Seat heating / Seat cooling** per front seat - each tap steps Off → Low →
+  Medium → High → Off.
+- **Fresh air** (G-Clean), **Parking comfort**, **Wheel heat** (on cars with a
+  heated steering wheel), and **Open / Close** for the windows, the sunroof and
+  the sunshade.
 
-Two touches worth knowing: **Unlock and Trunk arm on the first tap and fire
-on the second** (a stray touch on a wall tablet can't open the car), and the
-accent colour follows the state - teal while charging, amber when something
-needs a look. `--geely-accent` / `--geely-warn` theme variables override both.
+Every block hides itself on a trim that lacks the entity. There is no fan-speed
+control, because the car's cloud API has none.
 
-The cards also read your Home Assistant **country** for two bits of local
-wording and layout: the boot is labelled *Boot* where English-speakers call it
-that and *Trunk* elsewhere, and the driver's door is drawn on the correct side
-in right-hand-drive markets. Both are overridable per card with `boot: true`
-/ `false` and `rhd: true` / `false`.
+### If a card ever misbehaves
 
-#### If a card ever misbehaves
-
-The picker holds one more entry, **Geely Card (status vX.Y.Z)** - a plain
+The card picker holds one more entry, **Geely Card (status vX.Y.Z)**: a plain
 text tile that always renders, shows which version of the card script is
-actually running in *your* browser, and reports the registration timeline.
-If a card sticks on a spinner or looks outdated after an update, a
-screenshot of that tile is the whole bug report. (Old cards after an update
-usually mean a cached copy: update, **restart Home Assistant**, then hard
-refresh - or *Reset frontend cache* in the companion app.) No Geely entry in
-the picker at all, not even this one, means the card script has not run in
-that page yet: the same hard refresh usually brings the entries up, and if
-it doesn't, the Home Assistant log says why.
-
-> The YAML card and view files that used to live in `cards/` and `views/`
-> are gone - the built-in cards replace them and stay current on their own.
+running in *your* browser, and reports the registration timeline. If a card
+sticks on a spinner or looks outdated after an update, a screenshot of that tile
+is the whole bug report. Old cards after an update usually mean a cached copy:
+update, **restart Home Assistant**, then hard refresh. No Geely entry in the
+picker at all means the card script has not run in that page yet: the same hard
+refresh usually brings it up, and if not, the Home Assistant log says why.
 
 ---
 
@@ -411,32 +328,33 @@ it doesn't, the Home Assistant log says why.
 All of these are created **enabled** - nothing to switch on by hand.
 
 ### Battery & charging
+
 | Entity | Description |
 |---|---|
 | Battery | State of charge (%) |
 | Electric Range | Remaining driving range (km) |
-| Charger Connection | Disconnected / Plugged in / Charging. Reads *Charging* whenever the car actually is, including DC fast charges - some cars leave the underlying field on "Plugged in" for the whole session |
+| Charger Connection | Disconnected / Plugged in / Charging. Reads *Charging* whenever the car actually is, including DC fast charges, where some cars leave the underlying field on "Plugged in" for the whole session |
 | Charger Plug | Binary - cable connected |
-| Plugged In (reported) | Binary - the car's own word that the cable is in. Only on cars whose capability catalogue declares the E2's charging scheme (the South African E2, the Colombian EX2, the EX2 Max). On a South African E2 whose wallbox a relay switches off, Charger Plug read unplugged while the car's own field said plugged in ([#129](https://github.com/YossiKon/geely-connect/issues/129)). So far it has been right on two South African E2s; the only EX2 Max file seen reads unplugged |
+| Plugged In (reported) | Binary - the car's own word that the cable is in. Only on cars whose capability catalogue declares the E2's charging scheme (the South African E2, the Colombian EX2, the EX2 Max). On a South African E2 whose wallbox a relay switches off, Charger Plug read unplugged while this field said plugged in ([#129](https://github.com/YossiKon/geely-connect/issues/129)). So far it has been right on two South African E2s; the only EX2 Max file seen reads unplugged |
 | Time To Full Charge | Minutes remaining while charging (the car's own countdown, blank when it has no estimate) |
-| Average Consumption | Energy use (kWh / 100 km), lifetime |
-| Trip Consumption | kWh/100 km for the current trip, next to the lifetime figure |
+| Average Consumption | Energy use (kWh/100 km), lifetime |
+| Trip Consumption | kWh/100 km for the current trip |
 
 ### 🔋 Range at full charge - two honest answers
 
-This entity can be read two ways, and they differ by more than half on the same
-car. One owner's card said **426 km** while the same card showed his lifetime
-consumption at **22.7 kWh/100 km** - which on a 60.22 kWh pack is **265 km**.
-Both numbers are real:
+This entity can be read two ways, and they can differ by more than half on the
+same car. One owner's card said **426 km** while his lifetime consumption was
+**22.7 kWh/100 km** - which on a 60.22 kWh pack is **265 km**. Both numbers are
+real:
 
-- **The car's own estimate, scaled to 100%** (the default). Inherits whatever the
-  car assumed about the driving to come, which lands near the *rated* figure.
-- **The range at this car's measured consumption** - pack size x the efficiency
-  the car itself reports. What it actually does, in the driving it has actually
-  had.
+- **The car's own estimate, scaled to 100%** (the default). It inherits what
+  the car assumes about the driving to come, which lands near the *rated*
+  figure.
+- **The range at this car's measured consumption** - pack size × the efficiency
+  the car itself reports.
 
-The second needs the pack size, and **nothing in the payload carries it**. It
-cannot be guessed either, because it is not one number per model:
+The second needs the pack size, and **nothing in the payload carries it**. It is
+not one number per model either:
 
 | Pack | Claimed range | Which cars |
 |---|---|---|
@@ -444,61 +362,53 @@ cannot be guessed either, because it is not one number per model:
 | **60.22 kWh** | 530 km CLTC · ~495 km NEDC · ~425 km WLTP | the long-range EX5 most export markets got first |
 | **68.39 kWh** (2025→) | 610 km CLTC · **475 km WLTP** on Complete (18-inch wheels) · **450 km WLTP** on Inspire (19-inch wheels, glass roof) | the bigger pack from the 2025/26 update |
 
-Note the last row: **the same pack, same model, 25 km apart on trim alone** -
-wheels and weight. That is why the integration will not pick a number for you.
-
-Set **usable battery capacity (kWh)** in Configure (see
-[Changing settings later](#%EF%B8%8F-changing-settings-later)) and the entity
-switches to the measured figure. Leave it at 0 and nothing changes. Either way
-both numbers, and which one is being shown, are in the entity's attributes -
-`method`, `at_measured_consumption_km`, `car_estimate_scaled_km` - so the two can
-always be compared instead of one of them looking like a bug.
+Set **usable battery capacity (kWh)** under [Configure](#%EF%B8%8F-changing-settings-later)
+and the entity switches to the measured figure; leave it at 0 and nothing
+changes. Either way both numbers, and which one is shown, are in the entity's
+attributes (`method`, `at_measured_consumption_km`, `car_estimate_scaled_km`).
 
 ### Driving & trip
+
 | Entity | Description |
 |---|---|
-| Speed / Average Speed | Current & average speed (km/h) |
-| Trip Meter | The car's own trip meter A - the one the driver resets on the dash, not a single journey |
+| Speed / Average Speed | Current and average speed (km/h) |
+| Trip Meter | The car's own trip meter A - the one the driver resets on the dash |
 | Total Mileage | Odometer (km) |
 | Engine State | Off / Running |
 | Park Brake | Engaged / Released |
 
 ### Climate
+
 | Entity | Description |
 |---|---|
-| Interior Temperature | Cabin temp (°C) |
-| Cabin Humidity | Relative humidity inside the car (%), from the same block as the cabin air readings |
-| Exterior Temperature | Outside temp (°C) - **treat with suspicion**, see [Known limitations](#%EF%B8%8F-known-limitations). Owners of both the Starray and the EX5 have measured it ten degrees out |
-| Steering Wheel Heating | On / off, on the trims that have it. The reading was measured on a real car: 1 means heating at any level, 2 means off. A car that reports **0** does not have the feature and the entity says unknown rather than a confident "off" - the evidence is a comparison across models: an EX5 whose capability catalogue does advertise a heated wheel reads **2** with it switched off, while three Starrays read **0**. The app's own command was captured and **confirmed to turn the wheel on** ([#4](https://github.com/YossiKon/geely-connect/issues/4)), so there is also a controllable **Steering Wheel Heat** switch (and a card button) reading the same field |
+| Interior Temperature | Cabin temperature (°C) |
+| Cabin Humidity | Relative humidity inside the car (%) |
+| Exterior Temperature | Outside temperature (°C) - **treat with suspicion**, see [Outside temperature](#outside-temperature) |
+| Steering Wheel Heating | On / off, on the trims that have it. A car that reports 0 does not have the feature, and the entity reads unknown rather than a confident "off" ([#4](https://github.com/YossiKon/geely-connect/issues/4)) |
 
 ### Tires
-Three sets of four, one reading each corner:
+
+Three sets of four, one reading per corner:
 
 | Entity | Unit |
 |---|---|
 | **Tire Front-Left / Front-Right / Rear-Left / Rear-Right** | Always the unit you picked at setup |
 | Tire Pressure FL / FR / RL / RR | Whatever Home Assistant decides |
-| Tire Temperature FL / FR / RL / RR | °C, from the same TPMS sensors - and the closest thing to an ambient reading this payload has on a car that has stood a while, see [Outside temperature](#outside-temperature) |
+| Tire Temperature FL / FR / RL / RR | °C, from the same TPMS sensors |
 
-Use the first set. The second carries `device_class: pressure`, which hands the
-display unit to Home Assistant: it reads `suggested_unit_of_measurement` only
-when the entity is **first registered** and falls back to the unit system after
-that, so an install created before you picked psi keeps showing kPa forever no
-matter what the integration reports. The first set has no device class, so
-nothing converts it and the setup choice is honoured - on a fresh install, on
-an existing one, and again whenever you change the unit under **Configure**.
-
-The originals stay, so anything already pointing at them keeps working.
+**Use the first set.** The second carries `device_class: pressure`, which hands
+the display unit to Home Assistant, and Home Assistant applies the suggested
+unit only when the entity is first registered. The first set has no device
+class, so the unit you chose at setup is honoured on a fresh install and on an
+existing one, and again whenever you change it under **Configure**. The second
+set stays so that anything already pointing at it keeps working.
 
 > **If the card shows `—` for all four tires**, check that the **first** set is
-> enabled: the card reads those four and nothing else, so disabling them as
-> duplicates - a reasonable thing to do on seeing three sets - empties the
-> panel while every other view keeps working from the second set
+> enabled: the cards read those four and nothing else
 > ([#39](https://github.com/YossiKon/geely-connect/issues/39)).
 
-**All three units are always there.** Each of the four carries `psi`, `bar` and
-`kPa` attributes, whatever the state itself is showing - so a card or template
-can take whichever it wants without depending on the setup choice:
+Each of the four also carries `psi`, `bar` and `kPa` attributes, whatever the
+state itself shows:
 
 ```yaml
 # psi regardless of what the sensor's own unit is
@@ -507,105 +417,86 @@ can take whichever it wants without depending on the setup choice:
 
 ### Miles instead of kilometres
 
-There is no setting for this in the integration, because there does not need to
-be: every distance and speed entity carries `device_class: distance` or
-`speed`, so **Home Assistant does the conversion itself** - including in
-long-term statistics, which a template sensor would lose.
+There is no setting for this, because Home Assistant does the conversion itself:
+every distance and speed entity carries `device_class: distance` or `speed`, and
+the conversion carries into long-term statistics.
 
 - **One entity** - open it, press the gear, set **Unit of measurement** to `mi`
-  (or `mph`). Range, odometer, trip meter, distance to service and both speeds
-  can each be set on their own.
-- **All of them** - Settings → System → General → **Unit system → US customary**
-  changes the default for every entity nobody has overridden.
+  (or `mph`).
+- **All of them** - Settings → System → General → **Unit system → US customary**.
 
-The cards follow whatever the entity says rather than assuming: the range tile
-and the driving banner print `mi` and `mph` when that is what the entity is in
+The cards follow whatever the entity says, so the range tile and the driving
+banner print `mi` and `mph` when that is what the entity is in
 ([#37](https://github.com/YossiKon/geely-connect/issues/37)).
 
 ### Body (open / closed)
-Driver door, Passenger door, Rear-Left door, Rear-Right door, Trunk, Hood.
 
-On an EX2 Max and an E2, **Hood** reads *Open* while the frunk is up
-([#72](https://github.com/YossiKon/geely-connect/issues/72)).
-
-**Driver seatbelt** reads *Safe* / *Unsafe*: the car's field is `true` while
-the belt is released, measured on a real car with the belt buckled and then
-not ([#72](https://github.com/YossiKon/geely-connect/issues/72)).
-
-The **Trunk Lock** sensor is worth knowing about separately: it reads the tailgate's own latch, not whether the gate is open. On the cars in [#20](https://github.com/YossiKon/geely-connect/issues/20) the Unlock Trunk button releases that latch without the gate moving, and until now the only feedback was the indicators flashing - so this is how you tell whether the command did anything.
-
-**Battery Temperature Maintenance** reads the app's *Scheduled trip → Battery
-Temperature Maintenance* toggle. It is a setting rather than a live activity:
-on means the car will condition the pack before the scheduled departure, not
-that it is doing so now. It comes from the vendor's own schedule endpoint, read
-in four states on a Starray EM-i with one thing changed at a time
-([#4](https://github.com/YossiKon/geely-connect/issues/4)): switching only
-this toggle off moved one field and nothing else.
-
-**Scheduled Trip Weekly** and **Scheduled Trip One-off** sit beside it: whether
-the app's weekday schedule is armed, and whether a one-off departure is. Before
-this the battery sensor read the one-off flag, which agreed with the toggle on
-the first car only because that car's trip was a one-off.
-
-**Park Brake Engaged** sits beside the *Park Brake* text sensor - on/off for an
-automation, a word for a dashboard. Only the two codes real cars send are
-mapped; anything else reads unknown rather than *released*, because a car whose
-brake state cannot be determined must not report the reading that looks safe
-([#41](https://github.com/YossiKon/geely-connect/issues/41)).
-
-### Maintenance & health
 | Entity | Description |
 |---|---|
-| 12V Battery / 12V Voltage | Auxiliary battery level & voltage |
+| Door Driver / Passenger / Rear-Left / Rear-Right, Trunk, Hood | Open / closed. On an EX2 Max and an E2, **Hood** reads open while the frunk is up ([#72](https://github.com/YossiKon/geely-connect/issues/72)) |
+| Driver Seatbelt | *Safe* / *Unsafe* ([#72](https://github.com/YossiKon/geely-connect/issues/72)) |
+| Trunk Lock | The tailgate's own latch, not whether the gate is open - the way to tell whether **Unlock Trunk** did anything on your car ([#20](https://github.com/YossiKon/geely-connect/issues/20)) |
+| Park Brake Engaged | On / off for automations, beside the *Park Brake* text sensor. A code the integration doesn't know reads unknown rather than *released* ([#41](https://github.com/YossiKon/geely-connect/issues/41)) |
+| Battery Temperature Maintenance | The app's *Scheduled trip → Battery Temperature Maintenance* toggle - a setting, not a live activity ([#4](https://github.com/YossiKon/geely-connect/issues/4)) |
+| Scheduled Trip Weekly / Scheduled Trip One-off | Whether the app's weekday schedule, or a one-off departure, is armed |
+
+### Maintenance & health
+
+| Entity | Description |
+|---|---|
+| 12V Battery / 12V Voltage | Auxiliary battery level and voltage |
 | Days To Service / Distance To Service | Maintenance intervals. On cars whose capability catalogue declares the E2's charging scheme, the cloud sends a constant 1 for the days (one owner's car showed about 220 at the time), so there a 1 reads unknown. The distance is real and still shows ([#130](https://github.com/YossiKon/geely-connect/issues/130)) |
 
 ### Location
-Location (device tracker) - GPS position on the map, with altitude.
+
+**Location** (device tracker) - GPS position on the map, with altitude.
 
 ### 🧮 Computed - not reported by the car
+
 | Entity | Description |
 |---|---|
 | **Efficiency** | km per kWh, derived from average consumption |
-| **Charge Complete** | When charging finishes, as a time rather than a minute count - so a notification can fire on it |
-| **Charging Power** | How fast the car is charging, in kW. The car reports volts and amps but never their product, so this is the only place the charge rate exists. A real `power` entity, so it records long-term statistics and can be graphed alongside your house load. Reads 0 kW unless the car is genuinely charging: the connection field alone is not enough, because some cars never move it off "Plugged in" through an entire DC fast charge, so the DC contactor and the sign of the pack current count as well. Without that gate the pack pair - which carries traction current while you drive - publishes a 17 kW "charge" on the motorway |
-| **Charge Voltage** / **Charge Current** | The two halves behind that number (diagnostic). Worth a look when a charge is slower than expected - a derated circuit shows up as low current, not low voltage. The car sends an AC pair and a DC pair and never labels them, so the **DC contactor** decides which one is live: closed means a DC session, open means the AC leg. Comparing the two by apparent power used to do this job and was wrong - one car reports a nonsense 1586 V on the DC pair during AC charging, which won that comparison and published 25 kW on a 6 kW wallbox |
-| **DC Charge Current** / **DC Charge Voltage** | The same fast charge, on its own (diagnostic). Blank on an AC session and blank when idle, so a dashboard can show a DC charge without the pair above reporting through every wallbox charge. The voltage here is deliberately the **charger's** own output (`dcChargePileUAct`), not the pack's - the pack figure is what Charge Voltage already reports and what one car sends mis-scaled. Both stay blank rather than publishing the stale numbers these fields keep between sessions |
-| **Pack Power** | The battery's own power flow in kW, signed the way the car signs it: positive leaving the pack, negative going in. This is the figure the car's dashboard shows while driving - about 17 kW up a hill, and around −1.5 kW on a 1.8 kW wall charge, the difference being the onboard charger's losses and the 12 V systems. Reads unknown rather than a number when the pack voltage the car reports is physically impossible - one car sends about 1586 V during AC charging, which would otherwise publish −25 kW into long-term statistics |
-| **Range At Full Charge** | Remaining range extrapolated to 100% at the current efficiency, so it's comparable week to week. Blank below 10% charge, where the estimate is mostly noise |
-| **Last Trip** | How far the last completed journey went, worked out from the odometer between engine-on and engine-off |
+| **Charge Complete** | When charging finishes, as a time - so a notification can fire on it |
+| **Charging Power** | How fast the car is charging, in kW. The car reports volts and amps but never their product. Reads 0 kW unless the car is genuinely charging, so a drive never shows up as a "charge" |
+| **Charge Voltage** / **Charge Current** | The two halves behind that number (diagnostic). A derated circuit shows up as low current, not low voltage |
+| **DC Charge Current** / **DC Charge Voltage** | The same, for a DC fast charge only (diagnostic). Blank on an AC session and when idle. The voltage is the charger's own output, not the pack's |
+| **Pack Power** | The battery's own power flow in kW: positive leaving the pack, negative going in - the figure the car's dashboard shows while driving. Reads unknown when the pack voltage the car reports is physically impossible |
+| **Range At Full Charge** | Remaining range extrapolated to 100% - see [above](#-range-at-full-charge---two-honest-answers). Blank below 10% charge, where the estimate is mostly noise |
+| **Last Trip** | How far the last completed journey went, from the odometer between engine-on and engine-off |
 | **Trip In Progress** | How far the current journey has gone; 0 when parked |
-| **Connected** | Is the integration reaching the car right now |
-| **Last Updated** | Timestamp of the last successful poll |
+| **Connected** | Whether the integration is reaching the car right now |
+| **Last Updated** | When the last successful poll ran |
 
 ### ⛽ Hybrid & PHEV only
-These appear **only on a car that has a fuel tank**, so a battery-electric EX5
-shows none of them. Which set you get is decided by the `powerType` your account
-reports (`混动`, `PHEV`, `纯电动`, `BEV`, …); if that value is missing or is a
-wording this integration hasn't seen yet, the car's own telemetry decides
-instead, and the raw string is written to the log so it can be added.
+
+These appear **only on a car with a fuel tank**. Which set you get is decided by
+the `powerType` your account reports; if that is missing or a wording the
+integration hasn't seen yet, the car's own telemetry decides, and the raw string
+is written to the log so it can be added.
 
 | Entity | Description |
 |---|---|
 | Fuel Level / Fuel Level Percent | Litres in the tank, and the same as a percentage |
 | Fuel Consumption / Trip Fuel Consumption | L/100 km, lifetime average and current trip |
-| Mileage On Fuel / Mileage On Battery | Lifetime split of the odometer: how far the car has *ever* run on petrol vs on the battery. The two add up to the odometer, so they answer "what fraction of my driving is actually electric". Not a trip figure - for that, reset a trip meter |
+| Mileage On Fuel / Mileage On Battery | How far the car has *ever* run on petrol and on the battery. The two add up to the odometer |
 | Engine Coolant Temperature | °C |
-| Engine Speed | rpm - 0 whenever the engine is off, which on a PHEV is most of the time |
+| Engine Speed | rpm - 0 whenever the engine is off |
 | Engine Oil Health / Engine Hours To Service | Oil condition %, and engine hours until the next service |
 | Fuel Flap | Open / closed |
-| **Fuel Range** | The car's own figure where it reports one - some trims do, and it matches the cluster exactly. Where it doesn't (the EX5 sends no such field), it falls back to tank litres ÷ average consumption; on a plug-in hybrid that projection runs high, because the lifetime average is mostly-electric driving. Blank when neither is available |
-| **Combined Range** | Computed. Electric range + fuel range. Deliberately blank unless *both* halves are known - a "combined" range showing only the electric half would read far too low to a driver with a full tank |
+| **Fuel Range** | The car's own figure where it reports one; otherwise tank litres ÷ average consumption, which runs high on a plug-in hybrid. Blank when neither is available |
+| **Combined Range** | Computed: electric range + fuel range. Blank unless *both* halves are known |
 
-> Two of the odometers (`odometerOnFuelOnly`, `odometerOnBatteryOnly`) arrive
-> from the server in units of 0.1 km and are scaled here. If you compare against
-> the raw diagnostics download, expect a factor of ten.
+Two of the odometers (`odometerOnFuelOnly`, `odometerOnBatteryOnly`) arrive in
+units of 0.1 km and are scaled here, so expect a factor of ten against the raw
+diagnostics.
 
 ### 🔍 Full exposure (optional)
+
 Every other field the server returns can be exposed as an auto-generated
 diagnostic sensor. It is **off by default** - on an EX5 it is around 180
 entities, which buries the ones worth looking at. Turn it on under
-**Configure** if you are hunting for a field that isn't exposed yet. Turning it
-back off removes the generated entities again.
+**Configure** if you are hunting for a field that isn't exposed yet; turning it
+off removes them again.
 
 ---
 
@@ -614,19 +505,23 @@ back off removes the generated entities again.
 | Control | Actions |
 |---|---|
 | **Lock** | Lock / unlock the doors |
-| **Trunk** | Asks the car to release the tailgate latch, which then re-locks itself after a short window if nobody lifts the gate - which is exactly what the official app's own tailgate button does. **Four owners** now report the app only ever unlocking, never opening, across the EX5 Inspire, the EX5 Tech and the P145 PHEV, with the powered open coming from the key fob or the car's own screen. So this button is not a poor imitation of the app; it is the same action. The latch is confirmed releasing on three of the four - the EX5 Tech, the EX5 Inspire standard range and the P145 PHEV. On the fourth the indicators flash and the latch does not move, which is a **different** question from the powered open and the one thing still unexplained here. Watch the **Trunk Lock** sensor to see which of the two your car does. On the powered open itself: the EX5 capability catalogue **declares** `remote_control_open_2` (target `trunk`), but that lead is now closed - an owner read the car's own `vehicleCtrl` firmware binary and found the open command (`RDO`) is **provisioned in config with no handler**: the module's real handlers are `RDU RDL RWS RHL RES RCC RFD RPP RSM RCE PAA PAE`, and `RDO` is not among them. So the powered open cannot be executed over any remote channel the app or this integration reaches - the fob and the dashboard drive the actuator directly. This button sends the unlatch, which is all the cloud exposes; see [#20](https://github.com/YossiKon/geely-connect/issues/20). On the E2, the Colombian EX2 and the EX2 Max it sends `RTU`, the request the E2's own app sends, because the usual one unlocks every door on the E2. **Confirmed on an E2**: the boot unlocks and the other doors stay locked ([#72](https://github.com/YossiKon/geely-connect/issues/72)) |
-| **Frunk** | Releases the front trunk. It sends `rlu`, the request the E2's own app sends for it - on the E2 the usual door request unlocks every door and the boot but never the frunk. The same request, sent from Home Assistant, popped the frunk on an EX2 Max, and the button opens it on an E2 ([#72](https://github.com/YossiKon/geely-connect/issues/72)). The button appears only on a car whose capability catalogue names a front trunk, as the E2's and the EX2 Max's do; every other car gets none |
-| **Climate (remote pre-conditioning)** | Remote pre-heat/pre-cool: on/off, set temperature (15.5-28.5 °C), Rapid Warming, Rapid Cooling. The rapid presets drive the setpoint to the coldest or hottest the car allows and ask for both front seats at the highest level - heat when warming, ventilation when cooling - inside the same single request the car accepts, since a second command racing the first gets rejected while the car is still working. On a car with a heated steering wheel, rapid warming asks for the wheel too (`sw`, exactly as the captured app body does) - **confirmed on a real car to heat the wheel** ([#4](https://github.com/YossiKon/geely-connect/issues/4)). On some cars the cabin obeys and the seats do not; [Troubleshooting](#-troubleshooting--debugging) has the script that fixes that, and why fan speed cannot be asked for at all. Only reflects remote pre-climate cycles: the cloud does not report manual cabin HVAC. On the E2, the Colombian EX2 and the EX2 Max, on/off and the temperature send the request the E2's own app sends, in whole degrees from 16 to 28 °C ([#72](https://github.com/YossiKon/geely-connect/issues/72)); the rapid presets did nothing on the E2 |
-| **Seat heating** | Driver & passenger (rear if supported): Off/Low/Medium/High |
-| **Seat ventilation** | Driver & passenger (rear if supported) |
-| **Defrost** | Windscreen defrost on/off |
-| **Steering Wheel Heat** | On/off, on cars that show evidence of the feature, and on the built-in cards next to Fresh air. The command comes from a capture of the official app's own button ([#4](https://github.com/YossiKon/geely-connect/issues/4)) - `rce.heat: steering_wheel`, an underscore where every seat name uses hyphens, and no level, because the car cannot report one. **Confirmed on a real car** - both rapid warming and this standalone toggle turn the wheel on. The car's status field is slow to catch up, so the button holds its requested state for a moment and re-checks the car twice |
-| **Windows** | Open / close / ventilate. On the E2, the Colombian EX2 and the EX2 Max, the request the E2's own app sends. **Confirmed on an E2** in both directions, for the windows and the ventilation; there the cover shows the windows open 10-15 s after a press ([#72](https://github.com/YossiKon/geely-connect/issues/72)). The cover's `open_windows` attribute names each open window in the doors' words (`driver`, `passenger`, `rear_left`, `rear_right`), and the top-view card opens those on the drawing |
+| **Trunk** | Releases the tailgate latch - the same action as the official app's tailgate button - and the gate re-locks itself after a short window if nobody lifts it. The latch is confirmed releasing on the EX5 Tech, the EX5 Inspire standard range and the P145 PHEV; on one other car the indicators flash and the latch does not move, so watch the **Trunk Lock** sensor to see which your car does. The powered open cannot be reached remotely: the car's control module has no handler for it, so only the key fob and the car's own screen open the gate ([#20](https://github.com/YossiKon/geely-connect/issues/20)). On the E2, the Colombian EX2 and the EX2 Max it sends the E2 app's own request. **Confirmed on an E2**: the boot unlocks and the other doors stay locked ([#72](https://github.com/YossiKon/geely-connect/issues/72)) |
+| **Frunk** | Releases the front trunk, with the request the E2's own app sends: it popped the frunk on an EX2 Max, and opens it on an E2. Only on a car whose capability catalogue names a front trunk - so far the E2 and the EX2 Max ([#72](https://github.com/YossiKon/geely-connect/issues/72)) |
+| **Climate (remote pre-conditioning)** | On / off, set temperature (15.5-28.5 °C), Rapid Warming and Rapid Cooling. The rapid presets drive the setpoint to the extreme the car allows and, inside the same single request, ask for both front seats at the highest level - heat when warming, ventilation when cooling. On a car with a heated steering wheel, rapid warming asks for the wheel too, **confirmed on a real car to heat the wheel** ([#4](https://github.com/YossiKon/geely-connect/issues/4)). If the cabin obeys and the seats do not, see [Rapid warming / cooling and the seats](#rapid-warming--cooling-and-the-seats). It reflects remote pre-climate only: the cloud does not report manual cabin HVAC. On the E2, the Colombian EX2 and the EX2 Max it uses the E2 app's request, in whole degrees from 16 to 28 °C; the rapid presets did nothing on the E2 ([#72](https://github.com/YossiKon/geely-connect/issues/72)) |
+| **Seat heating** | Driver and passenger (rear if supported): Off / Low / Medium / High |
+| **Seat ventilation** | Driver and passenger (rear if supported) |
+| **Defrost** | Windscreen defrost on / off |
+| **Steering Wheel Heat** | On / off, on cars that show evidence of the feature - the official app's own command, **confirmed on a real car** ([#4](https://github.com/YossiKon/geely-connect/issues/4)). The car's status is slow to catch up, so the button holds the requested state for a moment and re-checks the car twice |
+| **Windows** | Open / close / ventilate. On the E2, the Colombian EX2 and the EX2 Max, with the E2 app's own request - **confirmed on an E2** in both directions, where the cover shows the windows open 10-15 s after a press ([#72](https://github.com/YossiKon/geely-connect/issues/72)). The cover's `open_windows` attribute names each open window in the doors' words (`driver`, `passenger`, `rear_left`, `rear_right`), and the top-view card opens those on the drawing |
 | **Sunroof / Sunshade** | Open / close |
-| **Charging** | Start / stop, plus scheduled charging (start & end time). Stopping a charge does not release the cable: the charge-port latch follows the doors, so to let someone unplug remotely, stop the charge **and** unlock the car - it re-locks itself afterwards if no door is opened. A car whose capability catalogue offers only a charge start *time* and no start/stop switch - the South African E2 and the Colombian EX2 ([#72](https://github.com/YossiKon/geely-connect/issues/72)) - gets no Charging switch: its own app has no start/stop either, and the command did nothing there. An EX2 Max's catalogue reads the same, so it gets none either. Its scheduled charging is the E2 app's own, written with the body that app sends, built from that app's captures and the car's read-back. Tried on one E2: after a start from here, plugged in with the window away from the current time, the car did not start charging, and its own settings and the app showed the schedule on. A time change goes out at once here, where the app sends one only with the toggle, and with no window on the car yet, set the start and end once in the app first |
-| **Parking Comfort** | Shows the car's own Parking Comfort (Camping mode) state; the remote on/off has not yet been seen to change a car. The switch reads on while the car reports `parkComfortState` 2 and off at any other value, which is how the official app reads it ([#45](https://github.com/YossiKon/geely-connect/issues/45)): on an EX5 the field moved from 1 to 2 when Camping mode was switched on in the car, and back to 1 when it was switched off. On that EX5 a remote stop, and a start in the app's own shape, were accepted by the server and changed nothing in the car, so a press here shows the requested state for 45 s and then follows the car again. Not created on the E2 and the Colombian EX2, whose catalogue and app have no such option ([#72](https://github.com/YossiKon/geely-connect/issues/72)), nor on the EX2 Max, whose catalogue has none either |
-| **Cabin purge (G-Clean)** | On/off |
-| **Find Car** | Horn + lights |
+| **Charging** | Start / stop, plus scheduled charging (start and end time). Stopping a charge does not release the cable: the charge-port latch follows the doors, so to let someone unplug remotely, stop the charge **and** unlock the car - it re-locks itself afterwards if no door is opened. The South African E2 and the Colombian EX2 get no start/stop switch: their catalogue offers only a charge start time, their own app has no start/stop either, and the command did nothing there. An EX2 Max's catalogue reads the same, so it gets none either. Their schedule is written the way the E2 app writes it. On one E2, a start from here turned the schedule on in the car's own settings and in the app, and the car, plugged in outside the window, did not start charging. A time change goes out at once here, where the app sends one only with the toggle; with no window on the car yet, set the start and end once in the app first ([#72](https://github.com/YossiKon/geely-connect/issues/72)) |
+| **Parking Comfort** | Shows the car's own Parking Comfort (Camping mode) state, read the way the official app reads it ([#45](https://github.com/YossiKon/geely-connect/issues/45)). The remote on/off has not yet been seen to change a car, so a press shows the requested state for 45 s and then follows the car again. Not created on the E2, the Colombian EX2 and the EX2 Max, which have no such option ([#72](https://github.com/YossiKon/geely-connect/issues/72)) |
+| **Cabin purge (G-Clean)** | On / off |
+| **Find Car** | Horn and lights |
+| **Refresh Data** | Fetches everything at once - status, secondary data and a fresh GPS fix - in any polling mode |
+
+> The window, sunroof and sunshade controls are live. They are ordinary dashboard
+> controls, so put them somewhere you won't hit them by accident.
 
 ---
 
@@ -637,10 +532,10 @@ client invalidates the other's access token, which is the `1402` both sides then
 see and renew from (measured on the EU backend,
 [#101](https://github.com/YossiKon/geely-connect/issues/101)). A poll does not
 sign in (a Geely EM entry renews its own session from the stored password about
-every two days, which does), and polling is kept as light as possible: few
-calls per cycle, GPS wake-ups and secondary data fetched sparingly, and long
-intervals whenever nothing changes (with an overnight quiet period). You pick a
-profile at setup:
+every two days, which does), and polling is kept as light as possible: few calls
+per cycle, GPS wake-ups and secondary data fetched sparingly, and long intervals
+whenever nothing changes, with an overnight quiet period. You pick a profile at
+setup and can change it any time under [Configure](#%EF%B8%8F-changing-settings-later):
 
 | Mode | Charging / driving | Parked (base → cap) | Secondary data | GPS wake |
 |---|---|---|---|---|
@@ -653,63 +548,30 @@ profile at setup:
 **"When it moves"** means the GPS wake fires while the car is driving, once more
 on the poll after it parks - so the parked location is always the last thing
 recorded - and again if the odometer moves without the integration seeing the
-trip. A car that has not moved is never woken to be asked where it is, however
-long it sits. (A car whose odometer cannot be read keeps the old per-cycle
-cadence, and **Refresh Data** forces a fix in any mode - which is also the
-answer for a car that is towed rather than driven. One press wakes the car
-once: v1.53.0 kept waking it on every poll after a press on a car that has no
-state block to fetch, the new platform's, until Home Assistant restarted.)
-
-The mode is **not fixed at setup** - change it any time from **Configure** on
-the device page (see *Changing settings later* below).
+trip. A car that has not moved is never woken to be asked where it is (a car
+whose odometer cannot be read keeps the old per-cycle cadence).
+**Refresh Data** forces a fix in any mode, which is also the answer for a car
+that was towed rather than driven.
 
 ### 🌙 Super Eco - data still arrives, barely
 
-Sits between Eco and Manual: the integration keeps updating on its own, but its
-*starting* interval is where Eco tops out, and two quiet polls reach a two-hour
-ceiling - a parked car costs roughly a dozen sessions a day against Eco's
-~fifty. Because the GPS wake-up reaches the car itself, it fires only when the
-car has actually moved, so a car parked for a fortnight is never woken at all -
-frugal with the car's 12 V battery, not just with your phone-app session.
-
-Whenever you want more than that, **Refresh Data** is the other half of the
-mode: a press fetches everything at once - status, the secondary state block,
-*and* a fresh GPS fix - in every mode, so an automation can pull on your
-schedule while the timer stays nearly silent. While charging or driving the
-mode speeds up by itself (every 5 minutes), because that is when the data is
-worth having.
-
-Everything is per-mode: the active-polling rate, the parked back-off, the cap,
-and how often secondary/GPS calls run.
+Super Eco keeps updating on its own, but starts where Eco tops out and
+reaches a two-hour ceiling after two quiet polls: roughly a dozen sessions a day
+for a parked car, against Eco's ~fifty, and a car parked for a fortnight is
+never woken at all, which spares its 12 V battery as well as your phone-app
+session. While charging or driving it speeds up to every 5 minutes.
+Pair it with **Refresh Data** in an automation when you want fresh data on your
+own schedule.
 
 ### ✋ Manual mode - sync only when you ask
 
-Manual runs **no timer at all**. Home Assistant never contacts the car on its
-own, so the phone app is never signed out by the integration. The trade is
-explicit: entity values stay exactly as old as your last sync, and there is no
-"is it plugged in yet?" without asking.
-
-A sync happens when - and only when - one of these occurs:
-
-- you press the **Refresh Data** button on the device page
-- something calls `homeassistant.update_entity` on any entity of the car
-  (a dashboard button, an automation, a schedule you define yourself)
-- **you send a command** - lock, climate, charging and the rest still poll
-  afterwards on their own, so the entity reflects what the car actually did
-
-Because syncs are rare in this mode, each one fetches **everything**: the full
-status, the secondary state and scheduled-charging data, and a fresh GPS
-position. The other modes ration those across cycles; Manual does not.
-
-Two things worth knowing before you pick it:
-
-- **Automations that read car state will act on stale data** unless they sync
-  first. Call `homeassistant.update_entity` at the start of the automation and
-  the data will be fresh for the conditions that follow.
-- **A failed sync is shown, not hidden.** The Refresh Data button reports the
-  error instead of silently leaving the old values on screen.
-
-Sync on your own schedule - this polls once an hour, and only during the day:
+Manual runs **no timer at all**: Home Assistant never contacts the car on its
+own, so the integration never signs the phone app out. A sync happens only when you press **Refresh Data**, when something
+calls `homeassistant.update_entity` on any of the car's entities, or after a
+command you send. Each sync fetches **everything**. Automations that read car
+state act on stale data unless they sync first, and a failed sync is shown on
+the Refresh Data button rather than hidden. Sync on your own schedule - this
+polls once an hour, during the day:
 
 ```yaml
 automation:
@@ -727,12 +589,41 @@ automation:
           entity_id: sensor.geely_ex5_4143_battery
 ```
 
-Other smart behaviour: **long-term statistics** (battery, range, consumption,
-pressures feed HA statistics + the Energy dashboard) and **ready-made
-Blueprints** in `blueprints/` (charging complete, a live lock-screen charging
-countdown, low battery, door/trunk left open, tire pressure out of range, left
-unlocked away from home, pre-condition climate before departure - weekly, or
-for a single trip you set the night before).
+---
+
+## 🎚️ Changing settings later
+
+Settings → Devices & Services → **Geely Connect** → **Configure** changes these
+at any time - no reinstall, no restart:
+
+- **Polling mode** (Super Eco / Eco / Normal / Live / Manual). Switching to
+  Manual stops the timer at once; switching away starts it again. No entity is
+  created or removed either way.
+- **Tire-pressure unit.** The four tire sensors are re-pointed, so their history
+  is kept.
+- **Usable battery capacity (kWh)** - optional, 0 by default. A real figure
+  switches *Range At Full Charge* to the range at this car's measured
+  consumption; see [Range at full charge](#-range-at-full-charge---two-honest-answers).
+- **Exterior temperature offset** - degrees added to that one entity, 0 by
+  default. Only worth setting if you have compared your own car against its own
+  cluster; see [Outside temperature](#outside-temperature).
+- **Full exposure** of every raw field - see [above](#-full-exposure-optional).
+
+### Which entities appear
+
+**Everything is on from the start** - everything the car reports, plus the
+computed extras. The main thing that varies by car is propulsion: the thirteen
+fuel and engine entities are created only for a car with a tank, so a
+battery-electric EX5 gets 88 entities and a PHEV gets 101. That is decided once
+at startup from your account's `powerType` and the car's own telemetry.
+
+- A car on the new **Geely EM** platform gets a few fewer; see
+  [the platform's own section](#the-new-geely-em-zeekr-platform--a-different-experimental-model).
+- **Unlock Frunk** appears only on a car whose capability catalogue names a front
+  trunk - so far the E2 and the EX2 Max
+  ([#72](https://github.com/YossiKon/geely-connect/issues/72)).
+- **Plugged In (reported)** appears only on cars whose catalogue declares the
+  E2's charging scheme ([#129](https://github.com/YossiKon/geely-connect/issues/129)).
 
 ---
 
@@ -740,22 +631,21 @@ for a single trip you set the night before).
 
 ### 📐 Finding your entity suffix
 
-For automations below, find your **entity suffix**: Settings → Devices &
-Services → Geely Connect → your car → click any entity. Your ids will look
-like `sensor.geely_ex5_4143_battery` - the device name always ends in the
+Settings → Devices & Services → Geely Connect → your car → click any entity.
+Your ids look like `sensor.geely_ex5_4143_battery` - the device name ends in the
 last four VIN characters - so there the suffix is `geely_ex5_4143`.
-`my_geely_ex5` in every file below is a **placeholder** - search-replace it
-with your own suffix.
+`my_geely_ex5` in every file and example below is a **placeholder**:
+search-replace it with your own suffix.
 
 ### 🤖 Automations - [`automations/`](automations/)
-Ready-to-paste automations. Append a file to your `automations.yaml`, or copy
-one entry at a time through the automation editor's ⋮ → **Edit in YAML**.
-Replace `notify.mobile_app_your_phone` with your own notifier.
 
-- **`automations/charging.yaml`** - charge finished, charge nearly finished
-  (uses the Charge Complete timestamp), a live lock-screen charging countdown
-  (ongoing notification with a ticking timer, Android companion app), low
-  battery, and "you forgot to plug in".
+Ready-to-paste automations. Append a file to your `automations.yaml`, or copy one
+entry at a time through the automation editor's ⋮ → **Edit in YAML**. Replace
+`notify.mobile_app_your_phone` with your own notifier.
+
+- **`automations/charging.yaml`** - charge finished, charge nearly finished, a
+  live lock-screen charging countdown (Android companion app), low battery, and
+  "you forgot to plug in".
 - **`automations/security.yaml`** - something left open, left unlocked after
   leaving, windows open with rain forecast, and a bedtime check.
 - **`automations/comfort-and-maintenance.yaml`** - weekday pre-heat, hot-cabin
@@ -764,41 +654,43 @@ Replace `notify.mobile_app_your_phone` with your own notifier.
 > The tire-pressure thresholds are in **psi**, matching the setup default.
 > Change them if you picked bar or kPa - the file says where.
 
-Prefer a UI? The same ideas are in [`blueprints/`](blueprints/) as importable
-blueprints - plus one that is only available there:
-**`blueprints/script/geely_connect/rapid_climate_with_seats.yaml`** builds a
-button that fires Rapid Cooling (or Warming) and then the seat vents or heaters,
-spaced out so the car accepts every command. See
-[Troubleshooting](#-troubleshooting--debugging) for why the spacing matters.
+### 🧩 Blueprints - [`blueprints/`](blueprints/)
+
+The same ideas as importable blueprints: charging complete, a live lock-screen
+charging countdown, low battery, door or trunk left open, tire pressure out of
+range, left unlocked away from home, and pre-conditioning before departure -
+weekly, or for a single trip you set the night before. One is only available
+here: **`blueprints/script/geely_connect/rapid_climate_with_seats.yaml`** builds
+a button that fires Rapid Cooling (or Warming) and then the seat vents or
+heaters, spaced out so the car accepts every command.
 
 ### 🖥️ Full dashboards - [`dashboards/`](dashboards/)
-A **dashboard** starts with `title:` / `views:` and is pasted via
-**Settings → Dashboards → Add dashboard → New dashboard from scratch → open →
-⋮ Edit → ⋮ Raw configuration editor → paste → Save** (NOT "Add card").
+
+A **dashboard** starts with `title:` / `views:` and is pasted via **Settings →
+Dashboards → Add dashboard → New dashboard from scratch → open → ⋮ Edit → ⋮ Raw
+configuration editor → paste → Save** (not "Add card").
 
 - **`dashboards/dashboard-premium.yaml`** - ⭐ four views (Overview with a map,
-  Charging, Climate, Trip & Health). Built-in HA cards only - and the Geely
-  cards above drop straight into any of them.
+  Charging, Climate, Trip & Health), built-in Home Assistant cards only. The
+  Geely cards drop straight into any of them.
 - **`dashboards/dashboard-builtin.yaml`** - a complete multi-section dashboard
-  using only built-in cards. No HACS needed.
+  using only built-in cards.
 
-> Any entity your car doesn't report shows as "unavailable" - just delete that
-> tile. The fuel, engine and electric-vs-petrol sections are the exception:
-> they hide themselves on a battery-only car, so leave them alone either way.
+Any entity your car doesn't report shows as "unavailable" - just delete that
+tile. The fuel, engine and petrol-versus-battery sections hide themselves on a
+battery-only car.
 
 ### 📱 Home-screen widgets - [`android-widgets/`](android-widgets/)
-Not dashboard cards. These are **Jinja templates** for the companion app's
-**Template widget**, which puts a live line of text on your phone's home screen.
-Pasting card YAML into that field shows you the YAML as text - different thing
-entirely. Start with **`all-in-one.jinja`**: lock, charge bar, charging and its
-finish time, what's open, any warning, and data age, all in one widget.
 
+**Jinja templates** for the companion app's **Template widget**, which puts a
+live line of text on your phone's home screen - not dashboard cards. Start with
+**`all-in-one.jinja`**: lock, charge bar, charging and its finish time, what's
+open, any warning, and data age, in one widget.
 
 ### ✍️ Copy-paste examples
 
 Replace `my_geely_ex5` with your suffix and `notify.mobile_app_xxxx` with your
-phone's notify service. Ready-made **Blueprints** for these live in
-[`blueprints/`](blueprints/) if you prefer a UI.
+phone's notify service.
 
 **Notify when charging finishes**
 ```yaml
@@ -891,59 +783,201 @@ automation:
           message: "Battery low ({{ states('sensor.my_geely_ex5_battery') }}%). Time to charge."
 ```
 
-Tip: press the **Refresh Data** button (or call `button.press` on
-`button.my_geely_ex5_refresh_data`) any time you want an immediate update.
+Tip: press **Refresh Data** (or call `button.press` on
+`button.my_geely_ex5_refresh_data`) whenever you want an immediate update.
+
+---
+
+## The new Geely EM (Zeekr) platform — a different, experimental model
+
+Geely released a separate new app on a new backend, so the setup form opens with
+a **platform picker**. The default is the existing backend, and an entry with no
+platform marker stays on it. The **Geely EM (Zeekr)** option is
+**experimental**.
+
+**What is verified.** On real Australian **EX2s**: the vehicle read (status,
+position and capabilities) and - for a migrated car addressed by its vehicle
+token - remote commands through the new gateway's own control route: find /
+lights (confirmed by two owners), windows, sunshade and vent, rapid heat / cool,
+G-Clean, seat and steering-wheel heat, defrost, the GPS position wake, and door
+lock / unlock, held back until a second owner had run the cycle on his own car,
+because a reversed mapping there would open a car instead of securing it. A
+service the catalogue does not cover answers with a clear "not mapped" error
+rather than a guessed body.
+
+**European Geely app.** Accounts using `com.geely.global` need the European
+identity and vehicle gateways, plus app keys supplied by the installation owner
+in a local file. Choose **Europe (requires local app keys)** in the new-app
+login's **New-app server region** field; country alone does not change servers,
+and existing new-app entries and the default selection stay on SEA. See
+[European setup](docs/LOCAL-EU-KEYS.md). Discovery and status reads were
+verified on an E2 in Spain and an E2 Max+ in France, where lock and unlock also
+moved the car ([#97](https://github.com/YossiKon/geely-connect/issues/97)).
+Other European markets and the other remote commands still need independent
+validation.
+
+**Migrated accounts.** When the official app moves an account onto the new
+platform, the old backend stops knowing the car, and every read answers
+`8060 The vehicle corresponding to the VIN does not exist`. Paste the app's
+`x-vin` header value into the advanced **Vehicle token** field (`zeekr_enc_vin`)
+at setup, or later under **Configure**, and the vehicle read and the commands
+above run against the new gateway directly. The token is redacted from logs and
+from the diagnostics report like every other credential.
+
+**A car the new gateway does not hold.** An account can sign in on the new app
+while the new gateway lists no car for it, or turns its car away (`079001`).
+On the cars seen so far the app then reaches that car by its plain VIN on the old
+route, and so does this integration: there is no token to paste, and neither the
+log nor a Repairs issue asks for one, unless the new gateway's vehicle list could
+not be read at that start. On such a car, an Australian EX5, the GPS position
+wake brought a fresh fix within 10 seconds of a 38-minute sleep, and rapid
+climate came on in the car ([#106](https://github.com/YossiKon/geely-connect/pull/106)).
+
+**Which entities differ.** The new platform's secondary-status endpoint is not
+mapped yet. With a vehicle token, *Scheduled Charging* (the switch and its two
+times), *Battery Temperature Maintenance* and the two *Scheduled Trip* sensors
+are built, read and written through the charge service - the gateway stores a
+new charging window only while the schedule is on, so a time change with it off
+is refused rather than lost - and *Parking Comfort* is left out. Without a token
+those six are left out instead, and Parking Comfort reads unknown.
+
+**Its security model is different**, and it is fair to say so plainly:
+
+- **No per-device mTLS certificate and no SPKI pins.** Connections are validated
+  against the public CAs with hostname checking, but the private-CA pinning that
+  protects the existing platform's control gateways does not apply here.
+- **It stores your Geely *account* password**, not a device key. The new
+  platform has no OTP-only login, and its session lasts about two days; the
+  integration renews it from the stored password, as the app does. The password
+  is redacted from logs and from the diagnostics report, and **encrypted at rest
+  (AES-256-GCM)** if you add a `geely_password_key` to `secrets.yaml` before
+  adding the entry - otherwise it is stored in plain text in Home Assistant's
+  `.storage`. You can decline to store it and re-authenticate by hand every
+  couple of days instead, or stay on the existing backend.
+
+---
+
+## 🌍 Supported regions
+
+This table describes the existing platform. For the new Geely app, see [the
+section above](#the-new-geely-em-zeekr-platform--a-different-experimental-model).
+
+| Area | Backend | Status |
+|---|---|---|
+| **EU / International** (and South African accounts, which resolve here) | `api.ecloudeu.com` | ✅ supported |
+| **NA** (US, CA, MX - and Brazilian accounts, which resolve here) | `api.ecloudus.com` | ✅ supported |
+| **APAC** (AU, NZ, JP, KR, SG, TH…) | `api.ecloudkr.com` | ✅ supported |
+| **UAE** (vehicle record names `AE`) | `tsp-geely-api-uae.xcloudsvc.com` | ⚠️ with your own app keys in a local file, not yet tried on a car ([setup](docs/LOCAL-REGION-KEYS.md)) |
+| **SA** | `tsp-geely-api-sa.xcloudsvc.com` | ❌ credentials not public |
+
+The area belongs to the **vehicle**, not to the country you pick at setup, so it
+is read from the login response and stored on the config entry. Login, the email
+code and the vehicle list are not regional in practice; certificate
+provisioning, the session exchange and control commands are. The login code must
+be minted by the same regional backend that will exchange it - a code from the
+wrong region is refused with an opaque `8500` - so NA accounts mint on
+`m-lcmsam-us.geely.com`, APAC on `m-lcmsam-kr.geely.com`, and everyone else on
+the EU host; a UAE car with local keys is set to mint on `m-lcmsam-ae.geely.com`
+by the same rule, not yet tried on a car. APAC details are in
+[`docs/APAC-SUPPORT.md`](docs/APAC-SUPPORT.md).
+
+A car in an area whose credentials are unknown stops the setup with a clear
+message naming the area, rather than failing later with the opaque
+`1501 geelyos verify error`. A UAE car does the same unless its owner has put that
+area's app id and secret in `geely_region_keys.json`; see [UAE and local app
+keys](docs/LOCAL-REGION-KEYS.md).
+
+---
+
+## 🔒 Security
+
+This section describes the existing platform. The new Geely EM platform has a
+different model, with no device certificate, no pins and a stored account
+password, set out in [its own section](#the-new-geely-em-zeekr-platform--a-different-experimental-model).
+
+Because this account can unlock and start your car, the transport is treated
+like a credential path rather than a convenience. Every connection is validated
+against the public CAs. The four Geely control gateways that use Geely's own
+private CA - `apis.ecloudeu.com`, `apis.ecloudus.com`, `apis.ecloudkr.com` and
+the UAE gateway `tsp-geely-apis-uae.xcloudsvc.com` - are each verified against a
+public-key pin that ships with the integration, so a man-in-the-middle is refused
+from the very first connection. All traffic goes to Geely's own servers, with
+no telemetry and no analytics. The one exception is the captcha at login: when
+Geely's captcha names an image host of GeeTest, the captcha's provider
+(`*.geetest.com`), its images are fetched from there.
+
+### What "hardened" means here
+
+| | How this integration handles it |
+|---|---|
+| **Certificate validation** | Strict public-CA validation with hostname checking on every connection. The private-CA fallback is allowlisted to the four known gateways, requires a private-CA verify code, and is permanently disabled for any host that has ever validated publicly, so a bad certificate cannot force a downgrade |
+| **Server identity** | SPKI public-key pins ship with the integration and are remembered on disk, so a swapped server key is caught across restarts, before any credential is sent |
+| **Logs & diagnostics** | Tokens, certificates and the captcha secret are masked; VIN, user ID, e-mail and device IDs are reduced to their last four characters - by key name, and also inside `{key, value}` parameter lists. The diagnostics download runs a second, independent pass and scrubs the VIN from free-text error messages |
+| **Request building** | The VIN, user ID and server-supplied headers are rejected if they contain CR/LF, so a hostile backend value cannot smuggle a second request onto the authenticated socket |
+| **Stored secrets** | The mTLS private key is created `0600` from the first byte, inside a `0700` directory |
+| **Identifiers** | VIN and user ID must match a strict charset before they reach a filesystem path or a request line |
+| **Re-authentication** | Signing in as a different Geely account is refused rather than silently rebinding the entry |
+
+**If Geely ever rotates a gateway's key**, you will see a `GeelyTLSPinError`
+naming the host and the key it presented. That is the pin doing its job: it
+cannot tell a legitimate rotation from an attacker, and neither can you from the
+error alone. So:
+
+1. **Do not pin the reported key.** If someone is intercepting your connection,
+   that key is *theirs*.
+2. [Open an issue](https://github.com/YossiKon/geely-connect/issues) with the
+   host and key from the error. A rotation hits everyone at once, so it is
+   quickly confirmed, and a release with the new pin ships. Meanwhile the
+   integration keeps showing the last known data - you lose remote commands, not
+   the car.
+3. Only if you must unblock yourself sooner: confirm the same key is reported
+   from a **different network** (e.g. a mobile hotspot instead of home Wi-Fi),
+   and only then add it to the `pins` list for that host in
+   `.storage/geely_connect/<VIN>/server_pins.json` and restart.
 
 ---
 
 ## 🩺 Troubleshooting & debugging
 
-Everything here is designed so a report can be complete on the first try. The
-car takes **one remote command at a time** and drops - not queues - whatever
-arrives while it is busy, so most puzzling behaviour is a timing story, and a
-timing story needs a timeline.
+The car takes **one remote command at a time** and drops - not queues - whatever
+arrives while it is busy (Home Assistant shows "the last request has not yet been
+executed"), so most puzzling behaviour is a timing story, and a
+timing story needs a timeline. Everything here is designed so a report can be
+complete on the first try.
 
 ### 1. Download the diagnostics
 
-**Settings → Devices & Services → Geely Connect → ⋮ → Download diagnostics.**
-It is a JSON file, redacted, and safe to attach to an issue. Home Assistant wraps
-it with your HA version and system info, the version of every custom component
-you have installed, this integration's manifest, and how long setup took - so
-"which version is this?" never needs asking. Under `data` is ours:
+**Settings → Devices & Services → Geely Connect → ⋮ → Download diagnostics.** It
+is a redacted JSON file, safe to attach to an issue. Home Assistant adds its own
+version, your custom components and this integration's manifest. Under `data`:
 
 | Section | What it answers |
 |---|---|
-| `vehicle_token` | On a Geely EM entry: whether the new platform's vehicle token is set in the entry, in its options, and in use - never the token itself. Without one, reads and commands go the old platform's way. `car_refused` is true when the new gateway turned the car away (`079001`): on the cars seen so far, such a car has no token to paste |
-| `polling` | Why the data is as old as it is. Poll cycle, how many polls in a row saw nothing change, the interval the adaptive logic settled on, whether the last fetch succeeded, and the last error |
-| `recent_commands` | The last 25 remote commands: what was sent, what came back, and how far apart. **This is the section that shows a command the car refused because it was still busy** - which leaves no other trace at all |
-| `logging` | Whether debug logging is actually on, so "I enabled it and got nothing" has an answer |
-| `capabilities` | The feature flags this trim advertises, as the integration derived them |
-| `capabilities_raw` | The capability catalog exactly as the server sent it. This is what answers "does this car support X at all, or is it only missing from the integration?" |
-| `capabilities_new_raw` | On a Geely EM entry read through its vehicle token: the new gateway's catalogue rows before translation, codes and labels included - the translated list above keeps only the codes the integration already knows ([#63](https://github.com/YossiKon/geely-connect/issues/63)). Empty on every other entry |
+| `polling` | Why the data is as old as it is: poll cycle, how many polls in a row saw nothing change, the interval the adaptive logic settled on, and the last error |
+| `recent_commands` | The last 25 remote commands: what was sent, what came back, and how far apart. **This is what shows a command the car refused because it was still busy** |
+| `logging` | Whether debug logging is actually on |
+| `capabilities` / `capabilities_raw` | The feature flags this trim advertises, and the catalogue exactly as the server sent it - "does this car support X at all, or is it only missing from the integration?" |
+| `capabilities_new_raw` | On a Geely EM entry read through its vehicle token, the new gateway's catalogue rows before translation ([#63](https://github.com/YossiKon/geely-connect/issues/63)) |
+| `vehicle_token` | On a Geely EM entry: whether a vehicle token is set and in use - never the token itself. `car_refused` is true when the new gateway turned the car away (`079001`) |
 | `status` | The full vehicle payload behind every sensor |
-| `charge_server` | The car's schedule slots, read live when you press the button. Three of them are known - the Scheduled trip (4), Scheduled Charging (6, or 2 on an E2) - and the rest of the range is read because a feature nobody has located may be sitting in one. A slot that does not exist answers with an error, and that is recorded rather than hidden |
+| `charge_server` | The car's schedule slots, read live when you download |
 | `cards` | Whether the dashboard cards are being served, and from where |
 
-**What is removed:** tokens, certificates, the captcha secret, and the mTLS key
+**What is removed:** tokens, certificates, the captcha secret and the mTLS key
 material outright; VIN, user ID, e-mail and device IDs down to their last four
-characters. Two independent passes run over the whole report - the
-integration's own, which matches key names *and* the `{key, value}` parameter
-shape where the field name is itself a value, and then Home Assistant's, which
-matches key names. Neither can see a VIN sitting inside a sentence, so error
-messages are scrubbed for it separately, where they are recorded and again where
-they are reported. Tests assert that none of it survives - see
-`tests/test_diagnostics.py`, `tests/test_redaction.py`.
+characters; and the GPS location. Two independent passes run over the whole
+report, and error messages are scrubbed for the VIN separately; tests assert
+that none of it survives (`tests/test_diagnostics.py`, `tests/test_redaction.py`).
 
-**What stays, so you know what you are sharing:** which commands you sent and
-when, your polling mode, your car's feature list, its current state including
-tire pressures and battery level, and any charging or comfort schedule times
-the car is holding. No location - GPS is redacted.
+**What stays, so you know what you are sharing:** which commands you sent and when, your polling mode, your car's
+feature list, its current state (tire pressures, battery level and so on), and
+any charging or comfort schedule times the car holds.
 
 ### 2. Turn on debug logging when the timing matters
 
-The integration page's ⋮ menu has **Enable debug logging**; press it, reproduce
-the problem, then **Disable debug logging** and Home Assistant hands you the log
-slice as a download. For a longer window, put this in `configuration.yaml`:
+The integration page's ⋮ menu has **Enable debug logging**: press it, reproduce
+the problem, then **Disable debug logging**, and Home Assistant hands you the log
+as a download. For a longer window, put this in `configuration.yaml`:
 
 ```yaml
 logger:
@@ -960,328 +994,71 @@ to attach as the diagnostics file.
 Three admin-only actions in **Developer Tools → Actions**, for feature work rather
 than daily use:
 
-- **`geely_connect.fire_control`** - any `serviceId` + parameters through the
-  telematics endpoint. This is how the tailgate and steering-wheel candidates
-  get tested - though the steering wheel is also the cautionary tale: two
-  rounds of guessed candidates were all accepted and did nothing, and the
-  real command only surfaced when an owner captured the app itself (#4).
-  `latest: true` sends the app's other body shape (a `latest` flag instead of
-  the scheduling block), which an E2's app was captured using for its frunk
-  (#72). The ordinary body opened the frunk on an EX2 Max and on an E2 all
-  the same.
-- **`geely_connect.fire_rapid`** - the compound rapid warm/cool body, with the
+- **`geely_connect.fire_control`** - any `serviceId` and parameters through the
+  telematics endpoint. `latest: true` sends the app's other body shape.
+- **`geely_connect.fire_rapid`** - the compound rapid warm / cool body, with the
   seat positions, level and any extra field you choose.
-- **`geely_connect.set_scheduled_trip`** - the app's **Scheduled trip** toggle
-  (the schedule that carries Cabin Comfort and Battery Temperature
-  Maintenance), `start` or `stop`, with an optional `departure`. The request is
-  the app's own, captured on a real EX5 in both directions (#4). The car's
-  current schedule is read first and sent back unchanged apart from what you
-  set, so a departure is never invented - with no schedule on the car and no
-  departure given, nothing is sent, and a `start` with no departure reuses the
-  car's only while it is still ahead. **Confirmed on a Starray EM-i** in both
-  directions (#4). `start` arms a one-off trip; it cannot re-arm a weekday
-  schedule set in the app. Judge it by the app's own Scheduled trip screen.
+- **`geely_connect.set_scheduled_trip`** - the app's **Scheduled trip** toggle,
+  `start` or `stop`, with an optional `departure`. The car's current schedule is
+  read first and sent back unchanged apart from what you set, so a departure is
+  never invented. Confirmed on a Starray EM-i in both directions
+  ([#4](https://github.com/YossiKon/geely-connect/issues/4)).
 
 > ⚠️ **A "Success" here proves nothing.** The gateway answers `code 1000` to any
 > well-formed request, including one naming a seat position the car does not
-> recognise - that is exactly the open question in
-> [#19](https://github.com/YossiKon/geely-connect/issues/19). Fire it, wait,
-> then look at whether an **entity actually moved**. Both actions poll the car
-> twice afterwards so the answer lands in the entity history.
+> recognise ([#19](https://github.com/YossiKon/geely-connect/issues/19)). Fire it, wait, then
+> look at whether an **entity actually moved** - both actions poll the car twice
+> afterwards so the answer lands in the entity history.
 
 ### Rapid warming / cooling and the seats
 
-The presets ask for the front seats inside the same single request they use for
-the cabin - heat when warming, ventilation when cooling, both at the highest
-level, with the setpoint driven to the lowest or highest temperature the car
-advertises. On a car that shows evidence of a heated steering wheel, rapid
-warming also carries `sw: "true"`, matching the app's own captured body (#4);
-every other car sends the body exactly as before.
-
-An owner reported the cabin warming and the seats staying cold, and for a while
-the suspicion was the seat position encoding. **It is not.** He fired the exact
-same request by hand with `fire_rapid` and both seats went to high, so the
-positions the presets send are correct and the request was never the problem.
-What differed between the two paths was the read-back: the preset polled the car
-once, eight seconds after firing, and the seat state arrives in the car's own
-time - so the seat *entities* could read Off while the seats were warming, with
-nothing polling again to correct them. The presets poll twice now.
-
+The rapid presets ask for the front seats inside the same single request they
+use for the cabin, which is what the official app does. If the cabin warms but a
+seat entity reads Off, give it a moment: the seat state arrives in the car's own
+time, and the presets poll twice afterwards to catch it. If your car genuinely
+ignores the bundled seat request,
 [`blueprints/script/geely_connect/rapid_climate_with_seats.yaml`](blueprints/script/geely_connect/rapid_climate_with_seats.yaml)
-is still there if your car genuinely ignores the bundled seat block: it fires the
-preset and then the individual Seat Heat / Seat Vent entities, spaced out so the
-car accepts every command.
+fires the preset and then the individual seat entities, spaced out so the car
+accepts every command.
 
 **Fan speed is not available.** No field for the blower exists anywhere in this
-API - not in the accepted parameters of the rapid command, and not as a
-capability this car advertises. When the app's rapid cooling runs the fan hard,
-that is the car's own program, not something the request asks for. If a future
-`capabilities_raw` from any trim shows otherwise, that changes.
-
----
-
-## 🔒 Security
-
-Security was a first-class goal of this build. Every connection is validated
-against the public CAs. The four Geely control gateways that use Geely's own
-private CA - `apis.ecloudeu.com`, `apis.ecloudus.com`, `apis.ecloudkr.com` and
-the UAE gateway `tsp-geely-apis-uae.xcloudsvc.com` - are each verified
-against a public-key pin that ships with the integration, so they are checked
-from the very first connection and a man-in-the-middle is refused rather than
-trusted. No other host may use that fallback, and a host that has validated
-publicly once can never be pushed onto it. Credentials are stored with owner-only access, secrets are masked in logs
-and in the diagnostics report, and all traffic goes only to Geely's own servers
-- no telemetry, no third parties.
-
-If Geely ever rotates one of these gateways' keys you will see a `GeelyTLSPinError`
-naming the host and the key it presented. That is the pin doing its job - it
-cannot tell a legitimate rotation from an attacker, and neither can you from
-the error alone. So:
-
-1. **Do not pin the reported key.** If the error was caused by someone
-   intercepting your connection, that key is *theirs*, and pinning it would
-   hand them exactly the trust the pin exists to withhold.
-2. [Open an issue](https://github.com/YossiKon/geely-connect/issues) with the
-   host and key from the error. A rotation hits everyone at once, so it is
-   quickly confirmed from other reports and networks, and a release with the
-   new pin ships. The integration keeps showing the last known data meanwhile
-   - you lose remote commands, not the car.
-3. Only if you must unblock yourself sooner: confirm the same key is reported
-   from a **different network** (e.g. mobile hotspot instead of home Wi-Fi -
-   an attacker rarely controls both), and only then add it to the `pins` list
-   for that host in `.storage/geely_connect/<VIN>/server_pins.json` and
-   restart.
-
-### What "hardened" means here
-
-Because this account can unlock and start your car, the transport gets treated
-like a credential path rather than a convenience:
-
-| | How this integration handles it |
-|---|---|
-| **Certificate validation** | Strict public-CA validation with hostname checking on every connection. The private-CA fallback is allowlisted to the four known gateways, requires a private-CA verify code, and is permanently disabled for any host that has ever validated publicly - so a bad certificate cannot force a downgrade |
-| **Server identity** | SPKI public-key pins ship with the integration and are remembered on disk, so a swapped server key is caught across restarts, before any credential is sent |
-| **Logs & diagnostics** | Tokens, certificates and the captcha secret are masked; VIN, user ID, e-mail and device IDs are reduced to their last four characters. Masking matches key *names* and also the `{key, value}` parameter shape, where the field name is itself a value and a name-only pass sees nothing - the same blind spot that let the VIN out through a scheduled-charging field once. The diagnostics download runs a second, independent pass and scrubs the VIN from free-text error messages, so a bug report is safe to attach |
-| **Request building** | The VIN, user ID and server-supplied headers are rejected if they contain CR/LF, so a hostile backend value cannot smuggle a second request onto the authenticated socket |
-| **Stored secrets** | The mTLS private key is created `0600` from the first byte - never briefly world-readable - inside a `0700` directory |
-| **Identifiers** | VIN and user ID must match a strict charset before they reach a filesystem path or a request line |
-| **Re-authentication** | Signing in as a different Geely account is refused rather than silently rebinding the entry |
-| **Where data goes** | Only Geely's own servers. No telemetry, no analytics, no third-party host |
-
-### The new Geely EM (Zeekr) platform — a different, experimental model
-
-Geely released a separate new app on a new backend, and the setup form now opens
-with a **platform picker**. The default is the existing backend and nothing
-changes for current installs — an entry with no platform marker stays on the
-legacy path. The new **Geely EM (Zeekr)** option is **experimental**, but no
-longer a single-account story. Live-verified on real Australian **EX2s** today:
-the vehicle read (status, position and capabilities), and - for a migrated car
-addressed by its vehicle token - remote
-commands through the new gateway's own control route: find / lights (confirmed
-by two owners), windows, sunshade and vent, rapid heat / cool, G-Clean, seat
-and steering-wheel heat, defrost, the GPS position wake, and - since v1.51.0 -
-**door lock / unlock**. That last one was held back from August until a second
-owner had run the cycle on his own car, because a reversed mapping there opens
-a vehicle instead of securing it; two Australian EX2s now lock and unlock as
-mapped. A service the catalogue does not cover still answers with a clear "not
-mapped" error rather than sending a guessed body to a car.
-
-**European Geely app.** Accounts using `com.geely.global` need the European
-identity and vehicle gateways, plus app keys supplied by the installation
-owner in a local file. Choose **Europe (requires local app keys)** in the new-app
-login's **New-app server region** field; country alone does not change servers.
-Existing new-app entries and the default selection stay on SEA.
-See [European setup](docs/LOCAL-EU-KEYS.md). Discovery
-and status reads were verified on an E2 in Spain with Android app 1.1.1, and on
-an E2 Max+ in France, where lock and unlock also moved the car on v1.56.0
-([#97](https://github.com/YossiKon/geely-connect/issues/97)); other European
-markets and the other remote commands still need independent validation.
-
-**Migrated accounts.** When the official app moves an account onto the new
-platform, the old backend stops knowing the car - every read answers
-`8060 The vehicle corresponding to the VIN does not exist`. Setup still works:
-paste the app's `x-vin` header value into the advanced **Vehicle token**
-field (`zeekr_enc_vin`) at setup, or later from **Configure**, and the vehicle
-read and the commands above run against the new gateway directly. The token is
-redacted from logs and from the diagnostics report like every other credential.
-
-**A car the new gateway does not hold.** An account can sign in on the new app
-while the new gateway lists no car for it, or turns its car away (`079001`).
-On the cars seen so far the app then reads and commands that car by its plain
-VIN on the old route, and so does this integration: there is no token to
-paste, the log does not ask for one, and neither does a Repairs issue, unless
-the new gateway's vehicle list could not be read at that start. The GPS
-position wake and rapid heat / cool go out in the bodies the iOS app was
-captured sending to such a car, an Australian EX5: there the wake brought a
-fresh fix within 10 seconds of a 38-minute sleep, and rapid climate came on in
-the car ([#106](https://github.com/YossiKon/geely-connect/pull/106)).
-
-Its security model is genuinely different from the legacy one above, and it is
-only fair to state that plainly:
-
-- **No per-device mTLS certificate and no SPKI pins.** Connections are validated
-  against the public CAs with hostname checking on, but the private-CA pinning
-  that protects the legacy control gateways does not apply here — those
-  hosts have not had their leaf keys captured.
-- **It stores your Geely *account* password**, not a device key. The new
-  platform has no OTP-only login, and the session it issues lasts ~2 days; the
-  integration renews it silently from the stored password exactly as the app
-  does. That password is **redacted from logs and from the diagnostics report**,
-  and is **encrypted at rest (AES-256-GCM)** if you add a `geely_password_key`
-  to `secrets.yaml` — otherwise it is stored in plain text in Home Assistant's
-  `.storage`, the same place the legacy mTLS key lives. You can decline to store
-  it and re-authenticate manually every couple of days instead.
-
-If keeping your account password out of `.storage` matters to you, set the
-`secrets.yaml` key before adding the entry, or stay on the legacy backend.
-
----
-
-## 🌍 Supported regions
-
-The following table describes the **legacy platform**. For the new Geely app,
-see [European setup](docs/LOCAL-EU-KEYS.md) and the platform section above.
-
-Geely runs a separate backend per area, each with its **own app credentials**:
-
-| Area | Backend | Status |
-|---|---|---|
-| **EU / International** (and South African accounts, which resolve here) | `api.ecloudeu.com` | ✅ supported |
-| **NA** (US, CA, MX - and Brazilian accounts, which resolve here) | `api.ecloudus.com` | ✅ supported |
-| **APAC** (AU, NZ, JP, KR, SG, TH…) | `api.ecloudkr.com` | ✅ supported |
-| **UAE** (vehicle record names `AE`) | `tsp-geely-api-uae.xcloudsvc.com` | ⚠️ with your own app keys in a local file, not yet tried on a car ([setup](docs/LOCAL-REGION-KEYS.md)) |
-| **SA** | `tsp-geely-api-sa.xcloudsvc.com` | ❌ credentials not public |
-
-The area belongs to the **vehicle**, not to the country you pick at setup - the
-two can differ - so it is read from the login response
-(`tspInfo[].serviceRegion`, falling back to `edgeInfo.code`, then the vehicle
-record's top-level `serviceRegion`, then `saleMarket`/`tcamMarket` - APAC
-accounts have `"AP"` - and finally a safe EU default) and stored on the
-config entry. Login, the email code and the vehicle list are not regional in
-practice; only certificate provisioning, the session exchange and control
-commands are.
-
-One rule turned out to hold everywhere: **the login code must be minted by
-the same regional backend that will exchange it.** A code from the wrong
-region is refused with an opaque `8500`, which is what stopped Brazilian
-accounts until the mint host was made to follow the region - NA accounts now
-mint on `m-lcmsam-us.geely.com`, APAC on `m-lcmsam-kr.geely.com`, everyone
-else on the EU host. A UAE car with local keys is set to mint on
-`m-lcmsam-ae.geely.com` by the same rule, not yet tried on a car.
-
-APAC specifics: the session exchange runs on the **public** host
-`api.ecloudkr.com` at `/auth-center/account/session` (not on the mTLS control
-host), requires `receiverId` (the login email) in the body, an
-`Accept: application/json; charset=utf-8` header and **uppercase**
-`X-SIGNATURE`/`X-TIMESTAMP` signature headers. See `docs/APAC-SUPPORT.md` for
-the full write-up.
-
-A car in an area whose credentials are unknown stops the setup with a clear
-message naming the area, rather than being signed against the European backend
-and failing with the opaque `1501 geelyos verify error` that the upstream
-project reports. Adding SA needs that area's app id and secret. A UAE car does
-the same unless its owner has put that area's app id and secret in
-`geely_region_keys.json`; see [UAE and local app keys](docs/LOCAL-REGION-KEYS.md).
-
----
-
-## 🎚️ Changing settings later
-
-Settings → Devices & Services → **Geely Connect** → **Configure** changes the
-**polling mode** (Super Eco / Eco / Normal / Live / Manual) and **tire-pressure unit** at
-any time - no reinstall, no restart. Changing the pressure unit also re-points
-the four existing tire sensors, so history is kept rather than restarting.
-
-Switching to **Manual** stops the timer immediately, and switching away from it
-starts polling again - no entity is created or removed either way, so history
-and automations are untouched.
-
-**Exterior temperature offset** lives here too - degrees added to that one
-entity, 0 by default. Only worth setting if you have compared your own car
-against its own cluster; see [Outside
-temperature](#outside-temperature).
-
-**Usable battery capacity (kWh)** lives here too. It is optional and 0 by
-default; a real figure switches *Range At Full Charge* from the car's own
-optimistic estimate to the range at this car's measured consumption. See
-[Range at full charge](#-range-at-full-charge---two-honest-answers) for the
-per-trim pack sizes.
-
-### Which entities appear
-
-**Everything is on from the start** - nothing is hidden and nothing needs
-enabling. Everything the car reports, plus the computed extras above.
-
-The main thing that varies by car is propulsion: the thirteen fuel and engine
-entities are created only for a car with a tank, so a battery-electric EX5 gets
-88 entities and a PHEV gets 101. That's a decision made once at startup from your
-account's `powerType` plus the car's own telemetry - there is no option to set.
-
-A car on the new Geely EM platform gets a few fewer. Its secondary-status
-endpoint is not mapped yet. With a vehicle token its schedules are read and
-written through the new gateway's charge service, so *Scheduled Charging* (the
-switch and its two times), *Battery Temperature Maintenance* and the two
-*Scheduled Trip* sensors are built; the gateway stores a new charging window
-only while the schedule is on, so a time change with it off is refused rather
-than lost. Without a token those six are left out rather than built to read
-unknown - and with a token, *Parking Comfort* is left out, its command not
-being mapped on that route. Without a token
-its switch is there, because the command goes out the old way, but it reads
-unknown: the state it shows lives in the secondary status.
-
-One button goes the other way. **Unlock Frunk** is created only on a car whose
-capability catalogue names a front trunk, which so far means the E2 and the
-EX2 Max ([#72](https://github.com/YossiKon/geely-connect/issues/72)); every other car,
-and any car whose catalogue could not be read, goes without it.
-
-The only thing not created is the raw full-exposure pass (see below), because
-those are duplicates of the curated entities by definition. Two aggregates that
-restated entities already on the list - a "lowest tire pressure" and a "service
-due" date - were removed rather than shipped alongside the four pressures and
-the two service counters.
-
-> The window, sunroof and sunshade controls are live. They are ordinary
-> dashboard controls, so put them somewhere you won't hit them by accident.
+API. When the app's rapid cooling runs the fan hard, that is the car's own
+program, not something the request asks for.
 
 ---
 
 ## ⚠️ Known limitations
 
 ### One session per account
-When Home Assistant logs in, the phone app is signed out, and vice-versa. If it
-happens, HA shows a **Reconfigure** prompt - request a fresh code and
+
+When Home Assistant logs in, the phone app is signed out, and vice versa. If it
+happens, Home Assistant shows a **Reconfigure** prompt: request a fresh code and
 re-authenticate. Tip: run the first setup on a network you trust.
 
 ### Temperature: the car stops reporting when it sleeps
 
-This is the mechanism behind every temperature complaint, and it is worth reading
-before the numbers below. An owner graphed his EX5's **exterior and interior**
-temperatures against two real sensors over 24 hours. Both Geely lines sat
-perfectly flat - the outside one at 35 °C - from midnight until 14:00, while the
-real air went from 13 down to 9 and back up to 19. They moved only when he shifted
-the car a couple of metres.
+**A parked Geely stops reporting.** The cloud keeps serving its last snapshot,
+every poll faithfully republishes it, and Home Assistant draws that as a
+confident flat line that reads like a live measurement. One owner graphed his
+EX5's exterior and interior temperatures against two real sensors over a day:
+both Geely lines sat flat from midnight until 14:00 while the real air moved by
+ten degrees.
 
-**A parked Geely stops reporting.** The cloud keeps serving its last snapshot, a
-poll every thirty seconds faithfully republishes it, and Home Assistant's recorder
-draws that as a confident flat line which reads exactly like a live measurement.
-It is history.
+Two things let you see this rather than guess at it:
 
-Two entities exist so you can see this rather than guess at it:
-
-- **Car Reported At** - the car's own timestamp on the snapshot, from a field
-  nothing read until v1.32.0. `Last Updated` is *our* clock and advances on every
-  poll; this one only advances when the car actually says something.
+- **Car Reported At** - the car's own timestamp on the snapshot. *Last Updated*
+  is the integration's clock and advances on every poll; this one advances only
+  when the car actually says something.
 - **Interior / Exterior Temperature** carry `car_reported_at` and `age_minutes`
-  attributes, because those are the two readings people hold a thermometer
-  against.
+  attributes.
 
-If a temperature looks wrong, check its age first. Fourteen hours old explains
-most of it.
+If a temperature looks wrong, check its age first.
 
 ### Outside temperature
-On top of the staleness, the `exteriorTemp` field is *also* offset on every car
-anyone has measured, and the shape of that error is now well characterised. Six synchronised readings -
-a photograph of the car's own cluster beside the same minute's payload:
+
+On top of the staleness, the `exteriorTemp` field is also offset on every car
+anyone has measured. Six synchronised readings - a photo of the car's own cluster
+beside the same minute's payload:
 
 | Car | Situation | Cluster / real | Reported | Delta |
 |---|---|---|---|---|
@@ -1292,50 +1069,31 @@ a photograph of the car's own cluster beside the same minute's payload:
 | EX5 (E245) | after driving | 22 °C | 32.0 | **+10.0** |
 | Starray (P145) | **parked for hours** | 19.7 °C | 10 | **−9.7** |
 
-Five of the six are *exactly* +10.0, on two different platforms. The sixth is the
-reason there is still no automatic correction: on a car that had stood for hours
-the field read ten degrees the **other** way, and it returned to the same 10
-every time that car was parked. A blanket −10 would have turned that reading into
-0 °C - which is why the one shipped in v1.21.4 was retracted a day later.
+Five of the six are exactly +10.0, on two platforms; the sixth went ten degrees
+the **other** way on a car that had stood for hours. A blanket correction would
+have turned that reading into 0 °C, so the value is **passed through untouched**.
+The exception is a reading the car itself disowns: the EX2 and the E2 send
+`exteriorTempValidity`, and while it is false the entity reads **unknown** - those
+cars published 110-131 °C on mild days with the flag false
+([#24](https://github.com/YossiKon/geely-connect/issues/24),
+[#72](https://github.com/YossiKon/geely-connect/issues/72)).
 
-The likeliest reading of all six is that the field is live only while the car is
-awake, and holds some other value once it has been sitting - but nobody has
-proved that, and the integration does not guess. **It is passed through
-untouched.**
-
-The one exception is a reading the car itself disowns. The EX2 and the E2 send
-`exteriorTempValidity` beside the number, and while it reads false the number
-is not a measurement: an EX2 in Colombia published 130-131 °C on a 25-28 °C day
-([#24](https://github.com/YossiKon/geely-connect/issues/24)) and a South African
-E2 110-130 °C ([#72](https://github.com/YossiKon/geely-connect/issues/72)),
-both with the flag false. The entity reads **unknown** then - no offset could
-correct a value that was never measured. A car that does not send the flag is
-unaffected.
-
-**What you can do about it**
+What you can do:
 
 - **If you have measured your own car** against its cluster and the offset is
-  consistent, set **exterior temperature offset** in Configure (see [Changing
-  settings later](#%EF%B8%8F-changing-settings-later)). It is yours, not ours:
-  0 for everyone who has not measured, applied to that one entity and nothing
-  else.
-- **The tyre temperatures are a better ambient proxy on a car that has stood a
-  while.** All four are now real entities - they come from the same TPMS sensors
-  as the pressures and were sitting in the payload unread. In the diagnostics
-  behind the table above they read 19-21 °C while `exteriorTemp` said 25 and the
-  cluster said 15. They are not an air thermometer, and a drive warms them - but
-  on a cold car they are the closest thing this payload has.
+  consistent, set **Exterior temperature offset** under
+  [Configure](#%EF%B8%8F-changing-settings-later).
+- **On a car that has stood a while, the tire temperatures are a better ambient
+  proxy** - they come from the same TPMS sensors as the pressures. A drive warms
+  them, though.
 - **For automations that need real outside air**, use one of Home Assistant's
   [weather integrations](https://www.home-assistant.io/integrations/#weather).
-  That is still the honest answer.
 
 ### Inside temperature
-Worth stating plainly, because it gets mentioned in the same breath: **nobody has
-reported the cabin reading being wrong**, and it holds up in the same diagnostics
-that condemn the outside one - 21.1 °C and 26.5 °C in cars whose real ambient was
-15 °C and 24 °C, which is what a closed cabin does. It updates on the same poll
-as everything else, so a parked car's cabin reading ages with the rest of the
-payload rather than freezing on its own.
+
+Nobody has reported the cabin reading being wrong, and it holds up in the same
+diagnostics that condemn the outside one. It updates on the same poll as
+everything else, so a parked car's cabin reading ages with the rest of the data.
 
 ---
 
@@ -1350,16 +1108,16 @@ custom_components/geely_connect/   the integration itself (what HACS installs)
 └── *.py                           platforms, API client, config flow, …
 automations/                       ready-to-paste automations
 blueprints/automation/             the same ideas as importable blueprints
-blueprints/script/                 rapid warm/cool including the seats, spaced
-dashboards/                        full dashboards (paste in Raw config editor)
-docs/images/                       the card screenshots in this README
+blueprints/script/                 rapid warm / cool including the seats, spaced
+dashboards/                        full dashboards (paste in the Raw configuration editor)
+android-widgets/                   home-screen widget templates for the companion app
+docs/                              regional setup notes and the card screenshots
 hacs.json                          HACS metadata
 ```
 
-The icon and logo live in `custom_components/geely_connect/brand/`. Since Home
-Assistant 2026.3 a custom integration serves its own brand images from there
-and they take priority over the CDN, so no `home-assistant/brands` submission
-is needed. On older versions the folder is simply ignored.
+Since Home Assistant 2026.3 a custom integration serves its own brand images from
+`brand/`, so no `home-assistant/brands` submission is needed; older versions
+simply ignore the folder.
 
 ---
 
