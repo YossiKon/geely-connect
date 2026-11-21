@@ -271,6 +271,8 @@
       "status.no_vehicle_body": "No Geely vehicle found. Set <code>prefix:</code> to your entity slug, e.g. <code>my_geely_ex5</code> for <code>sensor.my_geely_ex5_battery</code>.",
       "status.no_vehicle_title": "Geely Connect",
       "status.parked_locked": "Parked · Locked",
+      "status.tire_low": "Tire pressure low",
+      "status.tire_flat": "Puncture · check tire",
       "status.render_failed": "Render failed: {error}",
       "tooltip.charging_toggle": "Start / stop charging",
       "tooltip.cooler": "Cooler",
@@ -292,6 +294,8 @@
       "topview.closed": "Closed",
       "topview.open": "Open",
       "topview.unknown": "—",
+      "topview.tire_low": "LOW",
+      "topview.tire_flat": "FLAT",
     },
     th: {
       "action.charging": "ชาร์จ",
@@ -381,6 +385,8 @@
       "status.no_vehicle_body": "ไม่พบรถ Geely ตั้งค่า <code>prefix:</code> เป็นชื่อเอนทิตีของคุณ เช่น <code>my_geely_ex5</code> สำหรับ <code>sensor.my_geely_ex5_battery</code>",
       "status.no_vehicle_title": "Geely Connect",
       "status.parked_locked": "จอดอยู่ · ล็อกแล้ว",
+      "status.tire_low": "ลมยางต่ำ",
+      "status.tire_flat": "ยางรั่ว · ตรวจสอบยาง",
       "status.render_failed": "แสดงผลไม่สำเร็จ: {error}",
       "tooltip.charging_toggle": "เริ่ม / หยุดการชาร์จ",
       "tooltip.cooler": "เย็นลง",
@@ -402,6 +408,8 @@
       "topview.closed": "ปิด",
       "topview.open": "เปิด",
       "topview.unknown": "—",
+      "topview.tire_low": "ต่ำ",
+      "topview.tire_flat": "แบน",
     },
     it: {
       "action.charging": "Ricarica",
@@ -491,6 +499,8 @@
       "status.no_vehicle_body": "Nessun veicolo Geely trovato. Imposta <code>prefix:</code> con il tuo suffisso entità, es. <code>my_geely_ex5</code> per <code>sensor.my_geely_ex5_battery</code>.",
       "status.no_vehicle_title": "Geely Connect",
       "status.parked_locked": "Parcheggiata · Bloccata",
+      "status.tire_low": "Pressione pneumatici bassa",
+      "status.tire_flat": "Foratura · controlla lo pneumatico",
       "status.render_failed": "Rendering non riuscito: {error}",
       "tooltip.charging_toggle": "Avvia / interrompi la ricarica",
       "tooltip.cooler": "Più fresco",
@@ -512,6 +522,8 @@
       "topview.closed": "Chiuso",
       "topview.open": "Aperto",
       "topview.unknown": "—",
+      "topview.tire_low": "BASSA",
+      "topview.tire_flat": "FORATA",
     },
     bg: {
       "action.charging": "Зареждане",
@@ -601,6 +613,8 @@
       "status.no_vehicle_body": "Не е намерен автомобил Geely. Задайте <code>prefix:</code> с идентификатора на обектите си, напр. <code>my_geely_ex5</code> за <code>sensor.my_geely_ex5_battery</code>.",
       "status.no_vehicle_title": "Geely Connect",
       "status.parked_locked": "Паркирана · Заключена",
+      "status.tire_low": "Ниско налягане в гумите",
+      "status.tire_flat": "Спукана гума · проверете",
       "status.render_failed": "Грешка при показване: {error}",
       "tooltip.charging_toggle": "Старт / стоп на зареждането",
       "tooltip.cooler": "По-студено",
@@ -622,6 +636,8 @@
       "topview.closed": "Затворено",
       "topview.open": "Отворено",
       "topview.unknown": "—",
+      "topview.tire_low": "НИСКО",
+      "topview.tire_flat": "СПУКАНА",
     },
   };
 
@@ -848,98 +864,236 @@
       <circle class="hubcap" r="8"/>`;
 
 
-  /* Top view for the cockpit card - the same EX5 proportions (4615 x 1901
-   * mm), front pointing up. Every openable part carries its status right
-   * where it sits on the body: pressures beside each wheel, doors on their
-   * sills, hood / sunroof / trunk on their panels. */
+  /* Top view for the cockpit card: the EX5 from above, 4615 x 1901 mm, front
+   * up. It has a tapered nose and tail, a raked windscreen with wipers, side
+   * glass on the doors, a glass roof whose front pane slides back, and a
+   * tailgate hinged at the roof's end. Each door swings on its front hinge.
+   * An open window shows its gap. The hood and the tailgate rise toward the
+   * viewer. The live state arrives as classes on the root (see
+   * GeelyCardTop._topClasses), so a change animates instead of jumping. Words
+   * sit where they always have: pressures beside each wheel, doors by their
+   * sills, hood, sunroof and boot on their panels. */
+  const TOP_BODY = "M200 34 C162 34 128 37 108 44 C90 50 79 62 74 80 C71 92 70 110 69.5 130 " +
+    "C69 150 69 175 70 200 C70.8 215 72 230 72 250 C72 320 72 400 72 460 C72 480 70.5 495 69.5 515 " +
+    "C69 540 69 565 70 590 C71 615 74 638 82 656 C92 675 124 686 200 687 C276 686 308 675 318 656 " +
+    "C326 638 329 615 330 590 C331 565 331 540 330.5 515 C329.5 495 328 480 328 460 C328 400 328 320 " +
+    "328 250 C328 230 329.2 215 330 200 C331 175 331 150 330.5 130 C330 110 329 92 326 80 " +
+    "C321 62 310 50 292 44 C272 37 238 34 200 34 Z";
+  const TOP_HOOD = "M120 50 C150 44 250 44 280 50 C290 95 297 150 300 208 C250 203 150 203 100 208 " +
+    "C103 150 110 95 120 50 Z";
+  const TOP_WIND = "M99 215 C150 210 250 210 301 215 L290 316 C250 310 150 310 110 316 Z";
+  const TOP_ROOF = "M110 316 C150 310 250 310 290 316 L291.6 430 C291.6 490 289 540 284 572 " +
+    "C250 578 150 578 116 572 C111 540 108.4 490 108.4 430 Z";
+  const TOP_GLASSROOF = "M118 324 C152 319 248 319 282 324 L283.6 430 C283.6 486 281.6 532 278 560 " +
+    "C248 565 152 565 122 560 C118.4 532 116.4 486 116.4 430 Z";
+  const TOP_GATE = "M116 573 C150 579 250 579 284 573 L291 608 C294 630 292 648 285 662 " +
+    "C258 671 142 671 115 662 C108 648 106 630 109 608 Z";
+  const TOP_REARWIN = "M116 575 C150 581 250 581 284 575 L290 608 C250 615 150 615 110 608 Z";
+  const TOP_MIRROR = {
+    l: "M73 226 C64 222 52 221 45 225 C41 229 42 236 48 238 C56 241 66 240 73 237 Z",
+    r: "M327 226 C336 222 348 221 355 225 C359 229 358 236 352 238 C344 241 334 240 327 237 Z",
+  };
+  // Each door with its window. The hinge is the door's front outer corner, and
+  // CSS turns it there (see .cartop .door).
+  const TOP_DOOR = {
+    "fl": { d: "M72 232 L93 229.5 C99 256 105 290 110 316 L108.5 382 L72 382 Z",
+          glass: "M92 229.8 C96 258 104 290 110 316 L108.6 380 L87.7 380 L87.6 330 C87.6 290 89 256 92 229.8 Z",
+          edge: "M72 232 L72 382", dot: [80, 307], seat: [96, 272, 13, 70], mirror: "l",
+          air: "M58 270 C48 280 48 290 56 300 M54 292 C44 304 46 314 54 322",
+          word: [62, 312, "end"] },
+    "rl": { d: "M72 382 L108.5 382 L108.4 430 C108.4 455 108.6 478 109 500 L72 500 Z",
+          glass: "M87.7 386 L108.6 386 L108.4 430 C108.4 455 108.6 478 109 498 L88.1 498 C88 480 87.8 440 87.7 386 Z",
+          edge: "M72 382 L72 500", dot: [80, 441], seat: [96, 404, 13, 74], mirror: "",
+          air: "M58 404 C48 414 48 424 56 434 M54 426 C44 438 46 448 54 456",
+          word: [62, 446, "end"] },
+    "fr": { d: "M328 232 L307 229.5 C301 256 295 290 290 316 L291.5 382 L328 382 Z",
+          glass: "M308 229.8 C304 258 296 290 290 316 L291.4 380 L312.3 380 L312.4 330 C312.4 290 311 256 308 229.8 Z",
+          edge: "M328 232 L328 382", dot: [320, 307], seat: [291, 272, 13, 70], mirror: "r",
+          air: "M342 270 C352 280 352 290 344 300 M346 292 C356 304 354 314 346 322",
+          word: [338, 312, "start"] },
+    "rr": { d: "M328 382 L291.5 382 L291.6 430 C291.6 455 291.4 478 291 500 L328 500 Z",
+          glass: "M312.3 386 L291.4 386 L291.6 430 C291.6 455 291.4 478 291 498 L311.9 498 C312 480 312.2 440 312.3 386 Z",
+          edge: "M328 382 L328 500", dot: [320, 441], seat: [291, 404, 13, 74], mirror: "",
+          air: "M342 404 C352 414 352 424 344 434 M346 426 C356 438 354 448 346 456",
+          word: [338, 446, "start"] },
+  };
+  const TOP_TYRE = { fl: [50, 105], fr: [326, 105], rl: [50, 486], rr: [326, 486] };
+
   const CAR_TOP_SVG = (cls, d) => {
     const w = d.words;
+    const ts = d.tireState || {};
     const stat = (open) => (open == null ? w.unknown : open ? w.open : w.closed);
-    const cl = (open) => (open ? "tv-stat open" : "tv-stat");
+    const aperture = (k) => {
+      const g = TOP_DOOR[k];
+      return `<path class="inside" d="${g.d}"/>` +
+        `<rect class="seat2" x="${g.seat[0]}" y="${g.seat[1]}" width="${g.seat[2]}" height="${g.seat[3]}" rx="5"/>`;
+    };
+    const door = (k) => {
+      const g = TOP_DOOR[k];
+      const win = d.windows[k];
+      const m = g.mirror ? TOP_MIRROR[g.mirror] : "";
+      return `<g class="door ${k}">
+        <path class="paint panel" d="${g.d}"/><path class="fall" d="${g.d}"/>
+        <path class="sideglass win ${win ? "open" : ""}" d="${g.glass}"/>
+        ${win ? `<path class="win-open" d="${g.glass}"/>` : ""}
+        <path class="edge" d="${g.edge}"/>
+        <circle class="ind ${d.doors[k] ? "on" : ""}" cx="${g.dot[0]}" cy="${g.dot[1]}" r="5.5"/>
+        ${m ? `<g class="mirror-g ${g.mirror}"><path class="paint panel" d="${m}"/><path class="shade" d="${m}"/></g>` : ""}
+      </g>${win ? `<path class="air" d="${g.air}"/>` : ""}`;
+    };
+    const tyre = (k) => {
+      const [x, y] = TOP_TYRE[k];
+      return `<g class="tyre ${k} ${ts[k] || ""}">
+        <rect class="tyre-glow" x="${x - 6}" y="${y - 6}" width="36" height="108" rx="14" filter="url(#tglow)"/>
+        <rect class="tire" x="${x}" y="${y}" width="24" height="96" rx="10"/>
+        <rect class="tyre-ring" x="${x - 3}" y="${y - 3}" width="30" height="102" rx="12"/></g>`;
+    };
+    // The pressure, then what is wrong with it or its unit and corner. The two
+    // stay adjacent: the label is read as the value's next sibling.
+    const tyreWords = (k, x, y, corner) => {
+      const st = ts[k];
+      const tag = st === "low" ? w.tireLow : st === "flat" ? w.tireFlat
+        : `${d.tires[k].unit.toUpperCase()} ${corner}`;
+      const value = st === "na" ? w.unknown : d.tires[k].value;
+      return `<text class="tv-val ${st || ""}" x="${x}" y="${y}" text-anchor="middle">${esc(value)}</text>` +
+        `<text class="tv-lab ${st || ""}" x="${x}" y="${y + 16}" text-anchor="middle">${esc(tag)}</text>`;
+    };
+    // An open door says so by standing open, so only a shut or unread one is
+    // worded - the words would sit where the open door swings.
+    const doorWord = (k) => {
+      if (d.doors[k] === true) return "";
+      const [x, y, anchor] = TOP_DOOR[k].word;
+      return `<text class="tv-stat" x="${x}" y="${y}" text-anchor="${anchor}">${esc(stat(d.doors[k]))}</text>`;
+    };
+    const wheelX = d.rhd ? 244 : 156;
     return `
     <svg class="cartop ${cls}" viewBox="0 0 400 720" fill="none" aria-hidden="true">
       <defs>
-        <linearGradient id="tp" x1="0" y1="34" x2="0" y2="686" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stop-color="#dde2e8"/>
-          <stop offset=".45" stop-color="#b6bdc7"/>
-          <stop offset="1" stop-color="#7f8894"/>
+        <linearGradient id="tp" x1="70" y1="0" x2="330" y2="0" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stop-color="#7d8692"/><stop offset=".1" stop-color="#b9c0c8"/>
+          <stop offset=".3" stop-color="#dfe3e8"/><stop offset=".5" stop-color="#eceff2"/>
+          <stop offset=".7" stop-color="#dfe3e8"/><stop offset=".9" stop-color="#b9c0c8"/>
+          <stop offset="1" stop-color="#7d8692"/>
         </linearGradient>
-        <linearGradient id="tg" x1="0" y1="196" x2="0" y2="620" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stop-color="#39424f"/>
-          <stop offset="1" stop-color="#171c24"/>
+        <linearGradient id="tpv" x1="0" y1="34" x2="0" y2="687" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stop-color="#000" stop-opacity=".22"/><stop offset=".05" stop-color="#000" stop-opacity="0"/>
+          <stop offset=".93" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".26"/>
         </linearGradient>
-        <filter id="tsoft" x="-40%" y="-40%" width="180%" height="180%">
-          <feGaussianBlur stdDeviation="8"/>
-        </filter>
+        <linearGradient id="tg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#46505d"/><stop offset=".55" stop-color="#202832"/><stop offset="1" stop-color="#11161c"/>
+        </linearGradient>
+        <linearGradient id="tsg" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stop-color="#151b22"/><stop offset="1" stop-color="#2c3540"/>
+        </linearGradient>
+        <linearGradient id="tbeam" x1="0" y1="56" x2="0" y2="-10" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stop-color="#fffbe8" stop-opacity=".75"/><stop offset="1" stop-color="#fffbe8" stop-opacity="0"/>
+        </linearGradient>
+        <radialGradient id="theat" cx=".5" cy=".5" r=".6"><stop offset="0" stop-color="#ff9a3d"/><stop offset="1" stop-color="#ff9a3d" stop-opacity="0"/></radialGradient>
+        <radialGradient id="tcool" cx=".5" cy=".5" r=".6"><stop offset="0" stop-color="#5cc8ff"/><stop offset="1" stop-color="#5cc8ff" stop-opacity="0"/></radialGradient>
+        <filter id="tsh" x="-0.3" y="-0.3" width="1.6" height="1.6"><feGaussianBlur stdDeviation="7"/></filter>
+        <filter id="tsoft" x="-0.4" y="-0.4" width="1.8" height="1.8"><feGaussianBlur stdDeviation="9"/></filter>
+        <filter id="tglow" x="-0.8" y="-0.8" width="2.6" height="2.6"><feGaussianBlur stdDeviation="3.5"/></filter>
+        <clipPath id="tgr"><path d="${TOP_GLASSROOF}"/></clipPath>
+        <clipPath id="tws"><path d="${TOP_WIND}"/></clipPath>
       </defs>
 
-      <ellipse class="glow" cx="200" cy="368" rx="150" ry="330" filter="url(#tsoft)"/>
+      <path class="lane" d="M10 -20 V740 M390 -20 V740"/>
+      <circle class="rip r1" cx="200" cy="360" r="150"/><circle class="rip r2" cx="200" cy="360" r="150"/>
+      <circle class="rip r3" cx="200" cy="360" r="150"/>
+      <ellipse class="glow" cx="200" cy="362" rx="150" ry="334" filter="url(#tsoft)"/>
+      <path class="beam" d="M84 70 L36 -10 L170 -10 L140 46 Z" fill="url(#tbeam)"/>
+      <path class="beam" d="M316 70 L364 -10 L230 -10 L260 46 Z" fill="url(#tbeam)"/>
+      <path class="carshadow" d="${TOP_BODY}" filter="url(#tsh)" transform="translate(0 5)"/>
 
-      <rect class="tire" x="42" y="105" width="24" height="96" rx="10"/>
-      <rect class="tire" x="334" y="105" width="24" height="96" rx="10"/>
-      <rect class="tire" x="42" y="486" width="24" height="96" rx="10"/>
-      <rect class="tire" x="334" y="486" width="24" height="96" rx="10"/>
+      ${tyre("fl")}${tyre("fr")}${tyre("rl")}${tyre("rr")}
 
-      <path class="paint" d="
-        M200 34
-        C148 34 108 44 92 64
-        C78 82 72 112 70 156
-        C68 220 68 320 70 400
-        C71 470 73 540 80 596
-        C88 652 132 686 200 686
-        C268 686 312 652 320 596
-        C327 540 329 470 330 400
-        C332 320 332 220 330 156
-        C328 112 322 82 308 64
-        C292 44 252 34 200 34 Z"/>
+      <path class="paint" d="${TOP_BODY}"/><path class="fall" d="${TOP_BODY}"/><path class="outline" d="${TOP_BODY}"/>
 
-      <path class="mirror" d="M70 214 C52 204 40 203 33 209 C30 216 37 223 50 225 L70 228 Z"/>
-      <path class="mirror" d="M330 214 C348 204 360 203 367 209 C370 216 363 223 350 225 L330 228 Z"/>
+      <path class="inside" d="${TOP_HOOD}"/>
+      <rect x="146" y="60" width="108" height="60" rx="14" class="bay"/>
+      <circle cx="126" cy="94" r="6.5" class="bay-cap"/><rect x="262" y="78" width="20" height="30" rx="3" class="bay-box"/>
+      <g class="hood-panel">
+        <path class="paint panel" d="${TOP_HOOD}"/><path class="fall" d="${TOP_HOOD}"/>
+        <ellipse cx="200" cy="128" rx="58" ry="66" class="sheen" filter="url(#tsoft)"/>
+        <path class="crease" d="M142 54 C136 100 131 160 129 203 M258 54 C264 100 269 160 271 203"/>
+        <path class="lift" d="${TOP_HOOD}"/>
+      </g>
 
-      <path class="headlight" d="M94 62 q26 -13 50 -15 l1 9 q-23 3 -45 13 z"/>
-      <path class="headlight" d="M306 62 q-26 -13 -50 -15 l-1 9 q23 3 45 13 z"/>
-      <rect class="lightbar" x="122" y="662" width="156" height="7" rx="3.5"/>
+      <path class="hl-glow" d="M78 76 C88 60 110 48 140 43 L142 50 C114 55 94 66 84 82 Z" filter="url(#tglow)"/>
+      <path class="hl-glow" d="M322 76 C312 60 290 48 260 43 L258 50 C286 55 306 66 316 82 Z" filter="url(#tglow)"/>
+      <path class="headlight" d="M78 76 C88 60 110 48 140 43 L142 50 C114 55 94 66 84 82 Z"/>
+      <path class="headlight" d="M322 76 C312 60 290 48 260 43 L258 50 C286 55 306 66 316 82 Z"/>
+      <path class="lightbar" d="M142 46 C175 43 225 43 258 46"/>
+      <path class="tl-glow" d="M84 650 C92 666 108 678 130 683 L131 677 C112 672 98 662 90 648 Z M316 650 C308 666 292 678 270 683 L269 677 C288 672 302 662 310 648 Z" filter="url(#tglow)"/>
+      <path class="tail" d="M84 650 C92 666 108 678 130 683 L131 677 C112 672 98 662 90 648 Z"/>
+      <path class="tail" d="M316 650 C308 666 292 678 270 683 L269 677 C288 672 302 662 310 648 Z"/>
 
-      <path class="seam" d="M118 58 C104 100 98 150 96 192"/>
-      <path class="seam" d="M282 58 C296 100 302 150 304 192"/>
+      <path class="cowl" d="M100 208 C150 203 250 203 300 208 L301 215 C250 210 150 210 99 215 Z"/>
+      <path class="glass" d="${TOP_WIND}"/>
+      <g clip-path="url(#tws)"><path class="streak" d="M150 200 L120 330 M190 200 L160 330"/></g>
+      <path class="clim heat" d="${TOP_WIND}" fill="url(#theat)"/>
+      <path class="clim cool" d="${TOP_WIND}" fill="url(#tcool)"/>
+      <path class="wiper" d="M118 224 L176 215 M198 222 L262 213"/>
+      <path class="sideglass" d="M88.1 502 L109 502 C109.6 530 112 552 116 572 C112 584 106 594 100 600 C93 570 88.5 530 88.1 502 Z"/>
+      <path class="sideglass" d="M311.9 502 L291 502 C290.4 530 288 552 284 572 C288 584 294 594 300 600 C307 570 311.5 530 311.9 502 Z"/>
+      <path class="pillar" d="M87.7 380 L108.6 380 L108.6 386 L87.7 386 Z M312.3 380 L291.4 380 L291.4 386 L312.3 386 Z"/>
 
-      <path class="glass" d="M92 200 C130 190 270 190 308 200 L288 258 C240 250 160 250 112 258 Z"/>
-      <rect class="glass" x="116" y="264" width="168" height="308" rx="26"/>
-      <path class="glass" d="M116 576 C160 585 240 585 284 576 L296 614 C250 624 150 624 104 614 Z"/>
-      <rect class="sunline ${d.sunroof === true ? "open" : ""}" x="124" y="376" width="152" height="2.5" rx="1.25"/>
+      <path class="paint" d="${TOP_ROOF}"/>
+      <g clip-path="url(#tgr)">
+        <rect class="inside" x="110" y="318" width="180" height="250"/>
+        <ellipse class="wheel" cx="${wheelX}" cy="330" rx="19" ry="6"/>
+        <rect class="seat" x="132" y="338" width="50" height="66" rx="13"/><rect class="seat2" x="138" y="388" width="38" height="12" rx="5"/>
+        <rect class="seat" x="218" y="338" width="50" height="66" rx="13"/><rect class="seat2" x="224" y="388" width="38" height="12" rx="5"/>
+        <rect class="console" x="187" y="332" width="26" height="78" rx="7"/>
+        <rect class="glass" x="110" y="432" width="180" height="140"/>
+        <g class="sunpanel"><rect class="glass" x="110" y="318" width="180" height="116"/>
+          <rect class="sunline" x="122" y="431" width="156" height="2.5" rx="1.25"/></g>
+        <path class="streak wide" d="M110 520 L300 380 M110 560 L300 420"/>
+        <rect class="clim heat" x="110" y="318" width="180" height="250" fill="url(#theat)"/>
+        <rect class="clim cool" x="110" y="318" width="180" height="250" fill="url(#tcool)"/>
+      </g>
+      <path class="rim" d="${TOP_GLASSROOF}"/>
+      <path class="fin" d="M200 561 C203.5 562.5 205 567 204.5 573 L195.5 573 C195 567 196.5 562.5 200 561 Z"/>
 
-      <path class="seam" d="M70 262 L94 258 M70 352 L94 350 M70 448 L94 444"/>
-      <path class="seam" d="M330 262 L306 258 M330 352 L306 350 M330 448 L306 444"/>
+      <path class="inside" d="${TOP_GATE}"/>
+      <path class="ribs" d="M112 622 H288 M110 638 H290 M113 654 H287"/>
+      <path class="gate-shadow" d="M116 600 C160 606 240 606 284 600 L288 630 C250 640 150 640 112 630 Z" filter="url(#tsoft)"/>
+      <g class="tailgate">
+        <path class="paint panel" d="${TOP_GATE}"/><path class="fall" d="${TOP_GATE}"/>
+        <path class="glass" d="${TOP_REARWIN}"/>
+        <path class="tailbar" d="M122 656 C160 662 240 662 278 656"/>
+        <path class="lift" d="${TOP_GATE}"/>
+      </g>
+      <path class="clim heat" d="${TOP_REARWIN}" fill="url(#theat)"/>
+      <path class="clim cool" d="${TOP_REARWIN}" fill="url(#tcool)"/>
 
-      <rect class="port" x="66" y="552" width="13" height="15" rx="4"/>
-      <circle class="portdot" cx="72.5" cy="559.5" r="3"/>
+      ${aperture("fl")}${aperture("rl")}${aperture("fr")}${aperture("rr")}
+      ${door("fl")}${door("rl")}${door("fr")}${door("rr")}
 
-      <circle class="ind ${d.doors.fl ? "on" : ""}" cx="84" cy="306" r="6"/>
-      <circle class="ind ${d.doors.rl ? "on" : ""}" cx="84" cy="400" r="6"/>
-      <circle class="ind ${d.doors.fr ? "on" : ""}" cx="316" cy="306" r="6"/>
-      <circle class="ind ${d.doors.rr ? "on" : ""}" cx="316" cy="400" r="6"/>
+      <path class="cable" d="M58 560 C36 562 26 596 8 606 C-2 612 -14 612 -26 612"/>
+      <path class="cable-flow" d="M-26 612 C-14 612 -2 612 8 606 C26 596 36 562 58 560"/>
+      <rect class="plug" x="52" y="553" width="15" height="14" rx="4"/>
+      <rect class="port" x="66" y="552" width="10" height="15" rx="4"/>
+      <circle class="portdot" cx="71" cy="559.5" r="3"/>
 
-      <text class="tv-val" x="42" y="84" text-anchor="middle">${esc(d.tires.fl.value)}</text>
-      <text class="tv-lab" x="42" y="100" text-anchor="middle">${esc(d.tires.fl.unit.toUpperCase())} FL</text>
-      <text class="tv-val" x="358" y="84" text-anchor="middle">${esc(d.tires.fr.value)}</text>
-      <text class="tv-lab" x="358" y="100" text-anchor="middle">${esc(d.tires.fr.unit.toUpperCase())} FR</text>
-      <text class="tv-val" x="42" y="612" text-anchor="middle">${esc(d.tires.rl.value)}</text>
-      <text class="tv-lab" x="42" y="628" text-anchor="middle">${esc(d.tires.rl.unit.toUpperCase())} RL</text>
-      <text class="tv-val" x="358" y="612" text-anchor="middle">${esc(d.tires.rr.value)}</text>
-      <text class="tv-lab" x="358" y="628" text-anchor="middle">${esc(d.tires.rr.unit.toUpperCase())} RR</text>
+      <ellipse class="blink" cx="82" cy="74" rx="9" ry="6" filter="url(#tglow)"/>
+      <ellipse class="blink" cx="318" cy="74" rx="9" ry="6" filter="url(#tglow)"/>
+      <ellipse class="blink" cx="92" cy="660" rx="9" ry="6" filter="url(#tglow)"/>
+      <ellipse class="blink" cx="308" cy="660" rx="9" ry="6" filter="url(#tglow)"/>
 
-      <text class="${cl(d.doors.fl)}" x="58" y="311" text-anchor="end">${esc(stat(d.doors.fl))}</text>
-      <text class="${cl(d.doors.rl)}" x="58" y="405" text-anchor="end">${esc(stat(d.doors.rl))}</text>
-      <text class="${cl(d.doors.fr)}" x="342" y="311">${esc(stat(d.doors.fr))}</text>
-      <text class="${cl(d.doors.rr)}" x="342" y="405">${esc(stat(d.doors.rr))}</text>
-
-      <text class="tv-lab onbody" x="200" y="122" text-anchor="middle">${esc(w.hood)}</text>
-      <text class="${cl(d.hood)} onbody" x="200" y="142" text-anchor="middle">${esc(stat(d.hood))}</text>
+      ${tyreWords("fl", 42, 84, "FL")}${tyreWords("fr", 358, 84, "FR")}
+      ${tyreWords("rl", 42, 612, "RL")}${tyreWords("rr", 358, 612, "RR")}
+      ${doorWord("fl")}${doorWord("rl")}${doorWord("fr")}${doorWord("rr")}
+      ${d.hood === true
+        ? `<text class="tv-lab onglass" x="200" y="82" text-anchor="middle">${esc(w.hood)}</text>
+           <text class="tv-stat open onglass" x="200" y="102" text-anchor="middle">${esc(w.open)}</text>`
+        : `<text class="tv-lab onbody" x="200" y="128" text-anchor="middle">${esc(w.hood)}</text>
+           <text class="tv-stat onbody" x="200" y="148" text-anchor="middle">${esc(stat(d.hood))}</text>`}
       ${d.sunroof == null ? "" : `
-      <text class="tv-lab onglass" x="200" y="322" text-anchor="middle">${esc(w.sunroof)}</text>
-      <text class="${cl(d.sunroof)} onglass" x="200" y="342" text-anchor="middle">${esc(stat(d.sunroof))}</text>`}
-      <text class="tv-lab onbody" x="200" y="634" text-anchor="middle">${esc(d.bootWord)}</text>
-      <text class="${cl(d.trunk)} onbody" x="200" y="654" text-anchor="middle">${esc(stat(d.trunk))}</text>
+      <text class="tv-lab onglass" x="200" y="372" text-anchor="middle">${esc(w.sunroof)}</text>
+      <text class="tv-stat onglass ${d.sunroof ? "open" : ""}" x="200" y="392" text-anchor="middle">${esc(stat(d.sunroof))}</text>`}
+      <text class="tv-lab ${d.trunk === true ? "onglass" : "onbody"}" x="200" y="632" text-anchor="middle">${esc(d.bootWord)}</text>
+      <text class="tv-stat ${d.trunk === true ? "open onglass" : "onbody"}" x="200" y="650" text-anchor="middle">${esc(stat(d.trunk))}</text>
     </svg>`;
   };
 
@@ -1338,35 +1492,166 @@
              font-size:11.5px; padding:8px 11px; min-height:34px; border-radius:10px;
              cursor:pointer; -webkit-tap-highlight-color: transparent; }
     .cmini:active { transform: scale(.95); }
-    .cartop { display: block; width: 100%; }
-    .cartop .paint { fill: var(--geely-car-paint, url(#tp)); stroke: rgba(0,0,0,.18); stroke-width: 1.5; }
+    .cartop { display: block; width: 100%; overflow: visible; }
+    .cartop .paint { fill: var(--geely-car-paint, url(#tp)); }
+    .cartop .fall { fill: url(#tpv); }
+    .cartop .panel { stroke: rgba(0,0,0,.22); stroke-width: 1.2; }
+    .cartop .outline { fill: none; stroke: rgba(0,0,0,.22); stroke-width: 1.3; }
+    .cartop .carshadow { fill: #000; opacity: .45; }
     .cartop .glass { fill: url(#tg); }
-    .cartop .tire { fill: #23272e; }
-    .cartop .mirror { fill: #3a424d; }
-    .cartop .seam { stroke: rgba(0,0,0,.22); stroke-width: 1.6; fill: none; }
-    .cartop .headlight { fill: #eef4fa; stroke: rgba(0,0,0,.1); }
-    .cartop .lightbar { fill: #d05252; opacity: .85; }
-    .cartop .glow { fill: transparent; transition: fill .5s ease; }
-    .cartop.charging .glow { fill: color-mix(in srgb, ${ACCENT} 30%, transparent); }
-    .cartop.charging .portdot { fill: ${ACCENT}; filter: drop-shadow(0 0 4px ${ACCENT}); }
-    .cartop .port { fill: rgba(0,0,0,.28); }
+    .cartop .sideglass { fill: url(#tsg); }
+    .cartop .streak { stroke: #fff; stroke-opacity: .08; stroke-width: 16; }
+    .cartop .streak.wide { stroke-opacity: .07; stroke-width: 26; }
+    .cartop .rim { fill: none; stroke: rgba(0,0,0,.3); stroke-width: 1.2; }
+    .cartop .cowl { fill: #14181d; }
+    .cartop .wiper { stroke: #0c0f12; stroke-width: 2.2; stroke-linecap: round; }
+    .cartop .pillar, .cartop .fin { fill: #0c0f13; }
+    .cartop .shade { fill: #000; opacity: .2; }
+    .cartop .sheen { fill: #fff; opacity: .2; }
+    .cartop .crease { stroke: #fff; stroke-opacity: .55; stroke-width: 1.3; fill: none; }
+    .cartop .tire { fill: #2e333b; stroke: rgba(255,255,255,.07); }
+    .cartop .headlight { fill: #eef4fa; stroke: rgba(0,0,0,.15); }
+    .cartop .lightbar { stroke: #eef4fa; stroke-width: 2; stroke-linecap: round; fill: none; }
+    .cartop .hl-glow { fill: #fffbe8; opacity: 0; }
+    .cartop .tail { fill: #c43c42; }
+    .cartop .tl-glow { fill: #ff3b3b; opacity: 0; }
+    .cartop .tailbar { stroke: #d24b50; stroke-width: 2.6; stroke-linecap: round; fill: none; }
+    .cartop .port { fill: rgba(0,0,0,.3); }
     .cartop .portdot { fill: rgba(255,255,255,.35); }
+    .cartop .inside { fill: #0b0e12; }
+    .cartop .seat { fill: #232931; }
+    .cartop .seat2 { fill: #2c333c; }
+    .cartop .console { fill: #161b21; }
+    .cartop .wheel { fill: none; stroke: #3a424c; stroke-width: 3.5; }
+    .cartop .bay { fill: #151a20; stroke: #262c34; }
+    .cartop .bay-cap { fill: #2b6f8c; }
+    .cartop .bay-box { fill: #1d2228; }
+    .cartop .ribs { stroke: #1a1f26; stroke-width: 2; }
+    .cartop .sunline { fill: rgba(255,255,255,.22); }
     .cartop .ind { fill: ${AMBER}; opacity: 0; }
     .cartop .ind.on { opacity: 1; animation: geely-blink 1.4s ease infinite; }
-    .cartop .sunline { fill: rgba(255,255,255,.22); }
-    .cartop .sunline.open { fill: ${AMBER}; }
+    .cartop .edge { stroke: ${AMBER}; stroke-width: 2.4; fill: none; opacity: 0; transition: opacity .4s ease; }
+    .cartop .win.open { fill: #050608; }
+    .cartop .win-open { fill: none; stroke: ${AMBER}; stroke-width: 1.4; stroke-dasharray: 3 2.5; }
+    /* Moving dashes - the air through an open window, the charge along the
+     * cable, the road while driving - repaint the drawing on every frame,
+     * so they run for a few seconds each time the card draws rather than for
+     * a whole charge or drive. */
+    .cartop .air { fill: none; stroke: #9fd8ff; stroke-width: 1.4; stroke-linecap: round; opacity: .8;
+                   stroke-dasharray: 10 40; animation: geely-air 1.6s linear 4; }
+    .cartop .glow { fill: transparent; transition: fill .5s ease; }
+    .cartop .beam, .cartop .blink, .cartop .rip, .cartop .clim, .cartop .lane { opacity: 0; }
+    .cartop .blink { fill: #ffb347; }
+    .cartop .rip { fill: none; stroke: ${ACCENT}; stroke-width: 2; }
+    .cartop .lane { stroke: var(--secondary-text-color); stroke-width: 3; stroke-dasharray: 26 22; fill: none; }
+    .cartop .cable, .cartop .plug, .cartop .cable-flow { opacity: 0; transition: opacity .4s ease; }
+    .cartop .cable { stroke: #59626d; stroke-width: 6; fill: none; stroke-linecap: round; }
+    .cartop .cable-flow { stroke: ${ACCENT}; stroke-width: 2; fill: none; stroke-linecap: round; stroke-dasharray: 3 11; }
+    .cartop .plug { fill: #2a2f36; stroke: rgba(255,255,255,.18); }
+    .cartop .lift { fill: #fff; opacity: 0; transition: opacity .6s ease; }
+    .cartop .gate-shadow { fill: #000; opacity: 0; transition: opacity .6s ease; }
+    .cartop .tyre-ring { fill: none; stroke-width: 2.5; opacity: 0; }
+    .cartop .tyre-glow { opacity: 0; }
+    /* What moves turns about its own hinge, written as translate, turn and
+     * translate back, so no browser has to agree on a transform origin. */
+    .cartop .door, .cartop .mirror-g, .cartop .hood-panel, .cartop .tailgate, .cartop .sunpanel,
+    .cartop .tire, .cartop .rip { transform-box: view-box; transform-origin: 0 0; }
+    .cartop .door, .cartop .mirror-g, .cartop .hood-panel, .cartop .tailgate, .cartop .sunpanel,
+    .cartop .tire { transition: transform .8s cubic-bezier(.22,.8,.2,1); }
+    .cartop .door.fl { transform: translate(72px,232px) rotate(0deg) translate(-72px,-232px); }
+    .cartop.d-fl .door.fl { transform: translate(72px,232px) rotate(20deg) translate(-72px,-232px); }
+    .cartop .door.rl { transform: translate(72px,382px) rotate(0deg) translate(-72px,-382px); }
+    .cartop.d-rl .door.rl { transform: translate(72px,382px) rotate(20deg) translate(-72px,-382px); }
+    .cartop .door.fr { transform: translate(328px,232px) rotate(0deg) translate(-328px,-232px); }
+    .cartop.d-fr .door.fr { transform: translate(328px,232px) rotate(-20deg) translate(-328px,-232px); }
+    .cartop .door.rr { transform: translate(328px,382px) rotate(0deg) translate(-328px,-382px); }
+    .cartop.d-rr .door.rr { transform: translate(328px,382px) rotate(-20deg) translate(-328px,-382px); }
+    .cartop.d-fl .door.fl .edge, .cartop.d-rl .door.rl .edge,
+    .cartop.d-fr .door.fr .edge, .cartop.d-rr .door.rr .edge { opacity: .95; }
+    .cartop .mirror-g.l { transform: translate(73px,231px) rotate(0deg) translate(-73px,-231px); }
+    .cartop.locked .mirror-g.l { transform: translate(73px,231px) rotate(-60deg) translate(-73px,-231px); }
+    .cartop .mirror-g.r { transform: translate(327px,231px) rotate(0deg) translate(-327px,-231px); }
+    .cartop.locked .mirror-g.r { transform: translate(327px,231px) rotate(60deg) translate(-327px,-231px); }
+    .cartop .hood-panel { transform: translate(0px,208px) scale(1,1) translate(0px,-208px); }
+    .cartop.hood .hood-panel { transform: translate(0px,208px) scale(1,.5) translate(0px,-208px); }
+    .cartop.hood .hood-panel .lift, .cartop.trunk .tailgate .lift { opacity: .22; }
+    /* The tailgate swings up on its roof hinge, so from above it shortens toward that hinge. */
+    .cartop .tailgate { transform: translate(200px,573px) scale(1,1) translate(-200px,-573px); }
+    .cartop.trunk .tailgate { transform: translate(200px,573px) scale(1.05,.42) translate(-200px,-573px); }
+    .cartop.trunk .gate-shadow { opacity: .6; }
+    .cartop .sunpanel { transform: translate(0px,0px); }
+    .cartop.sun .sunpanel { transform: translate(0px,96px); }
+    .cartop.sun .sunline { fill: ${AMBER}; }
+    .cartop.lights .hl-glow, .cartop.lights .tl-glow { opacity: 1; }
+    .cartop.lights .beam { opacity: .9; transition: opacity .6s ease .25s; }
+    .cartop.lights .headlight { fill: #fff; }
+    .cartop.lights .tail { fill: #ff4d4d; }
+    .cartop.lights .tailbar { stroke: #ff5a5a; }
+    .cartop.power .hl-glow { animation: geely-poweron .9s ease-out 1; }
+    .cartop.flash .blink, .cartop.flash .hl-glow,
+    .cartop.find .blink, .cartop.find .hl-glow { animation: geely-flash 1.5s steps(1) 1; }
+    .cartop.find .rip { animation: geely-ripple 2s ease-out 1; }
+    .cartop.find .rip.r2 { animation-delay: .35s; }
+    .cartop.find .rip.r3 { animation-delay: .7s; }
+    .cartop.plugged .cable, .cartop.plugged .plug,
+    .cartop.charging .cable, .cartop.charging .plug { opacity: 1; }
+    .cartop.plugged .portdot { fill: #8fe8cd; }
+    .cartop.charging .portdot { fill: ${ACCENT}; filter: drop-shadow(0 0 4px ${ACCENT}); }
+    .cartop.charging .glow { fill: color-mix(in srgb, ${ACCENT} 30%, transparent);
+                             animation: geely-breathe 2.8s ease-in-out infinite; }
+    .cartop.charging .cable-flow { opacity: 1; animation: geely-flow 1.1s linear 6; }
+    .cartop.cl-heat .clim.heat, .cartop.cl-cool .clim.cool { opacity: .5; animation: geely-breathe 3.4s ease-in-out infinite; }
+    .cartop.moving .lane { opacity: .45; animation: geely-lane .7s linear 10; }
+    /* Tires: low reads amber, flat reads red and bulging, and one silent
+     * sensor among reporting ones gets a dashed ring. */
+    .cartop .tyre.fl .tire { transform: translate(62px,153px) scale(1,1) translate(-62px,-153px); }
+    .cartop .tyre.fl.flat .tire { transform: translate(62px,153px) scale(1.32,.96) translate(-62px,-153px); }
+    .cartop .tyre.fr .tire { transform: translate(338px,153px) scale(1,1) translate(-338px,-153px); }
+    .cartop .tyre.fr.flat .tire { transform: translate(338px,153px) scale(1.32,.96) translate(-338px,-153px); }
+    .cartop .tyre.rl .tire { transform: translate(62px,534px) scale(1,1) translate(-62px,-534px); }
+    .cartop .tyre.rl.flat .tire { transform: translate(62px,534px) scale(1.32,.96) translate(-62px,-534px); }
+    .cartop .tyre.rr .tire { transform: translate(338px,534px) scale(1,1) translate(-338px,-534px); }
+    .cartop .tyre.rr.flat .tire { transform: translate(338px,534px) scale(1.32,.96) translate(-338px,-534px); }
+    .cartop .tyre.low .tire { fill: #5a4318; }
+    .cartop .tyre.low .tyre-ring { stroke: ${AMBER}; opacity: 1; }
+    .cartop .tyre.low .tyre-glow { fill: ${AMBER}; opacity: .55; animation: geely-pulse 1.8s ease-in-out infinite; }
+    .cartop .tyre.flat .tire { fill: #5c1d21; }
+    .cartop .tyre.flat .tyre-ring { stroke: #ff5a60; opacity: 1; }
+    .cartop .tyre.flat .tyre-glow { fill: #ff4d55; opacity: .7; animation: geely-pulse .9s ease-in-out infinite; }
+    .cartop .tyre.na .tire { opacity: .35; }
+    .cartop .tyre.na .tyre-ring { stroke: var(--secondary-text-color); stroke-dasharray: 5 4; opacity: 1; }
     .cartop text { font-family: inherit; }
     .tv-val { font-size: 21px; font-weight: 600; fill: var(--primary-text-color);
               font-variant-numeric: tabular-nums; }
     .tv-lab { font-size: 12.5px; letter-spacing: .1em; fill: var(--secondary-text-color); }
+    .tv-val.low, .tv-lab.low { fill: ${AMBER}; }
+    .tv-val.flat, .tv-lab.flat { fill: #ff5a60; }
+    .tv-val.low, .tv-val.flat { animation: geely-blink 1.4s ease infinite; }
     .tv-stat { font-size: 17px; font-weight: 700; fill: var(--primary-text-color); }
     .tv-lab.onbody { fill: #6b7280; }
     .tv-stat.onbody { fill: #3a4149; }
     .tv-stat.open.onbody { fill: #b97a14; }
     .tv-stat.open { fill: ${AMBER}; font-weight: 600; animation: geely-blink 1.4s ease infinite; }
-    .tv-lab.onglass { fill: rgba(255,255,255,.55); }
-    .tv-stat.onglass { fill: rgba(255,255,255,.8); }
+    .tv-lab.onglass { fill: rgba(255,255,255,.6); }
+    .tv-stat.onglass { fill: rgba(255,255,255,.88); }
     .tv-stat.open.onglass { fill: ${AMBER}; }
+    @keyframes geely-air { from { stroke-dashoffset: 50; } to { stroke-dashoffset: 0; } }
+    @keyframes geely-pulse { 0%, 100% { opacity: .25; } 50% { opacity: .8; } }
+    @keyframes geely-breathe { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+    @keyframes geely-flow { to { stroke-dashoffset: -28; } }
+    @keyframes geely-lane { to { stroke-dashoffset: -48; } }
+    @keyframes geely-flash { 0% { opacity: 1; } 16% { opacity: 0; } 33% { opacity: 1; } 50% { opacity: 0; }
+                             66% { opacity: 1; } 83%, 100% { opacity: 0; } }
+    @keyframes geely-poweron { 0% { opacity: 0; } 12% { opacity: 1; } 20% { opacity: .2; } 32%, 100% { opacity: 1; } }
+    @keyframes geely-ripple {
+      0% { opacity: .9; transform: translate(200px,360px) scale(.4) translate(-200px,-360px); }
+      100% { opacity: 0; transform: translate(200px,360px) scale(2.3) translate(-200px,-360px); } }
+    /* animations: false in the card's options, or the system's reduced motion:
+     * every state still shows, at once and still. */
+    .cartop.noanim, .cartop.noanim * { animation: none !important; transition: none !important; }
+    @media (prefers-reduced-motion: reduce) {
+      .cartop, .cartop * { animation: none !important; transition: none !important; }
+    }
   `;
 
   /* ------------------------------------------------------------ base ----- */
@@ -1994,7 +2279,10 @@
         case "sched_sw": this._call("switch", "toggle", "scheduled_charging"); break;
         case "defrost": this._call("switch", "toggle", "defrost"); break;
         case "vent": this._call("switch", "toggle", "window_ventilation"); break;
-        case "find": this._call("button", "press", "find_car"); break;
+        case "find":
+          this._call("button", "press", "find_car");
+          if (this._onFind) this._onFind();
+          break;
         case "refresh": this._call("button", "press", "refresh_data"); break;
       }
     }
@@ -3377,10 +3665,110 @@
         "cover.sunroof", "cover.sunshade", "switch.g_clean",
         "binary_sensor.door_driver", "binary_sensor.door_passenger",
         "binary_sensor.door_rear_left", "binary_sensor.door_rear_right",
-        "binary_sensor.trunk", "binary_sensor.hood", "binary_sensor.connected"];
+        "binary_sensor.trunk", "binary_sensor.hood", "binary_sensor.connected",
+        "cover.all_windows", "binary_sensor.charger_plug",
+        "binary_sensor.plugged_in_reported"];
     }
 
     getCardSize() { return 10; }
+
+    /* How each tire reads against the thresholds, in kPa whatever unit Home
+     * Assistant shows: "low" under tire_low (190 by default), "flat" under
+     * tire_flat (100), and a threshold of 0 turns that alarm off. A sensor
+     * with no reading - unknown, unavailable or 0 - is never a puncture. It is
+     * "na" only while another tire does report, since then that one corner
+     * has lost its sensor. A car that reports no tire at all, such as an E2,
+     * stays plain. The integration's tire sensors carry the reading in kPa as
+     * an attribute, which no display unit can relabel; the unit is the
+     * fallback for a sensor without it. */
+    _tireStates() {
+      const corners = { fl: "front_left", fr: "front_right", rl: "rear_left", rr: "rear_right" };
+      const limit = (v, dflt) => {
+        const n = v === undefined || v === null || v === "" ? NaN : Number(v);
+        return isFinite(n) ? n : dflt;
+      };
+      const low = limit(this._config.tire_low, 190);
+      const flat = limit(this._config.tire_flat, 100);
+      const kpa = {};
+      for (const k in corners) {
+        const st = this._st(`sensor.tire_${corners[k]}`);
+        const n = NUM(st);
+        const attr = st && st.attributes ? Number(st.attributes.kPa) : NaN;
+        const unit = String(UNIT(st) || "kPa").toLowerCase();
+        kpa[k] = !OK(st) || n == null ? null
+          : st.attributes && st.attributes.kPa != null && isFinite(attr) ? attr
+          : unit === "bar" ? n * 100 : unit === "psi" ? n * 6.894757 : unit === "kpa" ? n : NaN;
+      }
+      const reading = Object.keys(kpa).some((k) => kpa[k] != null && kpa[k] > 0);
+      const out = {};
+      for (const k in kpa) {
+        const v = kpa[k];
+        out[k] = v == null || v === 0 ? (reading ? "na" : "")
+          : isNaN(v) || v < 0 ? "" : v < flat ? "flat" : v < low ? "low" : "";
+      }
+      return out;
+    }
+
+    /* Plugged in without a charge flowing: the cable shows, without its glow.
+     * The car's own cable flag counts too: on an E2 whose wallbox a relay
+     * switches off, the connection reads unplugged with the cable in (#129). */
+    _plugged(s) {
+      if (s.charging) return true;
+      const on = (id) => { const st = this._st(id); return !!st && st.state === "on"; };
+      if (on("binary_sensor.charger_plug") || on("binary_sensor.plugged_in_reported")) return true;
+      return !!(s.conn && s.conn.state === "Plugged in");
+    }
+
+    /* Warm or cool light in the cabin while the climate runs. A rapid preset
+     * says which. Otherwise the target is compared with the cabin, and with
+     * either one unknown, or the cabin within a degree of the target, the
+     * glass shows no tint rather than flipping as the cabin crosses it. */
+    _cabinTint(s) {
+      if (!this._climateOn(s.climate)) return "";
+      const preset = this._preset();
+      if (preset === "Rapid Cooling") return "cool";
+      if (preset === "Rapid Warming") return "heat";
+      const target = Number(s.climate.attributes && s.climate.attributes.temperature);
+      const inside = NUM(this._st("sensor.interior_temperature"));
+      if (!isFinite(target) || inside == null || Math.abs(target - inside) < 1) return "";
+      return target < inside ? "cool" : "heat";
+    }
+
+    /* The drawing's state as classes on its root. A change between two
+     * renders is applied a frame after the drawing appears, so the doors,
+     * hood, tailgate, roof and mirrors move instead of jumping. The mirrors
+     * fold on a parked, locked car: one that locks itself at speed keeps them
+     * out while it drives. */
+    _topClasses(s, d, driving, locked) {
+      const c = [];
+      ["fl", "fr", "rl", "rr"].forEach((k) => { if (d.doors[k] === true) c.push("d-" + k); });
+      if (d.hood === true) c.push("hood");
+      if (d.trunk === true) c.push("trunk");
+      if (d.sunroof === true) c.push("sun");
+      if (driving) c.push("lights", "moving");
+      if (locked && !driving) c.push("locked");
+      if (s.charging) c.push("charging");
+      else if (this._plugged(s)) c.push("plugged");
+      const tint = this._cabinTint(s);
+      if (tint) c.push("cl-" + tint);
+      if (this._config.animations === false) c.push("noanim");
+      return c.join(" ");
+    }
+
+    /* A moment rather than a state - the indicators flashing on a lock or an
+     * unlock, the lamps coming on, the ripple of Find - played once on the
+     * drawing that is showing. */
+    _oneShot(svg, name, ms) {
+      svg.classList.remove(name);
+      void svg.getBoundingClientRect();
+      svg.classList.add(name);
+      setTimeout(() => svg.classList.remove(name), ms);
+    }
+
+    _onFind() {
+      const svg = this.shadowRoot && this.shadowRoot.querySelector(".cartop");
+      if (svg) this._oneShot(svg, "find", 2200);
+    }
 
     _render() {
       if (!this._prefix || this._lostCar()) return this._missing();
@@ -3417,13 +3805,19 @@
       };
       const sunroofSt = this._st("cover.sunroof");
       const tire = (suffix) => this._tire(suffix);
+      const tireState = this._tireStates();
+      const flats = ["fl", "fr", "rl", "rr"].filter((k) => tireState[k] === "flat").length;
+      const lows = ["fl", "fr", "rl", "rr"].filter((k) => tireState[k] === "low").length;
       // Driving comes from the same composite as the banner and the action lock,
       // not from the raw speed. Keyed on speed, this line said "Parked" on a car
       // whose banner two lines above said Driving and whose buttons were greyed
       // out (#25) - and #21 showed why it happens so often: that owner's speed
       // field read 0 for twenty-five minutes of a drive. The speed is still
       // shown when the car actually reports one.
-      const statusLine = s.charging
+      // A puncture outranks everything, charging included. A low tire waits
+      // behind the states a driver acts on first.
+      const statusLine = flats ? this._t("status.tire_flat", "Puncture · check tire")
+        : s.charging
         ? this._t("status.charging_line", "Charging{power}",
             { power: OK(power) ? " · " + this._fmt(power) : "" })
         : driving
@@ -3432,8 +3826,11 @@
         : s.doorsOpen.length ? this._t("status.n_openings_open",
             "{count} opening{plural} open",
             { count: s.doorsOpen.length, plural: s.doorsOpen.length > 1 ? "s" : "" })
+        : lows ? this._t("status.tire_low", "Tire pressure low")
         : s.locked && s.locked.state === "locked" ? this._t("status.parked_locked", "Parked · Locked")
         : this._t("chip.parked", "Parked");
+      const statusCls = flats ? "danger" : s.charging ? "charging"
+        : !driving && !s.doorsOpen.length && lows ? "warn" : "";
       const sched = schedA && schedB && OK(schedA) && OK(schedB)
         ? `${schedA.state.slice(0, 5)}–${schedB.state.slice(0, 5)}${schedOn && schedOn.state === "on" ? "" : " (off)"}`
         : null;
@@ -3449,9 +3846,20 @@
       // while the full card, which never mirrored, had it right (#122). The
       // rear pair read alike that day, so nothing was seen for it; it stays
       // where its entities' names put it, as on the full card.
+      // The windows by the doors' words (cover.all_windows' open_windows), so
+      // the front pair swaps on a right-hand-drive car exactly as the doors do.
+      // A car or an older integration without the attribute opens none.
+      const wins = this._st("cover.all_windows");
+      const openWins = wins && OK(wins) && wins.attributes && Array.isArray(wins.attributes.open_windows)
+        ? wins.attributes.open_windows : [];
+      const winOpen = (role) => openWins.indexOf(role) >= 0;
       const d = {
         tires: { fl: tire("front_left"), fr: tire("front_right"),
                  rl: tire("rear_left"), rr: tire("rear_right") },
+        tireState,
+        rhd,
+        windows: { fl: winOpen(rhd ? "passenger" : "driver"), fr: winOpen(rhd ? "driver" : "passenger"),
+                   rl: winOpen("rear_left"), rr: winOpen("rear_right") },
         doors: { fl: isOpen(rhd ? "door_passenger" : "door_driver"),
                  fr: isOpen(rhd ? "door_driver" : "door_passenger"),
                  rl: isOpen("door_rear_left"), rr: isOpen("door_rear_right") },
@@ -3466,8 +3874,21 @@
           open: this._t("topview.open", "Open"),
           closed: this._t("topview.closed", "Closed"),
           unknown: this._t("topview.unknown", "—"),
+          tireLow: this._t("topview.tire_low", "LOW"),
+          tireFlat: this._t("topview.tire_flat", "FLAT"),
         },
       };
+      // The previous render, for this car only: a card pointed at another
+      // car starts from that car's drawing, not from a move between the two.
+      const prev = this._topPrev && this._topPrev.prefix === this._prefix ? this._topPrev : null;
+      // An unread lock - unavailable in an outage, unknown at a restart - is
+      // neither locked nor unlocked: the mirrors stay as last read, and only
+      // a change between two read states flashes the indicators.
+      const lockSt = s.locked;
+      const lockNow = lockSt && (lockSt.state === "locked" || lockSt.state === "unlocked")
+        ? lockSt.state === "locked" : null;
+      const lastLock = prev ? prev.lastLock : null;
+      const topCls = this._topClasses(s, d, driving, lockNow != null ? lockNow : lastLock === true);
 
       this.shadowRoot.innerHTML = `<style>${BASE_CSS}
         .head { display:flex; align-items:baseline; justify-content:space-between; }
@@ -3476,6 +3897,8 @@
         .dot.off { background:${AMBER}; }
         .status { font-size:12px; color: var(--secondary-text-color); margin-top:3px; }
         .status.charging { color:${ACCENT}; }
+        .status.warn { color:${AMBER}; }
+        .status.danger { color:#ff6b70; }
         .hero { display:flex; align-items:flex-end; gap:16px; margin:12px 0 6px; }
         .hero .n { font-size:46px; }
         .hero .u { font-size:14px; color: var(--secondary-text-color); margin-left:4px; }
@@ -3511,7 +3934,7 @@
               <div class="title">
                 ${this._config.hide_name ? "" : `<i class="dot ${online && (online.state === "off" || !OK(online)) ? "off" : ""}"></i>${esc(this._title())}`}
               </div>
-              <div class="status ${s.charging ? "charging" : ""}">${esc(statusLine)}</div>
+              <div class="status ${statusCls}">${esc(statusLine)}</div>
             </div>
             <span class="micro">${this._levels(s, batt)}</span>
           </div>
@@ -3533,7 +3956,7 @@
             ${this._actionRow(s, climateOn, defrost, vent)}
           </div>
 
-          <div class="carwrap">${CAR_TOP_SVG(s.charging ? "charging" : "", d)}</div>
+          <div class="carwrap">${CAR_TOP_SVG(prev ? prev.cls : topCls, d)}</div>
           ${this._navRow()}
           ${this._climatePanel()}
 
@@ -3610,6 +4033,26 @@
           </div>
         </div>`;
       this._wire();
+      // The drawing appears as it was, then takes the new state a frame
+      // later, so what changed moves. The first render shows the state as it
+      // is, and plays no moment.
+      // The switch is skipped only when a newer render has replaced this
+      // drawing. A card that Home Assistant has taken off the page while a
+      // condition hides it still gets its new state, or it would come back
+      // drawing the old one.
+      const svg = this.shadowRoot.querySelector(".cartop");
+      const shots = [];
+      if (prev && lockNow != null && lastLock != null && lockNow !== lastLock) shots.push(["flash", 1500]);
+      if (prev && !prev.lights && driving) shots.push(["power", 900]);
+      this._topPrev = { prefix: this._prefix, cls: topCls,
+        lastLock: lockNow != null ? lockNow : lastLock, lights: driving };
+      if (svg && prev && (prev.cls !== topCls || shots.length)) {
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          if (svg !== this.shadowRoot.querySelector(".cartop")) return;
+          svg.setAttribute("class", `cartop ${topCls}`);
+          shots.forEach(([name, ms]) => this._oneShot(svg, name, ms));
+        }));
+      }
     }
   }
 

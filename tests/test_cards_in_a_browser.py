@@ -51,6 +51,12 @@ window.mkHass = (opts) => {
   put(`sensor.${P}_tire_front_right`, "240", { unit_of_measurement: "kPa" });
   put(`sensor.${P}_tire_rear_left`, "260", { unit_of_measurement: "kPa" });
   put(`sensor.${P}_tire_rear_right`, "280", { unit_of_measurement: "kPa" });
+  // The four corners' readings and their unit, for the tire alarms.
+  if (opts.tires) {
+    ["front_left", "front_right", "rear_left", "rear_right"].forEach((corner, i) => {
+      put(`sensor.${P}_tire_${corner}`, opts.tires[i], { unit_of_measurement: opts.tireUnit || "kPa" });
+    });
+  }
   // Both small cards print this in their head row (#52); omit it with
   // noInteriorTemp to exercise the half-missing case.
   if (!opts.noInteriorTemp) {
@@ -110,7 +116,8 @@ window.mkHass = (opts) => {
     const c = opts.covers;
     if (c.windows) put(`cover.${P}_all_windows`, c.windows,
         { device_class: "window",
-          ...(c.windowsPos != null ? { current_position: c.windowsPos } : {}) });
+          ...(c.windowsPos != null ? { current_position: c.windowsPos } : {}),
+          ...(c.openWindows ? { open_windows: c.openWindows } : {}) });
     if (c.sunroof) put(`cover.${P}_sunroof`, c.sunroof, { device_class: "shade" });
     if (c.sunshade) put(`cover.${P}_sunshade`, c.sunshade, { device_class: "shade" });
   }
@@ -3442,3 +3449,325 @@ def test_the_service_row_keeps_the_distance_when_the_days_are_unknown():
             {"text": "12 d / —", "warn": True}], tag
         assert _mount(tag, _SERVICE_ROW, service={"days": "unknown", "km": "unavailable"}) == [
             {"text": "—", "warn": False}], tag
+
+
+# --------------------------------------- the top view, drawn as it stands
+
+_TOP_STATE = r"""(() => {
+    const svg = el.shadowRoot.querySelector('.cartop');
+    const status = el.shadowRoot.querySelector('.status');
+    return {
+      cls: svg.getAttribute('class').split(/\s+/),
+      wins: [...el.shadowRoot.querySelectorAll('.cartop .win.open')]
+        .map((w) => w.closest('.door').classList[1]),
+      tyres: Object.fromEntries([...el.shadowRoot.querySelectorAll('.cartop .tyre')]
+        .map((g) => [g.classList[1], g.classList[2] || ''])),
+      values: [...el.shadowRoot.querySelectorAll('.cartop text.tv-val')].map((t) => t.textContent),
+      status: status.textContent.trim(),
+      statusCls: status.className,
+    };
+})()"""
+
+
+def test_the_top_view_opens_each_door_on_its_own_side():
+    """A door is drawn open, not only flagged. An open door puts its
+    d-<corner> class on the drawing, and the front pair follows the driver's
+    side the way the dots do (#18)."""
+    for country, cfg, want in (("IL", {}, "d-fl"), ("AU", {}, "d-fr"),
+                               ("IL", {"rhd": True}, "d-fr")):
+        got = _mount("geely-card-top", _TOP_STATE, cfg=cfg, country=country,
+                     driverDoor="on")
+        doors = [c for c in got["cls"] if c.startswith("d-")]
+        assert doors == [want], (country, cfg, got["cls"])
+
+
+def test_the_top_view_opens_the_windows_the_car_names():
+    """cover.all_windows' open_windows names windows in the doors' words, so
+    the front pair swaps on a right-hand-drive car as the doors do and the rear
+    pair never swaps. Without the attribute, no window opens."""
+    covers = {"windows": "open", "openWindows": ["driver", "rear_right"]}
+    got = _mount("geely-card-top", _TOP_STATE, country="IL", covers=covers)
+    assert sorted(got["wins"]) == ["fl", "rr"], got["wins"]
+    got = _mount("geely-card-top", _TOP_STATE, country="AU", covers=covers)
+    assert sorted(got["wins"]) == ["fr", "rr"], got["wins"]
+    got = _mount("geely-card-top", _TOP_STATE, country="IL", covers={"windows": "open"})
+    assert got["wins"] == [], got["wins"]
+
+
+def test_the_top_view_reads_each_tire_against_the_thresholds():
+    """The comparison is in kPa, whatever unit Home Assistant shows. Under
+    190 is low and under 100 is flat. A 0 among reporting tires is a silent
+    sensor, never a puncture. A car that reports no tire at all keeps every
+    wheel plain. The card options move both thresholds."""
+    got = _mount("geely-card-top", _TOP_STATE, tires=["165", "40", "0", "231"])
+    assert got["tyres"] == {"fl": "low", "fr": "flat", "rl": "na", "rr": ""}, got["tyres"]
+    assert got["values"][2] == "—", got["values"]
+    assert got["status"] == "Puncture · check tire" and "danger" in got["statusCls"], got
+    got = _mount("geely-card-top", _TOP_STATE, tires=["23", "36", "33", "34"], tireUnit="psi")
+    assert got["tyres"] == {"fl": "low", "fr": "", "rl": "", "rr": ""}, got["tyres"]
+    assert got["status"] == "Tire pressure low" and "warn" in got["statusCls"], got
+    got = _mount("geely-card-top", _TOP_STATE, tires=["0.9", "2.4", "2.4", "2.4"], tireUnit="bar")
+    assert got["tyres"]["fl"] == "flat", got["tyres"]
+    got = _mount("geely-card-top", _TOP_STATE, tires=["unknown"] * 4)
+    assert got["tyres"] == {"fl": "", "fr": "", "rl": "", "rr": ""}, got["tyres"]
+    got = _mount("geely-card-top", _TOP_STATE, cfg={"tire_low": 240, "tire_flat": 150},
+                 tires=["230", "140", "250", "260"])
+    assert got["tyres"] == {"fl": "low", "fr": "flat", "rl": "", "rr": ""}, got["tyres"]
+
+
+def test_the_top_view_raises_the_hood_and_tailgate_and_slides_the_roof():
+    got = _evaluate(r"""() => {
+        const el = document.createElement("geely-card-top");
+        document.body.appendChild(el);
+        el.setConfig({});
+        const hass = window.mkHass({ covers: { sunroof: "open" } });
+        hass.states["binary_sensor.car_hood"].state = "on";
+        hass.states["binary_sensor.car_trunk"].state = "on";
+        el.hass = hass;
+        return {
+          cls: el.shadowRoot.querySelector(".cartop").getAttribute("class").split(/\s+/),
+          open: [...el.shadowRoot.querySelectorAll(".cartop .tv-stat.open")].map((t) => t.textContent.trim()),
+        };
+    }""")
+    assert {"hood", "trunk", "sun"} <= set(got["cls"]), got
+    assert got["open"] == ["Open", "Open", "Open"], got
+
+
+def test_a_change_moves_the_drawing_and_only_a_lock_change_flashes():
+    """The card re-renders its whole body. So the drawing first appears as it
+    was, and takes the new state two frames later, which is what lets a door
+    swing. An update that changes nothing about the car moves nothing and
+    plays no flash. Locking or unlocking flashes the indicators once."""
+    got = _evaluate(r"""async () => {
+        const frames = () => new Promise((r) => requestAnimationFrame(
+          () => requestAnimationFrame(() => setTimeout(r, 0))));
+        const el = document.createElement("geely-card-top");
+        document.body.appendChild(el);
+        el.setConfig({});
+        const cls = () => el.shadowRoot.querySelector(".cartop").getAttribute("class").split(/\s+/);
+        el.hass = window.mkHass({});
+        const first = cls();
+        el.hass = window.mkHass({ driverDoor: "on" });
+        const before = cls();
+        await frames();
+        const after = cls();
+        el.hass = window.mkHass({ driverDoor: "on" });
+        await frames();
+        const same = cls();
+        const h = window.mkHass({ driverDoor: "on" });
+        h.states["lock.car_doors"].state = "unlocked";
+        el.hass = h;
+        await frames();
+        const unlocked = cls();
+        return { first, before, after, same, unlocked };
+    }""")
+    assert "d-fl" not in got["first"] and "flash" not in got["first"], got
+    assert "d-fl" not in got["before"], got
+    assert "d-fl" in got["after"], got
+    assert "flash" not in got["same"], got
+    assert "flash" in got["unlocked"] and "locked" not in got["unlocked"], got
+
+
+def test_the_top_view_can_be_told_to_hold_still():
+    """`animations: false` stops what moves, not only names a class: an open
+    door then stands open with no transition and its dot does not blink."""
+    probe = r"""(() => {
+        const svg = el.shadowRoot.querySelector('.cartop');
+        const cs = (q) => getComputedStyle(el.shadowRoot.querySelector(q));
+        return { cls: svg.getAttribute('class').split(/\s+/),
+                 door: cs('.cartop .door.fl').transitionDuration,
+                 dot: cs('.cartop .door.fl .ind').animationName };
+    })()"""
+    still = _mount("geely-card-top", probe, cfg={"animations": False}, driverDoor="on")
+    assert "noanim" in still["cls"] and still["door"] == "0s" and still["dot"] == "none", still
+    moving = _mount("geely-card-top", probe, driverDoor="on")
+    assert "noanim" not in moving["cls"] and moving["door"] != "0s", moving
+    assert moving["dot"] != "none", moving
+
+
+def test_find_ripples_the_top_view():
+    got = _mount("geely-card-top", r"""(() => {
+        el.shadowRoot.querySelector('[data-act="find"]').click();
+        return el.shadowRoot.querySelector('.cartop').getAttribute('class').split(/\s+/);
+    })()""")
+    assert "find" in got, got
+
+
+_TOP_STATUS = r"""(cases) => cases.map((c) => {
+    const el = document.createElement('geely-card-top');
+    document.body.appendChild(el);
+    el.setConfig({});
+    const h = window.mkHass(c.opts);
+    if (c.charging) h.states['sensor.car_charger_connection'] =
+        { entity_id: 'sensor.car_charger_connection', state: 'Charging', attributes: {} };
+    el.hass = h;
+    const st = el.shadowRoot.querySelector('.status');
+    const out = { name: c.name, text: st.textContent.trim(), cls: st.className };
+    el.remove();
+    return out;
+})"""
+
+
+def test_the_top_views_status_line_puts_a_puncture_first_and_a_low_tire_last():
+    """A puncture outranks everything, charging included. A low tire is named
+    only when nothing a driver acts on first - a charge, a drive, an opening -
+    holds the line, and only then does the line turn amber."""
+    low, flat = ["165", "230", "230", "230"], ["40", "230", "230", "230"]
+    got = _evaluate(_TOP_STATUS, arg=[
+        {"name": "flat charging", "opts": {"tires": flat}, "charging": True},
+        {"name": "low charging", "opts": {"tires": low}, "charging": True},
+        {"name": "low door", "opts": {"tires": low, "driverDoor": "on"}},
+        {"name": "low driving", "opts": {"tires": low, "speed": "50"}},
+        {"name": "low alone", "opts": {"tires": low}},
+    ])
+    by = {g["name"]: g for g in got}
+    assert by["flat charging"]["text"] == "Puncture · check tire", by
+    assert "danger" in by["flat charging"]["cls"], by
+    assert by["low charging"]["text"].startswith("Charging"), by
+    assert "warn" not in by["low charging"]["cls"], by
+    assert by["low door"]["text"] == "1 opening open", by
+    assert "warn" not in by["low door"]["cls"], by
+    assert by["low driving"]["text"].startswith("Driving"), by
+    assert "warn" not in by["low driving"]["cls"], by
+    assert by["low alone"]["text"] == "Tire pressure low" and "warn" in by["low alone"]["cls"], by
+
+
+def test_an_open_door_says_so_by_standing_open_not_by_a_word():
+    got = _mount("geely-card-top", r"""[...el.shadowRoot.querySelectorAll('.cartop .tv-stat')]
+        .map((t) => t.textContent.trim())""", driverDoor="on")
+    assert "Open" not in got and got.count("Closed") >= 3, got
+
+
+def test_a_redraw_with_nothing_changed_on_the_car_keeps_the_drawing_as_it_stands():
+    """Every poll re-renders the card. A render that changes something else -
+    the battery here - draws the car as it already stood, with no move and no
+    flash."""
+    got = _evaluate(r"""async () => {
+        const frames = () => new Promise((r) => requestAnimationFrame(
+          () => requestAnimationFrame(() => setTimeout(r, 0))));
+        const el = document.createElement("geely-card-top");
+        document.body.appendChild(el);
+        el.setConfig({});
+        const cls = () => el.shadowRoot.querySelector(".cartop").getAttribute("class").split(/\s+/);
+        el.hass = window.mkHass({ driverDoor: "on" });
+        const node = el.shadowRoot.querySelector(".cartop");
+        const h = window.mkHass({ driverDoor: "on" });
+        h.states["sensor.car_battery"].state = "62";
+        el.hass = h;
+        const redrawn = el.shadowRoot.querySelector(".cartop") !== node;
+        const at_once = cls();
+        await frames();
+        return { redrawn, at_once, after: cls() };
+    }""")
+    assert got["redrawn"], got
+    assert "d-fl" in got["at_once"] and "flash" not in got["at_once"], got
+    assert "d-fl" in got["after"] and "flash" not in got["after"], got
+
+
+def test_a_card_hidden_by_a_condition_comes_back_drawing_the_car_as_it_is():
+    """Home Assistant keeps handing state to a card that a condition has taken
+    off the page. A door that shut meanwhile must not stand open when the card
+    is shown again."""
+    got = _evaluate(r"""async () => {
+        const frames = () => new Promise((r) => requestAnimationFrame(
+          () => requestAnimationFrame(() => setTimeout(r, 0))));
+        const el = document.createElement("geely-card-top");
+        document.body.appendChild(el);
+        el.setConfig({});
+        el.hass = window.mkHass({ driverDoor: "on" });
+        await frames();
+        el.remove();
+        el.hass = window.mkHass({});
+        await frames();
+        document.body.appendChild(el);
+        await frames();
+        return el.shadowRoot.querySelector(".cartop").getAttribute("class").split(/\s+/);
+    }""")
+    assert "d-fl" not in got, got
+
+
+def test_an_unread_lock_neither_unfolds_the_mirrors_nor_flashes():
+    """In an outage the lock reads unavailable. That is not an unlock: the
+    mirrors stay folded, and coming back locked plays no flash. A real unlock
+    after the outage still flashes."""
+    got = _evaluate(r"""async () => {
+        const frames = () => new Promise((r) => requestAnimationFrame(
+          () => requestAnimationFrame(() => setTimeout(r, 0))));
+        const el = document.createElement("geely-card-top");
+        document.body.appendChild(el);
+        el.setConfig({});
+        const cls = () => el.shadowRoot.querySelector(".cartop").getAttribute("class").split(/\s+/);
+        const lock = (state) => {
+          const h = window.mkHass({});
+          h.states["lock.car_doors"].state = state;
+          return h;
+        };
+        el.hass = lock("locked");
+        el.hass = lock("unavailable");
+        await frames();
+        const outage = cls();
+        el.hass = lock("locked");
+        await frames();
+        const back = cls();
+        el.hass = lock("unavailable");
+        await frames();
+        el.hass = lock("unlocked");
+        await frames();
+        const unlocked = cls();
+        return { outage, back, unlocked };
+    }""")
+    assert "locked" in got["outage"] and "flash" not in got["outage"], got
+    assert "locked" in got["back"] and "flash" not in got["back"], got
+    assert "locked" not in got["unlocked"] and "flash" in got["unlocked"], got
+
+
+def test_the_mirrors_stay_out_while_a_locked_car_drives():
+    """A car that locks itself at speed is still driving: the lamps are on
+    and the mirrors stay out. Parked and locked, they fold."""
+    probe = "el.shadowRoot.querySelector('.cartop').getAttribute('class').split(/\\s+/)"
+    driving = _mount("geely-card-top", probe, speed="50")
+    assert "lights" in driving and "locked" not in driving, driving
+    parked = _mount("geely-card-top", probe)
+    assert "locked" in parked and "lights" not in parked, parked
+
+
+def test_a_tire_threshold_of_zero_turns_that_alarm_off():
+    got = _mount("geely-card-top", _TOP_STATE, cfg={"tire_low": 0},
+                 tires=["165", "40", "230", "230"])
+    assert got["tyres"] == {"fl": "", "fr": "flat", "rl": "", "rr": ""}, got["tyres"]
+    got = _mount("geely-card-top", _TOP_STATE, cfg={"tire_flat": 0},
+                 tires=["165", "40", "230", "230"])
+    assert got["tyres"] == {"fl": "low", "fr": "low", "rl": "", "rr": ""}, got["tyres"]
+
+
+def test_the_top_view_reads_the_tires_kpa_attribute_before_the_display_unit():
+    """The integration's tire sensors carry the reading in kPa as an
+    attribute. A display unit relabelled by hand cannot silence the alarm."""
+    got = _evaluate(r"""() => {
+        const el = document.createElement("geely-card-top");
+        document.body.appendChild(el);
+        el.setConfig({});
+        const h = window.mkHass({});
+        const t = h.states["sensor.car_tire_front_left"];
+        t.state = "1650"; t.attributes = { unit_of_measurement: "mbar", kPa: 165 };
+        el.hass = h;
+        return [...el.shadowRoot.querySelectorAll('.cartop .tyre')]
+          .map((g) => g.classList[1] + ":" + (g.classList[2] || ""));
+    }""")
+    assert "fl:low" in got, got
+
+
+def test_the_cars_own_cable_flag_draws_the_cable():
+    """On an E2 whose wallbox a relay switches off, the connection reads
+    unplugged with the cable in, and the car's own flag says plugged (#129)."""
+    got = _evaluate(r"""() => {
+        const el = document.createElement("geely-card-top");
+        document.body.appendChild(el);
+        el.setConfig({});
+        const h = window.mkHass({});
+        h.states["binary_sensor.car_plugged_in_reported"] =
+          { entity_id: "binary_sensor.car_plugged_in_reported", state: "on", attributes: {} };
+        el.hass = h;
+        return el.shadowRoot.querySelector(".cartop").getAttribute("class").split(/\s+/);
+    }""")
+    assert "plugged" in got, got
