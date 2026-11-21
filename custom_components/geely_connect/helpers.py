@@ -298,6 +298,35 @@ def windows_open(data: Any) -> bool | None:
     return False if any_seen else None
 
 
+# The window corners in the doors' words (door_driver, door_passenger,
+# door_rear_left and door_rear_right read the same four fields), so a card that
+# draws the car puts each window beside its own door.
+_WINDOW_ROLES: dict[str, str] = {"Driver": "driver", "Passenger": "passenger",
+                                 "DriverRear": "rear_left",
+                                 "PassengerRear": "rear_right"}
+
+
+def open_windows(data: Any) -> list[str] | None:
+    """The corners whose window is not closed, in the doors' words.
+
+    windows_open's reading, corner by corner: "2" is closed and any other value
+    the car reports is open. None when the car reports no corner at all. Then
+    the attribute is absent, rather than an empty list that would read as every
+    window shut.
+    """
+    climate = walk(data or {}, _CLIMATE_PATH) or {}
+    seen = False
+    out: list[str] = []
+    for corner in WINDOW_CORNERS:
+        v = climate.get(f"winStatus{corner}")
+        if v is None:
+            continue
+        seen = True
+        if str(v) != "2":
+            out.append(_WINDOW_ROLES[corner])
+    return out if seen else None
+
+
 def slot_2_window(sched: Any) -> dict | None:
     """The charging window an E2 keeps in charge-server slot 2 (#72).
 

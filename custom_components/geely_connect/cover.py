@@ -53,7 +53,7 @@ from .const import (
 )
 from .helpers import (
     walk as _walk, windows_open, windows_position, schedule_refresh,
-    sunroof_is_stale,
+    sunroof_is_stale, open_windows,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -186,3 +186,11 @@ class GeelyWindows(_BaseGeelyCover):
         # corner so the % shows how far the windows are down - a vent crack
         # reads ~8, not just "open". None when the car omits winPos entirely.
         return windows_position(self.coordinator.data)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        # Which windows are open as well as whether one is, so the top-view
+        # card can open each on its own side. The attribute uses the doors'
+        # words, so the card maps windows exactly the way it maps doors.
+        corners = open_windows(self.coordinator.data)
+        return None if corners is None else {"open_windows": corners}

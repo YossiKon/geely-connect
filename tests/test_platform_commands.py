@@ -681,6 +681,28 @@ def test_windows_cover_follows_the_four_corner_fields():
     assert entity.is_closed is None
 
 
+def test_windows_cover_names_each_open_window_in_the_doors_words():
+    """The cover's own state is any window open; the attribute says which, in
+    the doors' words, so the top view can open the right one. No corner
+    reported means no attribute rather than an empty list, which would read as
+    every window shut."""
+    _need_ha()
+    closed = dict(winStatusDriver="2", winStatusPassenger="2",
+                  winStatusDriverRear="2", winStatusPassengerRear="2")
+    _, entity = _make_cover("GeelyWindows", data=_climate_data(**closed))
+    assert entity.extra_state_attributes == {"open_windows": []}
+    _, entity = _make_cover("GeelyWindows", data=_climate_data(
+        **dict(closed, winStatusDriver="1", winStatusPassengerRear="garbled")))
+    assert entity.extra_state_attributes == {"open_windows": ["driver", "rear_right"]}
+    _, entity = _make_cover("GeelyWindows", data=_climate_data(
+        winStatusPassenger="1", winStatusDriverRear="1"))
+    assert entity.extra_state_attributes == {"open_windows": ["passenger", "rear_left"]}
+    _, entity = _make_cover("GeelyWindows", data=_climate_data())
+    assert entity.extra_state_attributes is None
+    _, entity = _make_cover("GeelyWindows", data=None)
+    assert entity.extra_state_attributes is None
+
+
 def test_windows_cover_reports_the_most_open_corner_as_its_position():
     _need_ha()
     # A vent crack reads ~8 on every corner; the aggregate reports the max.
