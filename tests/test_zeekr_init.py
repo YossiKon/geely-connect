@@ -81,6 +81,11 @@ def _zeekr_entry():
 class _FakeZeekrApi:
     """The adapter surface the update closure touches, with a renewal queue."""
 
+    def without_secrets(self, text):
+        # The coordinator quotes every error through the client (the real
+        # one is ZeekrAdapter.without_secrets); this fake holds no secrets.
+        return str(text)
+
     def __init__(self, **kw):
         self.kw = kw
         self._hf_takes = [("mock-hf-new", 1750000001, "mock-at-new", "mock-rt-new")]

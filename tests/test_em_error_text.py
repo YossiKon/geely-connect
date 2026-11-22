@@ -434,3 +434,56 @@ def test_a_failed_poll_is_worded_without_the_token():
     e = poll()
     assert isinstance(e, m.ConfigEntryAuthFailed), e
     _clean(str(e))
+
+
+def test_the_adapter_quotes_any_text_without_the_token_for_the_coordinator():
+    """The adapter's without_secrets() is what the coordinator and the
+    actions quote an error through: the client's values masked, the VIN
+    shortened, as the trail shows it."""
+    said = _adapter().without_secrets(
+        OSError(f"reset while sending {TOKEN} {ACCESS} {HF} {EMAIL} for {FAKE_VIN}"))
+    _clean(said)
+    assert f"...{FAKE_VIN[-4:]}" in said and zc._mask(TOKEN) in said, said
+
+
+def test_a_failed_poll_quotes_an_outside_error_without_the_token():
+    """An error raised outside the client - here a socket's that repeats
+    what was sent - was never scrubbed where it was raised: the retries'
+    debug lines, the warning that reuses the last snapshot and UpdateFailed
+    quote it through the adapter."""
+    from test_zeekr_init import _mod, _Patched, _setup_zeekr
+    from test_init_lifecycle import _FakeCoordinator, _instant_sleep
+
+    m = _mod()
+    ok, hass, entry, api = _setup_zeekr(m)
+    assert ok is True
+    api.without_secrets = _adapter().without_secrets
+    fast = types.SimpleNamespace(sleep=_instant_sleep,
+                                 CancelledError=asyncio.CancelledError)
+
+    def failing():
+        raise OSError(f"reset while sending {TOKEN} {ACCESS} for {FAKE_VIN}")
+
+    api.vehicle_status = failing
+    failed, lines = None, []
+    for _ in range(4):
+        with _Patched(m, asyncio=fast):
+            e, more = _logged(lambda: _raises_or_none(
+                lambda: asyncio.run(_FakeCoordinator.instance.refresh())))
+        lines += more
+        failed = failed or e
+    warned = [text for level, text in lines if level >= logging.WARNING]
+    assert warned and "reusing last snapshot" in warned[0], warned
+    assert any("transient" in text for level, text in lines), lines
+    for _, text in lines:
+        _clean(text)
+    assert isinstance(failed, m.UpdateFailed), failed
+    _clean(str(failed))
+
+
+def _raises_or_none(fn):
+    try:
+        fn()
+    except Exception as exc:  # noqa: BLE001 - the error is what is checked
+        return exc
+    return None

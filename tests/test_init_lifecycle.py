@@ -10,6 +10,7 @@ import functools
 import importlib
 import importlib.util
 import json
+import logging
 import os
 import sys
 import tempfile
@@ -406,6 +407,11 @@ class _FakeApi:
     def vehicle_status(self):
         self.calls.append("status")
         return self._pop_status()
+
+    def without_secrets(self, text):
+        # The coordinator quotes every error through the client (the real
+        # one is GeelyApi.without_secrets); this fake holds no secrets.
+        return str(text)
 
     def vehicle_status_state(self):
         self.calls.append("state")
@@ -2160,7 +2166,8 @@ def test_the_slot_2_read_at_setup_leaves_the_data_alone_when_it_fails():
     keep = {"_scheduled_charging": {"bizType": 6}}
     for get in (raising, lambda biz: {"code": "8070", "message": "busy"},
                 lambda biz: {"code": 1000, "data": "nonsense"}):
-        api = types.SimpleNamespace(charge_server_get=get)
+        # Every client quotes an error through without_secrets().
+        api = types.SimpleNamespace(charge_server_get=get, without_secrets=str)
         assert run(api, dict(keep)) == keep
     # An api that does not serve the slot, or has stopped reading it, is not
     # asked at all. The getter answers well, so only the gate can keep the
@@ -2273,3 +2280,257 @@ def test_loading_the_time_platform_leaves_the_poller_its_clock():
         _FakeCoordinator.instance = None            # let the second package tree go
         for key in [k for k in sys.modules if k == name or k.startswith(name + ".")]:
             sys.modules.pop(key, None)
+
+
+# ------------------------------------------------ errors quoted by the client ---
+
+def _real_quoter():
+    """A real GeelyApi's without_secrets(), holding invented session values."""
+    from conftest import load as _load
+    api_mod = _load("api")
+    real = api_mod.GeelyApi.__new__(api_mod.GeelyApi)
+    real.vin = FAKE_VIN
+    real._jwt, real.cidpsso_token = "jwt-session-0001-abcdef", "cidpsso-token-0001"
+    real.user_id, real.email = "uid-000123456", "owner@example.com"
+    secret = (real._jwt, real.cidpsso_token, real.user_id, real.email, FAKE_VIN)
+    return real.without_secrets, secret, "denied for " + " / ".join(secret)
+
+
+def _quoted_clean(text, secret):
+    for v in secret:
+        assert v not in text, (v, text)
+
+
+class _Lines(logging.Handler):
+    def __init__(self):
+        super().__init__(logging.DEBUG)
+        self.lines = []
+
+    def emit(self, record):
+        self.lines.append((record.levelno, record.getMessage()))
+
+
+def test_a_failed_poll_quotes_the_gateway_and_outside_errors_without_the_session():
+    """The coordinator words its warning, UpdateFailed and the re-auth around
+    an error or an answer, and quotes them through the client: a status read
+    answered with a code that is not a success hands the gateway's msg back
+    as data, and an error raised outside the client - a socket's - was never
+    scrubbed where it was raised."""
+    quote, secret, words = _real_quoter()
+
+    def tweak(api_):
+        api_.without_secrets = quote
+
+    m = _mod()
+    ok, hass, _, api, coord, _ = _setup(m, api_tweak=tweak)
+    assert ok is True
+    fast = types.SimpleNamespace(sleep=_instant_sleep,
+                                 CancelledError=asyncio.CancelledError)
+    for msg in (words, {"detail": words}):
+        api.status_results = [{"code": 5000, "msg": msg}]
+        try:
+            with _Patched(m, asyncio=fast):
+                asyncio.run(coord.refresh())
+        except m.UpdateFailed as e:
+            _quoted_clean(str(e), secret)
+            assert "code=5000" in str(e) and f"...{FAKE_VIN[-4:]}" in str(e), str(e)
+            assert e.__cause__ is None, "the raw answer must not ride along"
+        else:
+            raise AssertionError("an error answer was taken as data")
+
+    root = logging.getLogger()
+    handler, old = _Lines(), root.level
+    root.addHandler(handler)
+    root.setLevel(logging.DEBUG)
+    failed = None
+    try:
+        api.status_results = [OSError(words) for _ in range(9)]
+        for _ in range(3):
+            try:
+                with _Patched(m, asyncio=fast):
+                    asyncio.run(coord.refresh())
+            except m.UpdateFailed as e:
+                failed = e
+    finally:
+        root.removeHandler(handler)
+        root.setLevel(old)
+    warned = [text for level, text in handler.lines if level >= logging.WARNING]
+    assert warned and "reusing last snapshot" in warned[0], warned
+    for _, text in handler.lines:
+        _quoted_clean(text, secret)
+    assert failed is not None, "the third failure in a row was not raised"
+    _quoted_clean(str(failed), secret)
+    assert failed.__cause__ is None and failed.__suppress_context__, \
+        "a chained error prints its raw text in the traceback"
+
+    m2 = _mod()
+    from homeassistant.exceptions import ConfigEntryAuthFailed
+    ok, hass, _, api, coord, _ = _setup(m2, api_tweak=tweak)
+    api.status_results = [m2.GeelyAuthError(words)]
+    try:
+        asyncio.run(coord.refresh())
+    except ConfigEntryAuthFailed as e:
+        _quoted_clean(str(e), secret)
+    else:
+        raise AssertionError("a refused session did not ask for re-authentication")
+
+
+def test_every_error_the_integration_quotes_goes_through_a_scrub():
+    """__init__.py's syntax tree, held to three rules. No traceback is
+    printed from it (logger.exception, exc_info, traceback, sys.exc_info):
+    a traceback prints the caught error whole. An except block quotes the
+    error it caught only through a scrub - the client's without_secrets(),
+    hide_values() given something to hide, or mask_path() where the key
+    folder is removed - and otherwise reads it only as e.message or e.code
+    (worded by the client), type()/isinstance(), a `from e` cause, or keeps
+    it for the retry's re-raise. The two errors worded from this package's
+    own text (region keys) are left. An answer (resp, sc, st, state_resp)
+    reaches a log line or a raised error only through without_secrets()."""
+    src = open(os.path.join(PKG, "__init__.py"), encoding="utf-8").read()
+    tree = ast.parse(src)
+    parents = {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parents[child] = node
+    own_text = {"RegionKeysError", "LocalRegionKeysError"}
+    answers = {"resp", "sc", "st", "state_resp"}
+    levels = {"debug", "info", "warning", "error", "critical", "exception", "log"}
+
+    def name_of(call):
+        f = call.func
+        return f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", "")
+
+    def function_of(node):
+        while node in parents:
+            node = parents[node]
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                return node.name
+        return None
+
+    def is_scrub(call):
+        name = name_of(call)
+        if name == "without_secrets":
+            return True
+        if name == "hide_values":
+            vals = call.args[1] if len(call.args) > 1 else None
+            return vals is not None and not (
+                isinstance(vals, (ast.Tuple, ast.List, ast.Set)) and not vals.elts)
+        if name == "mask_path":                 # VIN-shaped text only
+            return function_of(call) == "async_remove_entry"
+        return False
+
+    bare = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Attribute) and node.func.attr == "exception":
+                bare.append((node.lineno, "logger.exception"))
+            for kw in node.keywords:
+                if kw.arg == "exc_info" and not (
+                        isinstance(kw.value, ast.Constant) and kw.value.value is False):
+                    bare.append((node.lineno, "exc_info"))
+        if isinstance(node, ast.Name) and node.id == "traceback":
+            bare.append((node.lineno, "traceback"))
+        if (isinstance(node, ast.Attribute) and node.attr == "exc_info"
+                and isinstance(node.value, ast.Name) and node.value.id == "sys"):
+            bare.append((node.lineno, "sys.exc_info"))
+    for handler in ast.walk(tree):
+        if not isinstance(handler, ast.ExceptHandler) or not handler.name:
+            continue
+        if handler.type is not None and ast.unparse(handler.type) in own_text:
+            continue
+        for stmt in handler.body:
+            for node in ast.walk(stmt):
+                if not (isinstance(node, ast.Name) and node.id == handler.name):
+                    continue
+                p = parents.get(node)
+                if isinstance(p, ast.Raise) and p.cause is node:
+                    continue
+                if isinstance(p, ast.Attribute) and p.attr in {"message", "code"}:
+                    continue
+                if isinstance(p, ast.Assign) and all(
+                        isinstance(t, ast.Name) and t.id == "last_exc" for t in p.targets):
+                    continue
+                if isinstance(p, ast.Call):
+                    if name_of(p) in {"type", "isinstance"} or is_scrub(p):
+                        continue
+                    if (name_of(p) == "str" and isinstance(parents.get(p), ast.Call)
+                            and is_scrub(parents[p])):
+                        continue
+                bare.append((node.lineno, ast.get_source_segment(src, p)))
+
+    def scrubbed(node, stop):
+        while node is not stop and node in parents:
+            node = parents[node]
+            if isinstance(node, ast.Call) and name_of(node) == "without_secrets":
+                return True
+        return False
+
+    sinks = []
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr in levels and isinstance(node.func.value, ast.Name)
+                and node.func.value.id in {"_LOGGER", "logger"}):
+            sinks.append(node)
+        if isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call):
+            sinks.append(node.exc)
+    for sink in sinks:
+        for node in ast.walk(sink):
+            if isinstance(node, ast.Name) and node.id in answers:
+                p = parents.get(node)
+                if isinstance(p, ast.Attribute) and p.attr == "keys":
+                    continue
+                if not scrubbed(node, sink):
+                    bare.append((node.lineno, ast.get_source_segment(src, p or node)))
+    assert not bare, bare
+
+
+def test_an_action_quotes_an_outside_error_without_the_session():
+    """fire_control's error is shown where the action was called from, and
+    an error raised outside the client was never scrubbed."""
+    from homeassistant.exceptions import HomeAssistantError
+    quote, secret, words = _real_quoter()
+    m = _mod()
+    api = _FakeApi()
+    api.without_secrets = quote
+
+    def control(*args, **kw):
+        raise OSError(words)
+
+    api.control = control
+    _, run = _service(m, {"e1": {"vin": FAKE_VIN, "api": api}},
+                      {"service_id": "RCT", "command": "start"})
+    try:
+        run()
+    except HomeAssistantError as e:
+        assert "fire_control RCT failed" in str(e), str(e)
+        _quoted_clean(str(e), secret)
+        assert e.__cause__ is None and e.__suppress_context__, \
+            "a chained error prints its raw text in the traceback"
+    else:
+        raise AssertionError("a failed send was taken as sent")
+
+
+def test_a_failed_trip_read_is_raised_without_its_chain():
+    """The scheduled trip's read, failed by an error from outside the client,
+    is quoted through it and raised without the chain that would print the
+    raw text in a traceback."""
+    from homeassistant.exceptions import HomeAssistantError
+    quote, secret, words = _real_quoter()
+    m = _mod()
+    api = _FakeApi()
+    api.without_secrets = quote
+
+    def unreadable(_biz):
+        raise OSError(words)
+
+    api.charge_server_get = unreadable
+    _, call = _service(m, {"e1": {"vin": FAKE_VIN, "api": api, "capabilities": {}}},
+                       {"command": "start"}, name="set_scheduled_trip")
+    try:
+        call()
+    except HomeAssistantError as e:
+        assert "could not read the current scheduled trip" in str(e), str(e)
+        _quoted_clean(str(e), secret)
+        assert e.__cause__ is None and e.__suppress_context__
+    else:
+        raise AssertionError("an unreadable trip was taken as read")

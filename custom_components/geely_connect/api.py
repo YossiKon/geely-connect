@@ -992,6 +992,16 @@ class GeelyApi(CommandTrail):
         return _shorten_vin(hide_values(str(redact(j)), self.hidden() + sent),
                             getattr(self, "vin", "") or "")
 
+    def without_secrets(self, text: Any) -> str:
+        """`text` with what hidden() names masked and the VIN shortened, for a
+        caller that words an error of its own around one from this client -
+        the coordinator's warning, UpdateFailed, an action's error. An error
+        raised outside the client (a socket's, a parser's) was never scrubbed
+        where it was raised, and a gateway's answer the client hands back as
+        data was not either."""
+        return _shorten_vin(hide_values(str(text), self.hidden()),
+                            getattr(self, "vin", "") or "")
+
     def _note_text(self, text: Any) -> str:
         """The trail's own scrub (CommandTrail), after taking out what
         hidden() names - before the trail cuts the line short, since a cut

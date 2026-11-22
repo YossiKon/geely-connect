@@ -1735,3 +1735,19 @@ def test_a_client_built_without_the_constructor_still_sends_and_refuses():
         assert e.message == "busy", e.message
     else:
         raise AssertionError("a refusal was taken as accepted")
+
+
+def test_the_client_quotes_any_text_without_its_session_for_the_coordinator():
+    """without_secrets() is what the coordinator and the actions quote an
+    error through: one raised outside the client, a socket's or a parser's,
+    was never scrubbed where it was raised. The session values are masked
+    and the VIN shortened, and a client built without the constructor still
+    answers."""
+    a = _session_client()
+    a._jwt_uid = "tsp-uid-000987"
+    secret = (_JWT, _CIDPSSO, _USER, _EMAIL, "tsp-uid-000987")
+    said = a.without_secrets(OSError(_echo(*secret) + f" on {FAKE_VIN}"))
+    _left_out(said, secret)
+    assert FAKE_VIN not in said and f"...{FAKE_VIN[-4:]}" in said, said
+    bare = api.GeelyApi.__new__(api.GeelyApi)
+    assert bare.without_secrets("socket closed") == "socket closed"

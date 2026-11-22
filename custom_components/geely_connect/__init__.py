@@ -39,7 +39,8 @@ from homeassistant.util import dt as dt_util
 from . import api as geely_api
 from . import cards
 from . import propulsion
-from .api import GeelyApi, GeelyAuthError, GeelyControlError, GeelyTLSPinError, redact
+from .api import (GeelyApi, GeelyAuthError, GeelyControlError, GeelyTLSPinError,
+                  hide_values, redact)
 from .zeekr_adapter import ZeekrAdapter
 from .region_keys import LocalRegionKeysError, load_region_backend
 from .zeekr_regions import RegionKeysError, load_region_profile
@@ -214,7 +215,13 @@ async def _maybe_refetch_vehicle_metadata(hass: HomeAssistant, entry: ConfigEntr
             )
         )
     except Exception as e:  # noqa: BLE001
-        _LOGGER.debug("metadata refetch failed (non-fatal): %s", e)
+        # No client is built yet; what the request sent is hidden as a
+        # client would hide it (hide_values).
+        _LOGGER.debug("metadata refetch failed (non-fatal): %s",
+                      hide_values(str(e), (entry.data.get(CONF_CIDPSSO_TOKEN),
+                                           entry.data.get(CONF_USER_ID),
+                                           entry.data.get(CONF_DEVICE_IDFA),
+                                           entry.data.get(CONF_DEVICE_IDFV))))
         return
     target_vin = entry.data.get(CONF_VIN)
     match = next((v for v in all_v if v.get("vin") == target_vin), None)
@@ -258,7 +265,8 @@ async def _read_slot_2_now(hass: HomeAssistant, api: Any, coordinator: Any,
     try:
         sc = await hass.async_add_executor_job(api.charge_server_get, "2")
     except Exception as e:  # noqa: BLE001
-        _LOGGER.debug("scheduled-charging slot 2 read failed (non-fatal): %s", e)
+        _LOGGER.debug("scheduled-charging slot 2 read failed (non-fatal): %s",
+                      api.without_secrets(e))
         return
     if sc.get("code") in success_codes and isinstance(sc.get("data"), dict):
         coordinator.data["_scheduled_charging"] = sc["data"]
@@ -587,9 +595,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 derived = await hass.async_add_executor_job(api.probe_x_vin, d[CONF_VIN])
             except GeelyAuthError as e:
                 _LOGGER.debug("x-vin derivation skipped, the session needs "
-                              "re-authentication: %s", e)
+                              "re-authentication: %s", api.without_secrets(e))
             except Exception as e:  # noqa: BLE001 - derivation is best-effort only
-                _LOGGER.debug("x-vin derivation failed at setup: %s", e)
+                _LOGGER.debug("x-vin derivation failed at setup: %s",
+                              api.without_secrets(e))
             if derived:
                 api.adopt_enc_vin(derived)
                 hass.config_entries.async_update_entry(
@@ -613,7 +622,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                             api.new_gateway_lists_vehicle)
                     except Exception as e:  # noqa: BLE001 - keep it on doubt
                         listed, unread = None, type(e).__name__
-                        _LOGGER.debug("new-gateway vehicle list failed: %s", e)
+                        _LOGGER.debug("new-gateway vehicle list failed: %s",
+                                      api.without_secrets(e))
                     else:
                         if listed is None:
                             unread = "unreadable answer"
@@ -722,7 +732,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 last_exc = e
                 _LOGGER.debug("transient %s on %s (attempt %d/%d): %s",
                               type(e).__name__, getattr(func, "__name__", "?"),
-                              i + 1, attempts, e)
+                              i + 1, attempts, api.without_secrets(e))
                 if i + 1 < attempts:
                     await asyncio.sleep(delay)
         assert last_exc is not None
@@ -810,37 +820,48 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             try:
                 await _call_with_retry(api.request_position_refresh)
             except GeelyAuthError as e:
-                raise ConfigEntryAuthFailed(str(e)) from e
+                raise ConfigEntryAuthFailed(api.without_secrets(e)) from e
             except GeelyTLSPinError as e:
                 # A pin failure means the server key changed - an active
                 # MITM or a legitimate rotation. Never hide it at DEBUG.
-                _LOGGER.error("position refresh: TLS pin check failed: %s", e)
+                _LOGGER.error("position refresh: TLS pin check failed: %s",
+                              api.without_secrets(e))
             except Exception as e:  # noqa: BLE001
-                _LOGGER.debug("position-refresh PAI non-fatal failure: %s", e)
+                _LOGGER.debug("position-refresh PAI non-fatal failure: %s",
+                              api.without_secrets(e))
 
         # Primary status - the one call we always make.
         try:
             resp = await _call_with_retry(api.vehicle_status)
         except GeelyAuthError as e:
-            raise ConfigEntryAuthFailed(str(e)) from e
+            raise ConfigEntryAuthFailed(api.without_secrets(e)) from e
         except Exception as e:  # noqa: BLE001
             fail_state["consecutive"] += 1
             if fail_state["consecutive"] <= _FAILURE_TOLERANCE and prev:
                 _LOGGER.warning(
                     "vehicle_status failed (%d/%d consecutive); reusing last "
-                    "snapshot: %s", fail_state["consecutive"], _FAILURE_TOLERANCE, e,
+                    "snapshot: %s", fail_state["consecutive"], _FAILURE_TOLERANCE,
+                    api.without_secrets(e),
                 )
                 return prev
-            raise UpdateFailed(f"vehicle_status: {e}") from e
+            # `from None`: a chained error carries its raw text into the
+            # traceback Home Assistant prints at debug.
+            raise UpdateFailed(f"vehicle_status: {api.without_secrets(e)}") from None
         code = resp.get("code")
         data = resp.get("data")
         if code not in _SUCCESS_CODES:
+            # The gateway's own words, handed back as data: no client scrubbed
+            # them on the way.
+            msg = resp.get("msg")
+            if msg is not None:
+                msg = api.without_secrets(msg if isinstance(msg, str) else redact(msg))
             raise UpdateFailed(
-                f"vehicle_status code={code!r} msg={resp.get('msg')!r} "
+                f"vehicle_status code={code!r} msg={msg!r} "
                 f"keys={sorted(resp.keys())}"
             )
         if not isinstance(data, dict):
-            _LOGGER.debug("vehicle_status returned non-dict data: top-level=%r", redact(resp))
+            _LOGGER.debug("vehicle_status returned non-dict data: top-level=%s",
+                          api.without_secrets(redact(resp)))
             data = {}
 
         # The zeekr adapter renews the old-platform HF JWT silently from the
@@ -930,13 +951,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         data["_state"] = state_resp["data"]
                         state_read = True
                 except GeelyAuthError as e:
-                    raise ConfigEntryAuthFailed(str(e)) from e
+                    raise ConfigEntryAuthFailed(api.without_secrets(e)) from e
                 except GeelyTLSPinError as e:
                     # A pin failure means the server key changed - an active
                     # MITM or a legitimate rotation. Never hide it at DEBUG.
-                    _LOGGER.error("vehicle state fetch: TLS pin check failed: %s", e)
+                    _LOGGER.error("vehicle state fetch: TLS pin check failed: %s",
+                                  api.without_secrets(e))
                 except Exception as e:  # noqa: BLE001
-                    _LOGGER.debug("vehicle_status_state non-fatal failure: %s", e)
+                    _LOGGER.debug("vehicle_status_state non-fatal failure: %s",
+                                  api.without_secrets(e))
             if api_reads_charge_server(api):
                 try:
                     sc = await _call_with_retry(api.charge_server_get,
@@ -946,9 +969,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 except GeelyTLSPinError as e:
                     # A pin failure means the server key changed - an active
                     # MITM or a legitimate rotation. Never hide it at DEBUG.
-                    _LOGGER.error("scheduled-charging fetch: TLS pin check failed: %s", e)
+                    _LOGGER.error("scheduled-charging fetch: TLS pin check failed: %s",
+                                  api.without_secrets(e))
                 except Exception as e:  # noqa: BLE001
-                    _LOGGER.debug("scheduled-charging fetch non-fatal failure: %s", e)
+                    _LOGGER.debug("scheduled-charging fetch non-fatal failure: %s",
+                                  api.without_secrets(e))
             # Slot 4, the app's Scheduled trip. Battery Temperature
             # Maintenance lives here as `bw` and nowhere in the status block:
             # an owner switched it off with the weekday schedule armed, and
@@ -964,9 +989,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     if st.get("code") in _SUCCESS_CODES and isinstance(st.get("data"), dict):
                         data["_scheduled_trip"] = st["data"]
                 except GeelyTLSPinError as e:
-                    _LOGGER.error("scheduled-trip fetch: TLS pin check failed: %s", e)
+                    _LOGGER.error("scheduled-trip fetch: TLS pin check failed: %s",
+                                  api.without_secrets(e))
                 except Exception as e:  # noqa: BLE001
-                    _LOGGER.debug("scheduled-trip fetch non-fatal failure: %s", e)
+                    _LOGGER.debug("scheduled-trip fetch non-fatal failure: %s",
+                                  api.without_secrets(e))
             # Cleared only by a poll whose own state read worked. Clearing it
             # before the fetch, as this did for a day, meant one failed
             # vehicle-state call silently swallowed the user's Refresh Data
@@ -1044,7 +1071,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             capabilities.get("raw_count", 0), len(capabilities) - 1,
         )
     except Exception as e:  # noqa: BLE001
-        _LOGGER.warning("Capability fetch failed (non-fatal): %s", e)
+        _LOGGER.warning("Capability fetch failed (non-fatal): %s",
+                        api.without_secrets(e))
 
     # The first refresh read slot 6, before the catalogue could say the car
     # keeps its schedule in slot 2. Read slot 2 now, so the switch does not
@@ -1200,11 +1228,13 @@ def _register_debug_service(hass: HomeAssistant) -> None:
             )
         return loaded[0]
 
-    async def _send(entry_id: str, label: str, fn) -> dict:
+    async def _send(entry_id: str, label: str, fn, api: Any) -> dict:
         """Run one blocking API call, surfacing failures the way entities do.
 
         Swallowing them here made a rejected command look successful, and hid
-        an expired session from the reauth flow.
+        an expired session from the reauth flow. An error is quoted through
+        the client's without_secrets(), since one raised outside it was never
+        scrubbed.
         """
         try:
             return await hass.async_add_executor_job(fn)
@@ -1214,9 +1244,12 @@ def _register_debug_service(hass: HomeAssistant) -> None:
             entry = hass.config_entries.async_get_entry(entry_id)
             if entry:
                 entry.async_start_reauth(hass)
-            raise HomeAssistantError(f"Geely session expired: {e}") from e
+            raise HomeAssistantError(
+                f"Geely session expired: {api.without_secrets(e)}") from None
         except Exception as e:
-            raise HomeAssistantError(f"{label} failed: {e}") from e
+            # `from None`, as for UpdateFailed: the chain would print the raw
+            # text in the traceback Home Assistant logs at debug.
+            raise HomeAssistantError(f"{label} failed: {api.without_secrets(e)}") from None
 
     def _read_back(bundle: dict) -> None:
         """Poll straight after a probe, twice.
@@ -1244,10 +1277,11 @@ def _register_debug_service(hass: HomeAssistant) -> None:
         # asked for, so the default call keeps its three-argument shape.
         shape = {"latest": True} if call.data.get("latest") else {}
         resp = await _send(entry_id, f"fire_control {sid}", functools.partial(
-            bundle["api"].control, sid, params, cmd, **shape))
+            bundle["api"].control, sid, params, cmd, **shape), bundle["api"])
         _LOGGER.warning(
             "fire_control %s %s params=%s%s → response=%s",
-            sid, cmd, redact(params), " latest=true" if shape else "", redact(resp),
+            sid, cmd, redact(params), " latest=true" if shape else "",
+            bundle["api"].without_secrets(redact(resp)),
         )
         _read_back(bundle)
 
@@ -1291,7 +1325,7 @@ def _register_debug_service(hass: HomeAssistant) -> None:
             "extra": extra,
         }
         resp = await _send(entry_id, "fire_rapid", functools.partial(
-            bundle["api"].rapid_climate, **asked))
+            bundle["api"].rapid_climate, **asked), bundle["api"])
         # An entry on the new platform sends the app's captured body and
         # nothing more, on either of its routes. This line listed what such an
         # entry left out as if it had gone, and a probe of `extra` that probed
@@ -1304,7 +1338,7 @@ def _register_debug_service(hass: HomeAssistant) -> None:
             call.data["temp"], heat, vent, level, redact(extra),
             (" [NOT sent - this entry's body is the app's captured one: %s]"
              % ", ".join(unsent)) if unsent else "",
-            redact(resp),
+            bundle["api"].without_secrets(redact(resp)),
         )
         _read_back(bundle)
 
@@ -1351,15 +1385,18 @@ def _register_debug_service(hass: HomeAssistant) -> None:
             resp = await hass.async_add_executor_job(api.charge_server_get, "4")
         except NotImplementedError as e:
             raise ServiceValidationError(
-                f"the scheduled trip is not mapped on this platform yet: {e}") from e
+                "the scheduled trip is not mapped on this platform yet: "
+                f"{api.without_secrets(e)}") from e
         except Exception as e:  # noqa: BLE001 - the read decides, so it must be seen
-            raise HomeAssistantError(f"could not read the current scheduled trip: {e}") from e
+            raise HomeAssistantError(
+                f"could not read the current scheduled trip: {api.without_secrets(e)}") from None
         # A read the gateway refused is not an empty schedule: with a
         # departure given, an empty one would send the captured defaults.
         code = resp.get("code") if isinstance(resp, dict) else None
         if code is not None and str(code) != "1000":
             raise HomeAssistantError(
-                f"could not read the current scheduled trip: {redact(resp)}")
+                "could not read the current scheduled trip: "
+                f"{api.without_secrets(redact(resp))}")
         current = resp.get("data") if isinstance(resp, dict) else None
         current = current if isinstance(current, dict) else {}
         if departure is not None:
@@ -1400,10 +1437,10 @@ def _register_debug_service(hass: HomeAssistant) -> None:
             "bwl": _held("bwl", "1"),
         }
         resp = await _send(entry_id, f"set_scheduled_trip {command}", functools.partial(
-            api.scheduled_trip_set, **kwargs))
+            api.scheduled_trip_set, **kwargs), api)
         _LOGGER.warning("set_scheduled_trip %s departure=%s ac=%s bw=%s bwl=%s → response=%s",
                         command, scheduled_ms, kwargs["ac"], kwargs["bw"], kwargs["bwl"],
-                        redact(resp))
+                        api.without_secrets(redact(resp)))
         _read_back(bundle)
 
     # Admin-only. The entities are the supported surface and stay available to
@@ -1480,7 +1517,8 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
         )
     except Exception as e:  # noqa: BLE001 - removal is best-effort
         _LOGGER.warning("could not remove %s (%s); delete it by hand to be sure "
-                        "the vehicle key is gone", geely_api.mask_path(vin_dir), e)
+                        "the vehicle key is gone", geely_api.mask_path(vin_dir),
+                        geely_api.mask_path(e))
     else:
         _LOGGER.info("Removed stored certificate and key for %s",
                      geely_api.mask_path(vin_dir))

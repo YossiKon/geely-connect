@@ -35,7 +35,7 @@ import threading
 import time
 from typing import Any
 
-from .api import CommandTrail, GeelyAuthError, GeelyControlError
+from .api import CommandTrail, GeelyAuthError, GeelyControlError, _shorten_vin
 from .zeekr_client import (
     ZeekrApiError, ZeekrAuthError, ZeekrClient, ZeekrIdaas, _car_refused,
     hide_values, vehicle_vin,
@@ -465,12 +465,20 @@ class ZeekrAdapter(CommandTrail):
         text leaves out (ZeekrClient.hidden): the vehicle token above all,
         which addresses and controls the car and goes out with every command
         on the new route. Text that did not come from the client - a timeout,
-        say - passes this way too. The VIN is left to the trail, which
-        shortens it to its last four characters, as on the original
-        platform."""
+        say - passes this way too. The VIN is shortened to its last four
+        characters, as on the original platform, not masked."""
+        return super()._note_text(self.without_secrets(text))
+
+    def without_secrets(self, text: Any) -> str:
+        """`text` with what the client's error text leaves out
+        (ZeekrClient.hidden) masked and the VIN shortened to its last four
+        characters, for the trail and for a caller that words an error of its
+        own around one from here - the coordinator's warning, UpdateFailed, an
+        action's error. An error raised outside the client (a socket's, a
+        parser's) was never scrubbed where it was raised."""
         vin = self._client.vin
         out = hide_values(str(text), [v for v in self._client.hidden() if v != vin])
-        return super()._note_text(out)
+        return _shorten_vin(out, vin)
 
     # ---- x-vin -------------------------------------------------------------
 
