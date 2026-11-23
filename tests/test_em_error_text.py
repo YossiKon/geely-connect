@@ -132,6 +132,14 @@ def test_hide_values_takes_the_longest_first_and_leaves_short_ones():
     assert zc.hide_values("token tok", ["tok", "", None]) == "token tok"
 
 
+def test_forms_of_one_length_go_in_a_fixed_order():
+    """Two values of one length that overlap in the text: the first in order
+    goes first, whatever order a set hands them in, so the same text comes
+    out on every run."""
+    for values in (["cdefgh", "abcdef"], ["abcdef", "cdefgh"]):
+        assert zc.hide_values("x abcdefgh y", values) == "x XXXXXXgh y", values
+
+
 def test_a_hidden_value_moves_no_word_boundary():
     """A code written right against a value: `401` ran into the token's first
     letter, so no word ended after it, and an asterisk there would end one -
@@ -141,6 +149,132 @@ def test_a_hidden_value_moves_no_word_boundary():
                 c.vehicle_status_new_resp)
     _clean(str(e))
     assert not ad._looks_authy(str(e)), str(e)
+
+
+def test_a_value_with_nothing_to_escape_is_matched_as_it_stands_only():
+    """The quoted forms add nothing for a value repr() leaves alone, so every
+    classifier test here reads the same text it read before them."""
+    api = load("api")
+    import test_api_client as tac
+    fixtures = (*SECRETS, "fake-refresh-0123", "fake-newer-session-0123",
+                tac._JWT, tac._CIDPSSO, tac._USER, tac._EMAIL)
+    for value in fixtures:
+        assert api._quoted_forms(value) == {value}, value
+
+
+def test_a_value_a_transport_refuses_is_hidden_in_its_own_words():
+    """A token holding a line break is refused when it goes into a header,
+    and the refusal names it escaped - requests as text, http.client as
+    bytes - as does str() of an answer that repeats it. Neither side of the
+    break may survive."""
+    import http.client
+    import requests
+    api = load("api")
+    # A latin-1 letter as well, which the two quote apart: requests writes
+    # it as it is, http.client as a \x escape.
+    value = "fake-session-t\xf6k\nen-0123456789"
+    as_text = "fake-session-t\xf6k\\nen-0123456789"
+    as_bytes = "fake-session-t\\xf6k\\nen-0123456789"
+    said = []
+    try:
+        requests.utils.check_header_validity(("token", value))
+    except requests.exceptions.InvalidHeader as e:
+        said.append((str(e), as_text))
+    conn = http.client.HTTPConnection("gw.example.invalid")
+    try:
+        conn.request("GET", "/", headers={"Authorization": value})
+    except ValueError as e:
+        said.append((str(e), as_bytes))
+    finally:
+        conn.close()
+    said.append((str(api.redact({"message": f"session {value} expired"})), as_text))
+    assert len(said) == 3, said
+    for text, form in said:
+        assert form in text, ("not quoted as expected", form, text)
+        masked = zc.hide_values(text, [value])
+        assert masked == text.replace(form, api._mask(form)), (text, masked)
+        assert "fake-session" not in masked and "en-0123456789" not in masked, masked
+
+
+def test_a_value_beyond_latin_1_has_no_bytes_form():
+    """http.client encodes a header to latin-1 before it checks it, so a
+    letter beyond latin-1 stops it with an error that names the letter and
+    its place, never the value. requests quotes the value as text, the form
+    left to match."""
+    import http.client
+    import requests
+    api = load("api")
+    value = "fake-session-t€k\nen-0123456789"
+    as_text = "fake-session-t€k\\nen-0123456789"
+    assert api._quoted_forms(value) == {value, as_text}
+    try:
+        requests.utils.check_header_validity(("token", value))
+    except requests.exceptions.InvalidHeader as e:
+        text = str(e)
+    else:
+        raise AssertionError("requests let a line break into a header")
+    masked = zc.hide_values(text, [value])
+    assert masked == text.replace(as_text, api._mask(as_text)), (text, masked)
+    conn = http.client.HTTPConnection("gw.example.invalid")
+    try:
+        conn.request("GET", "/", headers={"Authorization": value})
+    except UnicodeEncodeError as e:
+        said = str(e)
+    else:
+        raise AssertionError("http.client sent a header it cannot encode")
+    finally:
+        conn.close()
+    assert "fake-session" not in said and "en-0123456789" not in said, said
+
+
+def test_a_value_quoted_with_an_escaped_apostrophe_is_hidden():
+    """repr() writes a string holding both quote marks between single
+    quotes, each apostrophe escaped: an answer that names an address in
+    double quotes, folded in with str(), writes an address holding an
+    apostrophe so - a form neither repr() of the address alone gives."""
+    api = load("api")
+    address = "john.o'brien@example.invalid"
+    text = str({"code": 10010003,
+                "message": f'Account "{address}" is not registered'})
+    escaped = "john.o\\'brien@example.invalid"
+    assert escaped in text and address not in text, text
+    masked = zc.hide_values(text, [address])
+    assert masked == text.replace(escaped, api._mask(escaped)), masked
+    assert "brien" not in masked, masked
+
+
+def test_each_quoter_writes_its_own_form_and_each_is_hidden():
+    """One value holding an apostrophe, a latin-1 letter and a line break,
+    quoted four ways: requests quotes it alone, as text, between double
+    quotes; http.client alone, as bytes, between double quotes; str() of
+    an answer naming it in double quotes, as text between single quotes,
+    the apostrophe escaped; and the same sentence as bytes. Each form is
+    one only that quoter writes."""
+    import http.client
+    import requests
+    api = load("api")
+    value = "fake-o'tok\xf6\nen-0001"
+    said = []
+    try:
+        requests.utils.check_header_validity(("token", value))
+    except requests.exceptions.InvalidHeader as e:
+        said.append((str(e), "fake-o'tok\xf6\\nen-0001"))
+    conn = http.client.HTTPConnection("gw.example.invalid")
+    try:
+        conn.request("GET", "/", headers={"Authorization": value})
+    except ValueError as e:
+        said.append((str(e), "fake-o'tok\\xf6\\nen-0001"))
+    finally:
+        conn.close()
+    sentence = f'Account "{value}" is not registered'
+    said.append((str({"message": sentence}), "fake-o\\'tok\xf6\\nen-0001"))
+    said.append((repr(sentence.encode("latin-1")), "fake-o\\'tok\\xf6\\nen-0001"))
+    assert len(said) == 4 and len({form for _, form in said}) == 4, said
+    for text, form in said:
+        assert form in text, ("not quoted as expected", form, text)
+        masked = zc.hide_values(text, [value])
+        assert masked == text.replace(form, api._mask(form)), (text, masked)
+        assert "fake-o" not in masked and "en-0001" not in masked, masked
 
 
 def test_a_session_replaced_while_a_call_is_out_is_still_left_out():

@@ -304,6 +304,30 @@ def _mask(value: str) -> str:
     return "".join("X" if ch.isalnum() or ch == "_" else "*" for ch in value)
 
 
+def _quoted_forms(value: str) -> set[str]:
+    """`value` as it stands, and as repr() writes it between quotes - as
+    text, which is how requests names a header value it refuses and how
+    str() quotes the strings of an answer, and as latin-1 bytes, which is
+    how http.client names one (`Invalid header value b'...'`). Both refuse
+    a value holding a bare line break and write the break escaped, so such
+    a value is quoted only in an escaped form.
+
+    repr() quotes a string holding an apostrophe between double quotes,
+    unless it holds a double quote too: then between single quotes, with
+    each apostrophe escaped. A value quoted inside such a string - a
+    sentence naming an address in double quotes - is written that way, so
+    each repr() is taken in both modes: as the value alone would be quoted,
+    and with a double quote ahead of it. A value with nothing either repr()
+    escapes, in either mode, has one form."""
+    forms = {value, repr(value)[1:-1], repr('"' + value)[2:-1]}
+    try:
+        raw = value.encode("latin-1")
+    except UnicodeEncodeError:
+        return forms
+    forms.update((repr(raw)[2:-1], repr(b'"' + raw)[3:-1]))
+    return forms
+
+
 def hide_values(text: str, values: Iterable[Any]) -> str:
     """`text` with each of `values` masked wherever it stands in it.
 
@@ -315,16 +339,26 @@ def hide_values(text: str, values: Iterable[Any]) -> str:
     value leaves a prefix no replace can match. Both platforms' clients run
     it (GeelyApi.hidden, ZeekrClient.hidden).
 
-    The mask keeps the value's length and the kind of each character (_mask),
-    so nothing around it moves and no word boundary comes or goes: a cut
-    falls where it fell, and the error classifiers, which decide whether a
-    password login runs, read the same words outside the value as they did -
-    a code written right against a value (`code=401<token>`) included. The
-    longest value goes first, so one held inside another is not split; a
-    value under _HIDE_MIN_LEN characters is left."""
-    for value in sorted({str(v) for v in values if v and len(str(v)) >= _HIDE_MIN_LEN},
-                        key=len, reverse=True):
-        text = text.replace(value, _mask(value))
+    Each value is matched in each of its quoted forms too (_quoted_forms):
+    an answer folded in with str() quotes a value through repr(), and a
+    transport that refuses a header - for a line break in a token, say -
+    names the value escaped. Matched only as it stands, a value holding a
+    line break went into the text whole, escaped, and so did an address
+    holding an apostrophe that an answer named in double quotes.
+
+    The mask keeps the length and the kind of each character as it stands
+    in the text (_mask), so nothing around it moves and no word boundary
+    comes or goes: a cut falls where it fell, and the error classifiers,
+    which decide whether a password login runs, read the same words outside
+    the value as they did - a code written right against a value
+    (`code=401<token>`) included. The longest form goes first, so one held
+    inside another is not split, and forms of one length in a fixed order,
+    so the same text comes out on every run; a value under _HIDE_MIN_LEN
+    characters is left."""
+    forms = {form for v in values if v and len(str(v)) >= _HIDE_MIN_LEN
+             for form in _quoted_forms(str(v))}
+    for form in sorted(forms, key=lambda f: (-len(f), f)):
+        text = text.replace(form, _mask(form))
     return text
 
 
