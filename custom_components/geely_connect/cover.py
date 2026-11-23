@@ -53,7 +53,7 @@ from .const import (
 )
 from .helpers import (
     walk as _walk, windows_open, windows_position, schedule_refresh,
-    sunroof_is_stale, open_windows,
+    sunroof_is_stale, open_windows, quote_failure,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -114,9 +114,11 @@ class _BaseGeelyCover(CoordinatorEntity, CoverEntity):
         except GeelyControlError as e:
             raise HomeAssistantError(f"Geely cover ({self._target}): {e.message}") from e
         except Exception as e:
-            _LOGGER.exception("cover %s %s failed", self._target, command)
-            raise HomeAssistantError(f"Geely cover failure: {e}") from e
-        _LOGGER.debug("Geely cover %s %s response=%s", self._target, command, redact(resp))
+            said = quote_failure(_LOGGER, self._api, e, "cover %s %s",
+                                 self._target, command)
+            raise HomeAssistantError(f"Geely cover failure: {said}") from None
+        _LOGGER.debug("Geely cover %s %s response=%s", self._target, command,
+                      self._api.without_secrets(redact(resp)))
 
         schedule_refresh(self._hass, self.coordinator, 8)
 

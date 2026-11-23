@@ -15,6 +15,7 @@ import os
 import sys
 import tempfile
 import time
+import traceback
 import types
 
 from conftest import FAKE_VIN, PKG, have_homeassistant, load
@@ -2302,12 +2303,44 @@ def _quoted_clean(text, secret):
 
 
 class _Lines(logging.Handler):
+    """Every line logged, as a handler prints it - a traceback included,
+    which record.getMessage() leaves out."""
+
     def __init__(self):
         super().__init__(logging.DEBUG)
         self.lines = []
 
     def emit(self, record):
-        self.lines.append((record.levelno, record.getMessage()))
+        self.lines.append((record.levelno, logging.Formatter().format(record)))
+
+
+def _quoted_failure(press, secret):
+    """A command that fails, run with every line logged meanwhile captured.
+    The error - as the toast shows it, and as Home Assistant prints its
+    traceback at debug - and every line hold none of `secret`, and the error
+    carries no chain. Returns the error and the lines."""
+    from homeassistant.exceptions import HomeAssistantError
+    root = logging.getLogger()
+    handler, old = _Lines(), root.level
+    root.addHandler(handler)
+    root.setLevel(logging.DEBUG)
+    failed = None
+    try:
+        asyncio.run(press())
+    except HomeAssistantError as e:
+        failed = e
+    finally:
+        root.removeHandler(handler)
+        root.setLevel(old)
+    assert failed is not None, "a failed command was taken as sent"
+    _quoted_clean(str(failed), secret)
+    _quoted_clean("".join(traceback.format_exception(failed)), secret)
+    for _, text in handler.lines:
+        _quoted_clean(text, secret)
+    assert failed.__cause__ is None and (
+        failed.__context__ is None or failed.__suppress_context__), \
+        "a chained error prints its raw text in the traceback"
+    return failed, handler.lines
 
 
 def test_a_failed_poll_quotes_the_gateway_and_outside_errors_without_the_session():
@@ -2375,25 +2408,29 @@ def test_a_failed_poll_quotes_the_gateway_and_outside_errors_without_the_session
         raise AssertionError("a refused session did not ask for re-authentication")
 
 
-def test_every_error_the_integration_quotes_goes_through_a_scrub():
-    """__init__.py's syntax tree, held to three rules. No traceback is
-    printed from it (logger.exception, exc_info, traceback, sys.exc_info):
-    a traceback prints the caught error whole. An except block quotes the
-    error it caught only through a scrub - the client's without_secrets(),
-    hide_values() given something to hide, or mask_path() where the key
-    folder is removed - and otherwise reads it only as e.message or e.code
-    (worded by the client), type()/isinstance(), a `from e` cause, or keeps
-    it for the retry's re-raise. The two errors worded from this package's
-    own text (region keys) are left. An answer (resp, sc, st, state_resp)
-    reaches a log line or a raised error only through without_secrets()."""
-    src = open(os.path.join(PKG, "__init__.py"), encoding="utf-8").read()
+_ANSWERS = {"resp", "sc", "st", "state_resp"}
+# Held to the rules below with the platforms' two added: every module that
+# words an error for the user or the log, but __init__.py (on its own, in the
+# test after next), the clients (api, zeekr_client, zeekr_adapter - they are
+# the scrub) and the config flow (worded apart).
+_PLATFORM_MODULES = ("binary_sensor.py", "button.py", "climate.py", "cover.py",
+                     "device_tracker.py", "helpers.py", "lock.py", "select.py",
+                     "sensor.py", "switch.py", "time.py")
+
+
+def _quote_rule_breaks(module, strict=False):
+    """Where `module` quotes an error, an answer or the coordinator's last
+    error without a scrub, as (line, source) pairs. The rules are the two
+    tests' below; `strict` adds the platforms' two."""
+    src = open(os.path.join(PKG, module), encoding="utf-8").read()
     tree = ast.parse(src)
     parents = {}
     for node in ast.walk(tree):
         for child in ast.iter_child_nodes(node):
             parents[child] = node
-    own_text = {"RegionKeysError", "LocalRegionKeysError"}
-    answers = {"resp", "sc", "st", "state_resp"}
+    # Errors worded from this package's own text: the region keys', and the
+    # secrets.yaml key's, which names the file and the error's class only.
+    own_text = {"RegionKeysError", "LocalRegionKeysError", "PasswordKeyError"}
     levels = {"debug", "info", "warning", "error", "critical", "exception", "log"}
 
     def name_of(call):
@@ -2404,20 +2441,51 @@ def test_every_error_the_integration_quotes_goes_through_a_scrub():
         while node in parents:
             node = parents[node]
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                return node.name
+                return node
         return None
 
     def is_scrub(call):
         name = name_of(call)
-        if name == "without_secrets":
+        if name in {"without_secrets", "quote_failure"}:
             return True
         if name == "hide_values":
             vals = call.args[1] if len(call.args) > 1 else None
             return vals is not None and not (
                 isinstance(vals, (ast.Tuple, ast.List, ast.Set)) and not vals.elts)
         if name == "mask_path":                 # VIN-shaped text only
-            return function_of(call) == "async_remove_entry"
+            fn = function_of(call)
+            return fn is not None and fn.name == "async_remove_entry"
         return False
+
+    def read_safely(node):
+        """An error read for its shape, its truth or its cause, or quoted
+        through a scrub."""
+        p = parents.get(node)
+        if isinstance(p, ast.Raise) and p.cause is node:
+            return True
+        if isinstance(p, ast.Attribute) and p.attr in {"message", "code"}:
+            return True
+        if isinstance(p, ast.Assign) and all(
+                isinstance(t, ast.Name) and t.id == "last_exc" for t in p.targets):
+            return True
+        if isinstance(p, (ast.If, ast.IfExp)) and p.test is node:
+            return True
+        up = node                       # type(e.__cause__ or e) is a type too
+        while isinstance(parents.get(up), (ast.Attribute, ast.BoolOp)):
+            up = parents[up]
+        if (isinstance(parents.get(up), ast.Call)
+                and name_of(parents[up]) in {"type", "isinstance"}):
+            return True
+        if isinstance(p, ast.Call):
+            if name_of(p) in {"type", "isinstance"} or is_scrub(p):
+                return True
+            if (name_of(p) == "str" and isinstance(parents.get(p), ast.Call)
+                    and is_scrub(parents[p])):
+                return True
+        return False
+
+    def where(node):
+        return node.lineno, ast.get_source_segment(src, parents.get(node) or node)
 
     bare = []
     for node in ast.walk(tree):
@@ -2440,23 +2508,9 @@ def test_every_error_the_integration_quotes_goes_through_a_scrub():
             continue
         for stmt in handler.body:
             for node in ast.walk(stmt):
-                if not (isinstance(node, ast.Name) and node.id == handler.name):
-                    continue
-                p = parents.get(node)
-                if isinstance(p, ast.Raise) and p.cause is node:
-                    continue
-                if isinstance(p, ast.Attribute) and p.attr in {"message", "code"}:
-                    continue
-                if isinstance(p, ast.Assign) and all(
-                        isinstance(t, ast.Name) and t.id == "last_exc" for t in p.targets):
-                    continue
-                if isinstance(p, ast.Call):
-                    if name_of(p) in {"type", "isinstance"} or is_scrub(p):
-                        continue
-                    if (name_of(p) == "str" and isinstance(parents.get(p), ast.Call)
-                            and is_scrub(parents[p])):
-                        continue
-                bare.append((node.lineno, ast.get_source_segment(src, p)))
+                if (isinstance(node, ast.Name) and node.id == handler.name
+                        and not read_safely(node)):
+                    bare.append(where(node))
 
     def scrubbed(node, stop):
         while node is not stop and node in parents:
@@ -2475,12 +2529,72 @@ def test_every_error_the_integration_quotes_goes_through_a_scrub():
             sinks.append(node.exc)
     for sink in sinks:
         for node in ast.walk(sink):
-            if isinstance(node, ast.Name) and node.id in answers:
+            if isinstance(node, ast.Name) and node.id in _ANSWERS:
                 p = parents.get(node)
                 if isinstance(p, ast.Attribute) and p.attr == "keys":
                     continue
                 if not scrubbed(node, sink):
-                    bare.append((node.lineno, ast.get_source_segment(src, p or node)))
+                    bare.append(where(node))
+    if not strict:
+        return bare
+
+    # The coordinator's last error, read in place or held in a name.
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Attribute) and node.attr == "last_exception"
+                and isinstance(node.ctx, ast.Load)):
+            continue
+        p = parents.get(node)
+        if (isinstance(p, ast.Assign) and len(p.targets) == 1
+                and isinstance(p.targets[0], ast.Name)):
+            held = p.targets[0].id
+            for use in ast.walk(function_of(node) or tree):
+                if (isinstance(use, ast.Name) and use.id == held
+                        and isinstance(use.ctx, ast.Load) and not read_safely(use)):
+                    bare.append(where(use))
+        elif not read_safely(node):
+            bare.append(where(node))
+    # A raise in an except block keeps the error it caught, as its cause or
+    # as its context, unless it is `from None`.
+    for handler in ast.walk(tree):
+        if not isinstance(handler, ast.ExceptHandler):
+            continue
+        if handler.type is not None and ast.unparse(handler.type) == "GeelyControlError":
+            continue
+        for stmt in handler.body:
+            for node in ast.walk(stmt):
+                if (isinstance(node, ast.Raise) and node.exc is not None
+                        and not (isinstance(node.cause, ast.Constant)
+                                 and node.cause.value is None)):
+                    bare.append((node.lineno, "raised without `from None`"))
+    return bare
+
+
+def test_every_error_the_integration_quotes_goes_through_a_scrub():
+    """__init__.py's syntax tree, held to three rules. No traceback is
+    printed from it (logger.exception, exc_info, traceback, sys.exc_info):
+    a traceback prints the caught error whole. An except block quotes the
+    error it caught only through a scrub - the client's without_secrets(),
+    hide_values() given something to hide, or mask_path() where the key
+    folder is removed - and otherwise reads it only as e.message or e.code
+    (worded by the client), type()/isinstance(), a `from e` cause, or keeps
+    it for the retry's re-raise. The two errors worded from this package's
+    own text (region keys) are left. An answer (resp, sc, st, state_resp)
+    reaches a log line or a raised error only through without_secrets()."""
+    bare = _quote_rule_breaks("__init__.py")
+    assert not bare, bare
+
+
+def test_every_error_a_platform_quotes_goes_through_a_scrub():
+    """The platforms and helpers.py, held to the same three rules and two
+    more. A raise inside an except block is `from None`, unless the block
+    caught a GeelyControlError, which the client words itself: a `from e`
+    cause, or the context any other raise keeps, prints the caught error
+    whole in the traceback Home Assistant logs at debug for a failed service
+    call. And the coordinator's last error - the Refresh Data button shows
+    it - is read like a caught one. helpers.quote_failure() counts as a
+    scrub: it quotes through the client and logs no traceback."""
+    bare = [(module, *b) for module in _PLATFORM_MODULES
+            for b in _quote_rule_breaks(module, strict=True)]
     assert not bare, bare
 
 

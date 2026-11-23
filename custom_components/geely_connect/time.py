@@ -41,8 +41,8 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .api import GeelyControlError, redact, window_length
 from .const import DOMAIN
-from .helpers import (api_serves, schedule_intent, slot_2_is_on, slot_2_window,
-                      truthy as _truthy, schedule_refresh)
+from .helpers import (api_serves, quote_failure, schedule_intent, slot_2_is_on,
+                      slot_2_window, truthy as _truthy, schedule_refresh)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -177,10 +177,12 @@ class GeelyScheduledChargingTime(CoordinatorEntity, TimeEntity):
         except GeelyControlError as e:
             raise HomeAssistantError(f"Geely Scheduled Charging time: {e.message}") from e
         except Exception as e:
-            _LOGGER.exception("scheduled-charging set time failed")
-            raise HomeAssistantError(f"Geely Scheduled Charging time failure: {e}") from e
+            said = quote_failure(_LOGGER, self._api, e, "scheduled-charging set time")
+            raise HomeAssistantError(
+                f"Geely Scheduled Charging time failure: {said}") from None
         _LOGGER.debug("Set scheduled charging %s=%s response=%s",
-                      self._kind, _fmt_hhmm(value), redact(resp))
+                      self._kind, _fmt_hhmm(value),
+                      self._api.without_secrets(redact(resp)))
 
         # Optimistic local value: holds for 60s, until the slow server
         # propagation (about 30s) catches up.
@@ -225,10 +227,12 @@ class GeelyScheduledChargingTime(CoordinatorEntity, TimeEntity):
         except GeelyControlError as e:
             raise HomeAssistantError(f"Geely Scheduled Charging time: {e.message}") from e
         except Exception as e:
-            _LOGGER.exception("scheduled-charging set time failed")
-            raise HomeAssistantError(f"Geely Scheduled Charging time failure: {e}") from e
+            said = quote_failure(_LOGGER, self._api, e, "scheduled-charging set time")
+            raise HomeAssistantError(
+                f"Geely Scheduled Charging time failure: {said}") from None
         _LOGGER.debug("Set scheduled charging %s=%s response=%s",
-                      self._kind, _fmt_hhmm(value), redact(resp))
+                      self._kind, _fmt_hhmm(value),
+                      self._api.without_secrets(redact(resp)))
         self._optimistic_value = value
         self._optimistic_until = time_mod.time() + 60
         window.update(startTime=start, endtime=end, duration=window_length(start, end))

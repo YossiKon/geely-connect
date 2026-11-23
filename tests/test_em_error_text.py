@@ -97,12 +97,15 @@ def _adapter():
 
 
 class _Records(logging.Handler):
+    """Every line logged, as a handler prints it - a traceback included,
+    which record.getMessage() leaves out."""
+
     def __init__(self):
         super().__init__(logging.DEBUG)
         self.lines = []
 
     def emit(self, record):
-        self.lines.append((record.levelno, record.getMessage()))
+        self.lines.append((record.levelno, logging.Formatter().format(record)))
 
 
 def _logged(fn):

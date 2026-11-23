@@ -16,7 +16,6 @@ import logging
 import math
 import os
 from collections.abc import Callable
-from contextlib import contextmanager
 from typing import Any
 
 import homeassistant.util.yaml as yaml_util
@@ -25,7 +24,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import DeviceInfo
 
-from .api import GeelyControlError
 from .const import (
     CONF_VEHICLE_COLOR,
     CONF_VEHICLE_MODEL_CODE,
@@ -97,10 +95,14 @@ def _encryption_key(hass: HomeAssistant) -> bytes | None:
     except FileNotFoundError:
         return None
     except Exception as e:  # noqa: BLE001 - YAML errors, permissions, encoding
+        # `from None`: Home Assistant's loader has logged a parse or decoding
+        # error already, and a chain would print it again with every
+        # traceback of this one. (An OS error - a permission, say - is not
+        # logged there, and the message names only the loader's error class.)
         raise PasswordKeyError(
             f"secrets.yaml exists but could not be read ({type(e.__cause__ or e).__name__}), "
             f"so whether it holds a '{_SECRET_KEY_NAME}' is unknown"
-        ) from e
+        ) from None
     if not secrets:
         return None
     if not isinstance(secrets, dict):
@@ -453,8 +455,9 @@ def schedule_refresh(hass: HomeAssistant, coordinator, *delays: float,
                 await coordinator.async_request_refresh()
         except asyncio.CancelledError:
             raise
-        except Exception:  # noqa: BLE001 - a background poll must not raise
-            _LOGGER.debug("post-command refresh failed", exc_info=True)
+        except Exception as e:  # noqa: BLE001 - a background poll must not raise
+            # The class only: a traceback would print the error's words whole.
+            _LOGGER.debug("post-command refresh failed: %s", type(e).__name__)
         if after is not None:
             after()
 
@@ -473,22 +476,67 @@ def schedule_refresh(hass: HomeAssistant, coordinator, *delays: float,
         hass.async_create_task(_run())
 
 
-@contextmanager
-def translate_control_errors(logger, label: str, log_msg: str = "", *log_args):
-    """Turn a rejected command into something the user sees.
+_PACKAGE_DIR = os.path.normcase(os.path.dirname(os.path.abspath(__file__)))
 
-    Without this a GeelyControlError - rate limit, wrong parameters, feature
-    unavailable - propagates as an unhandled exception and the user is told
-    nothing. HomeAssistantError surfaces as a toast.
+
+def _error_kind(err: BaseException) -> str:
+    """The error's class, with its module unless it is a builtin."""
+    kind = type(err)
+    if kind.__module__ == "builtins":
+        return kind.__qualname__
+    return f"{kind.__module__}.{kind.__qualname__}"
+
+
+def _package_hops(err: BaseException, keep: int = 6) -> str:
+    """The error's way through this package, as `file.py:line` hops.
+
+    What a traceback tells a bug report, less what it must not carry: the
+    error's own words, and the source lines, which can quote them. An error
+    raised in the executor brings its frames there along on its traceback.
     """
+    hops = []
+    tb = err.__traceback__
+    while tb is not None:
+        path = tb.tb_frame.f_code.co_filename
+        if os.path.normcase(os.path.dirname(os.path.abspath(path))) == _PACKAGE_DIR:
+            hops.append(f"{os.path.basename(path)}:{tb.tb_lineno}")
+        tb = tb.tb_next
+    return " > ".join(hops[-keep:]) or "outside this integration"
+
+
+def quote_failure(logger: logging.Logger, api: Any, err: BaseException,
+                  what: str, *args: Any) -> str:
+    """Log a command that failed short of an answer, and word it for the user.
+
+    An error raised outside the client - a socket's, a timeout's, a parser's -
+    was never scrubbed where it was raised, and its text can repeat what the
+    request sent, the session included. It is quoted through the client's
+    without_secrets(), for the log and for the error the caller raises - which
+    the caller raises `from None`, since a chained error prints whole in the
+    traceback Home Assistant logs at debug. The log line used to be that
+    traceback; it names the error's class and its hops through this package
+    instead, which is what finds the line.
+
+    It must not raise: it runs in the except block that raises the user's
+    error, and an error of its own would reach Home Assistant whole, chained
+    to the one it was quoting. The two steps that can fail are each caught -
+    an error the client cannot quote leaves its class name, never str(), and
+    a logger call that raises leaves no line. A handler that fails inside
+    emit is logging's to report, on stderr with the caught error chained, so
+    the format must match its arguments. Only the error's class is read
+    unguarded.
+    """
+    kind = _error_kind(err)
     try:
-        yield
-    except GeelyControlError as e:
-        raise HomeAssistantError(f"Geely {label}: {e.message}") from e
-    except Exception as e:
-        if log_msg:
-            logger.exception(log_msg, *log_args)
-        raise HomeAssistantError(f"Geely {label} failure: {e}") from e
+        said = str(api.without_secrets(err))
+    except Exception:  # noqa: BLE001 - see above
+        said = kind
+    try:
+        logger.error(what + " failed (%s at %s): %s", *args, kind,
+                     _package_hops(err), said)
+    except Exception:  # noqa: BLE001 - see above
+        pass
+    return said
 
 
 def speed_is_stale(basic: dict | None) -> bool:

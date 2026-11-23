@@ -85,6 +85,7 @@ from .const import (
 from .helpers import (
     walk as _walk,
     truthy as _truthy,
+    quote_failure,
     schedule_refresh,
     steering_wheel_fitted,
 )
@@ -446,8 +447,9 @@ class GeelyClimate(CoordinatorEntity, ClimateEntity, RestoreEntity):
         except GeelyControlError as e:
             raise HomeAssistantError(f"Geely rapid {('warming' if warming else 'cooling')}: {e.message}") from e
         except Exception as e:
-            _LOGGER.exception("rapid %s failed", "warm" if warming else "cool")
-            raise HomeAssistantError(f"Geely rapid failure: {e}") from e
+            said = quote_failure(_LOGGER, self._api, e, "rapid %s",
+                                 "warm" if warming else "cool")
+            raise HomeAssistantError(f"Geely rapid failure: {said}") from None
         # Server accepted - apply optimistic state.
         self._cached_target_temp = target
         self._set_optimistic(HVACMode.HEAT_COOL)
@@ -464,7 +466,8 @@ class GeelyClimate(CoordinatorEntity, ClimateEntity, RestoreEntity):
         )
         self._optimistic_preset_until = time.time() + 30
         _LOGGER.debug("Geely rapid %s response=%s",
-                      "warming" if warming else "cooling", redact(resp))
+                      "warming" if warming else "cooling",
+                      self._api.without_secrets(redact(resp)))
 
         # Three polls, then a verdict. The first two are the seat read-back
         # story (#19): the rapid bundle asks for the cabin AND both front
@@ -581,11 +584,12 @@ class GeelyClimate(CoordinatorEntity, ClimateEntity, RestoreEntity):
         except GeelyControlError as e:
             raise HomeAssistantError(f"Geely climate: {e.message}") from e
         except Exception as e:
-            _LOGGER.exception("climate %s failed", command)
-            raise HomeAssistantError(f"Geely climate failure: {e}") from e
+            said = quote_failure(_LOGGER, self._api, e, "climate %s", command)
+            raise HomeAssistantError(f"Geely climate failure: {said}") from None
         _LOGGER.debug(
             "Geely climate %s params=%s duration=%d response=%s",
-            command, redact(params), duration, redact(resp),
+            command, redact(params), duration,
+            self._api.without_secrets(redact(resp)),
         )
 
         schedule_refresh(self._hass, self.coordinator, 8)

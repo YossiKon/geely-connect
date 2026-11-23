@@ -80,6 +80,11 @@ class _Api:
             raise self.raise_
         return {"code": "1000"}
 
+    def without_secrets(self, text):
+        # The platforms quote an error and an answer through the client (the
+        # real one is GeelyApi.without_secrets); this fake holds no secrets.
+        return str(text)
+
 
 class _Coord:
     last_update_success = True
@@ -1316,3 +1321,113 @@ def test_the_slot_2_times_refuse_what_the_app_could_not_send():
             e = _expect_error(end.async_set_value(dtime(6, 0)))
         assert text in str(e), e
         assert end._optimistic_value is None
+
+
+# ------------------------------------------------------- the session left out ---
+# An error raised outside the client - here a socket's that repeats what the
+# request sent - was never scrubbed where it was raised. The toast, the log
+# line and the traceback Home Assistant prints at debug quote it through the
+# client (a real GeelyApi's without_secrets, holding invented values).
+
+def _session_api(words, quote):
+    api = _Api(raise_=OSError(words))
+    api.without_secrets = quote
+    return api
+
+
+def _logged_error(lines, where):
+    errors = [text for level, text in lines if level >= logging.ERROR]
+    assert any(f"failed (OSError at {where}:" in text for text in errors), errors
+
+
+def test_a_failed_switch_command_is_quoted_without_the_session():
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    from test_init_lifecycle import _quoted_failure, _real_quoter
+    sw = load("switch")
+    quote, secret, words = _real_quoter()
+    cases = (
+        (lambda h, b: sw.GeelySwitch(h, b, *_switch_def(sw, "charging")[:-1]),
+         "Geely RCS", {}, {}),
+        (sw.GeelyGCleanSwitch, "Geely G-Clean", {}, {}),
+        (sw.GeelyDefrostSwitch, "Geely Defrost", {}, {}),
+        (sw.GeelySteeringWheelHeatSwitch, "Geely Steering Wheel Heat", {}, {}),
+        (sw.GeelyScheduledChargingSwitch, "Geely Scheduled Charging",
+         {"rbcStartTime": "23:00"}, {}),
+        (sw.GeelyScheduledChargingSwitch, "Geely Scheduled Charging",
+         _slot_2("2"), _SLOT_2_CAPS),
+        (sw.GeelyWindowVentilationSwitch, "Geely Window Ventilation", {}, {}),
+    )
+    rec = _RefreshRec()
+    for build, label, sched, caps in cases:
+        hass, b = _bundle(_status(sched=sched), api=_session_api(words, quote), caps=caps)
+        ent = _quiet(build(hass, b))
+        with _patched(sw, schedule_refresh=rec, time=_Clock()):
+            e, lines = _quoted_failure(ent.async_turn_on, secret)
+        assert f"{label} failure: denied for " in str(e), (label, e)
+        assert f"...{FAKE_VIN[-4:]}" in str(e), (label, e)
+        _logged_error(lines, "switch.py")
+    assert rec.calls == [], "a failed command must not schedule a refresh"
+
+
+def test_a_switch_answer_reaches_the_debug_log_without_the_session():
+    """redact() goes by key name; an answer worded around what was sent
+    reached the debug line whole."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    from test_init_lifecycle import _Lines, _quoted_clean, _real_quoter
+    sw = load("switch")
+    quote, secret, words = _real_quoter()
+    api = _Api()
+    api.without_secrets = quote
+    api.control = lambda *a, **k: {"code": "1000", "message": words}
+    hass, b = _bundle(_status(), api=api)
+    ent = _quiet(sw.GeelyDefrostSwitch(hass, b))
+    root = logging.getLogger()
+    handler, old = _Lines(), root.level
+    root.addHandler(handler)
+    root.setLevel(logging.DEBUG)
+    try:
+        with _patched(sw, schedule_refresh=_RefreshRec(), time=_Clock()):
+            asyncio.run(ent.async_turn_on())
+    finally:
+        root.removeHandler(handler)
+        root.setLevel(old)
+    said = [text for _, text in handler.lines if "response=" in text]
+    assert said and "denied for " in said[0], handler.lines
+    for _, text in handler.lines:
+        _quoted_clean(text, secret)
+
+
+def test_a_failed_seat_command_is_quoted_without_the_session():
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    from test_init_lifecycle import _quoted_failure, _real_quoter
+    sel = load("select")
+    quote, secret, words = _real_quoter()
+    hass, b = _bundle(_status(), api=_session_api(words, quote))
+    ent = _seat(sel, hass, b, "seat_vent_driver")
+    with _patched(sel, schedule_refresh=_RefreshRec()):
+        e, lines = _quoted_failure(
+            lambda: ent.async_select_option(sel.CLIMATE_SEAT_LEVELS[1]), secret)
+    assert "Geely seat vent failure: denied for " in str(e), e
+    assert ent._optimistic_option is None
+    _logged_error(lines, "select.py")
+
+
+def test_a_failed_charging_time_is_quoted_without_the_session():
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    from test_init_lifecycle import _quoted_failure, _real_quoter
+    t = load("time")
+    quote, secret, words = _real_quoter()
+    for sched, caps in (({"rbcStartTime": "23:00", "rbcEndTime": "07:00",
+                          "bcCycleActive": "true"}, {}),
+                        (_slot_2("1"), _SLOT_2_CAPS)):
+        hass, b = _bundle(_status(sched=sched), api=_session_api(words, quote), caps=caps)
+        end = _quiet(t.GeelyScheduledChargingTime(hass, b, "end"))
+        with _patched(t, schedule_refresh=_RefreshRec(), time_mod=_Clock()):
+            e, lines = _quoted_failure(lambda: end.async_set_value(dtime(6, 0)), secret)
+        assert "Geely Scheduled Charging time failure: denied for " in str(e), (caps, e)
+        assert end._optimistic_value is None
+        _logged_error(lines, "time.py")

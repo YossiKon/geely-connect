@@ -168,36 +168,70 @@ def test_the_wait_is_a_background_task_of_the_config_entry():
     assert c.refreshes == 1 and seen == ["after"]
 
 
-def test_control_errors_become_toasts_with_the_server_message():
+def test_a_failed_refresh_is_logged_by_its_class_only():
+    """A traceback at debug printed the poll's error whole."""
     _ha()
-    h = load("helpers")
-    api = load("api")
-    from homeassistant.exceptions import HomeAssistantError
+    from test_init_lifecycle import _Lines
     import logging
+    h = load("helpers")
+    root = logging.getLogger()
+    handler, old = _Lines(), root.level
+    root.addHandler(handler)
+    root.setLevel(logging.DEBUG)
     try:
-        with h.translate_control_errors(logging.getLogger("t"), "lock"):
-            raise api.GeelyControlError("8070", "still pending")
-    except HomeAssistantError as e:
-        assert "lock" in str(e) and "still pending" in str(e)
-    else:
-        raise AssertionError("GeelyControlError passed through unwrapped")
+        _run_scheduled(h, _Coord(), 0, raise_from_refresh=ValueError("cloud hiccup"))
+    finally:
+        root.removeHandler(handler)
+        root.setLevel(old)
+    said = [text for _, text in handler.lines if "post-command refresh failed" in text]
+    assert said == ["post-command refresh failed: ValueError"], handler.lines
 
 
-def test_unexpected_errors_are_wrapped_and_logged_too():
-    """A KeyError from a malformed response must reach the user as a toast,
-    not vanish as an unhandled exception in a service call."""
+def test_quote_failure_never_raises_and_never_quotes_unscrubbed():
+    """It runs in the except block that raises the user's error, where an
+    error of its own would reach Home Assistant whole, chained to the one it
+    was quoting. A client that cannot scrub, an error whose text cannot be
+    read, a logger that breaks: each leaves the class name, never str()."""
     _ha()
     h = load("helpers")
-    from homeassistant.exceptions import HomeAssistantError
-    import logging
+    seen = []
+
+    class Log:
+        def error(self, msg, *args):
+            seen.append(msg % args)
+
+    class BrokenLog:
+        def error(self, *args):
+            raise RuntimeError("handler down")
+
+    class Quoter:
+        def without_secrets(self, text):
+            return str(text)
+
+    class Unreadable(Exception):
+        def __str__(self):
+            raise RuntimeError("no text")
+
+    assert h.quote_failure(Log(), Quoter(), OSError("socket closed"),
+                           "lock %s", "RDL") == "socket closed"
+    assert seen[-1] == ("lock RDL failed (OSError at outside this integration): "
+                        "socket closed"), seen
+    # No scrub to quote through: the class, and the text nowhere.
+    assert h.quote_failure(Log(), object(), OSError("socket closed"), "x") == "OSError"
+    assert "socket" not in seen[-1], seen
+    said = h.quote_failure(Log(), Quoter(), Unreadable(), "x")
+    assert said.endswith("Unreadable") and "." in said, said
+    assert h.quote_failure(BrokenLog(), Quoter(), OSError("socket closed"), "x") \
+        == "socket closed"
+    # The hops are this package's frames only, as file:line.
     try:
-        with h.translate_control_errors(logging.getLogger("t"), "trunk",
-                                        "trunk command blew up"):
-            raise KeyError("data")
-    except HomeAssistantError as e:
-        assert "trunk" in str(e)
+        h.vehicle_metadata(None)
+    except AttributeError as err:
+        hops = h._package_hops(err)
     else:
-        raise AssertionError("the generic error passed through unwrapped")
+        raise AssertionError("vehicle_metadata(None) read as a record")
+    assert hops.startswith("helpers.py:") and " > " not in hops, hops
+    assert hops.split(":")[1].isdigit(), hops
 
 
 # -------------------------------------------------------------------- sensor ---

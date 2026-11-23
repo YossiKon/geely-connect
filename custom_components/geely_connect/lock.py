@@ -41,7 +41,7 @@ from .const import (
     SERVICE_LOCK_PARAMS,
     SERVICE_UNLOCK,
 )
-from .helpers import walk as _walk, schedule_refresh
+from .helpers import walk as _walk, quote_failure, schedule_refresh
 
 SERVICE_UNLOCK_PARAMS = SERVICE_LOCK_PARAMS
 
@@ -181,9 +181,10 @@ class GeelyLock(CoordinatorEntity, LockEntity):
         except GeelyControlError as e:
             raise HomeAssistantError(f"Geely {service_id}: {e.message}") from e
         except Exception as e:
-            _LOGGER.exception("lock %s failed", service_id)
-            raise HomeAssistantError(f"Geely {service_id} failure: {e}") from e
-        _LOGGER.debug("Geely lock %s response: %s", service_id, redact(resp))
+            said = quote_failure(_LOGGER, self._api, e, "lock %s", service_id)
+            raise HomeAssistantError(f"Geely {service_id} failure: {said}") from None
+        _LOGGER.debug("Geely lock %s response: %s", service_id,
+                      self._api.without_secrets(redact(resp)))
         self._pending_target_locked = target_locked
         self._pending_started_at = time.time()
         self.async_write_ha_state()

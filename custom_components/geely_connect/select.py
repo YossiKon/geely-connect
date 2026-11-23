@@ -60,7 +60,7 @@ from .const import (
     SEAT_REAR_RIGHT,
     SERVICE_CLIMATE,
 )
-from .helpers import walk as _walk, schedule_refresh
+from .helpers import walk as _walk, quote_failure, schedule_refresh
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -210,14 +210,15 @@ class GeelySeatLevel(CoordinatorEntity, SelectEntity):
                 f"Geely seat {self._mode} ({self._seat_name}): {e.message}"
             ) from e
         except Exception as e:
-            _LOGGER.exception("seat %s seat=%s level=%d failed",
-                              self._mode, self._seat_name, level)
+            said = quote_failure(_LOGGER, self._api, e, "seat %s seat=%s level=%d",
+                                 self._mode, self._seat_name, level)
             raise HomeAssistantError(
-                f"Geely seat {self._mode} failure: {e}"
-            ) from e
+                f"Geely seat {self._mode} failure: {said}"
+            ) from None
         _LOGGER.debug(
             "Geely seat %s seat=%s level=%d response=%s",
-            self._mode, self._seat_name, level, redact(resp),
+            self._mode, self._seat_name, level,
+            self._api.without_secrets(redact(resp)),
         )
         # Server accepted - set optimistic so the UI doesn't flicker
         # while the next status poll catches up to the real state.

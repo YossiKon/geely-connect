@@ -32,6 +32,11 @@ class RecorderApi:
             raise self.exc
         return {"code": "1000", "message": "ok"}
 
+    def without_secrets(self, text):
+        # The platforms quote an error and an answer through the client (the
+        # real one is GeelyApi.without_secrets); this fake holds no secrets.
+        return str(text)
+
 
 class FakeCoordinator:
     def __init__(self, data=None):
@@ -510,6 +515,60 @@ def test_refresh_button_reports_failure_even_without_a_stored_exception():
     assert msg == "Geely sync failed", msg
 
 
+# ------------------------------------------------------- the session left out ---
+# An error raised outside the client - here a socket's that repeats what the
+# request sent - was never scrubbed where it was raised. The toast, the log
+# line and the traceback Home Assistant prints at debug quote it through the
+# client (a real GeelyApi's without_secrets, holding invented values).
+
+def _session_api(words, quote):
+    api = RecorderApi(exc=OSError(words))
+    api.without_secrets = quote
+    return api
+
+
+def _logged_error(lines, where):
+    import logging
+    errors = [text for level, text in lines if level >= logging.ERROR]
+    assert any(f"failed (OSError at {where}:" in text for text in errors), errors
+
+
+def test_a_failed_button_press_is_quoted_without_the_session():
+    _need_ha()
+    from test_init_lifecycle import _quoted_failure, _real_quoter
+    quote, secret, words = _real_quoter()
+    _, got = _setup_buttons(_bundle(api=_session_api(words, quote)))
+    e, lines = _quoted_failure(_by_uid(got, "btn_unlock_trunk").async_press, secret)
+    assert "Geely RDU_2 failure: denied for " in str(e), e
+    _logged_error(lines, "button.py")
+
+
+def test_refresh_data_quotes_the_polls_error_without_the_session():
+    """The coordinator words its own errors through the client, but an
+    unexpected one reaches last_exception as it was raised."""
+    _need_ha()
+    from test_init_lifecycle import _quoted_failure, _real_quoter
+    quote, secret, words = _real_quoter()
+    coord = FakeCoordinator()
+    coord.last_update_success = False
+    coord.last_exception = OSError(words)
+    _, got = _setup_buttons(_bundle(api=_session_api(words, quote), coordinator=coord))
+    e, _ = _quoted_failure(_by_uid(got, "btn_refresh").async_press, secret)
+    assert str(e).startswith("Geely sync failed: denied for "), e
+    assert f"...{FAKE_VIN[-4:]}" in str(e), e
+
+
+def test_a_failed_lock_command_is_quoted_without_the_session():
+    _need_ha()
+    from test_init_lifecycle import _quoted_failure, _real_quoter
+    quote, secret, words = _real_quoter()
+    _, entity, writes = _make_lock(api=_session_api(words, quote), data=_lock_data("1"))
+    e, lines = _quoted_failure(entity.async_unlock, secret)
+    assert "Geely RDU_2 failure: denied for " in str(e), e
+    assert entity._pending_target_locked is None and writes == []
+    _logged_error(lines, "lock.py")
+
+
 # ------------------------------------------------------------------ cover ---
 
 _COVER_TARGETS = (
@@ -555,6 +614,17 @@ def test_cover_close_sends_rws2_stop_for_its_target():
         finally:
             cover.schedule_refresh = orig
         assert api.calls == [("RWS_2", [{"key": "target", "value": target}], "stop", 0)], cls_name
+
+
+def test_a_failed_cover_command_is_quoted_without_the_session():
+    _need_ha()
+    from test_init_lifecycle import _quoted_failure, _real_quoter
+    quote, secret, words = _real_quoter()
+    for cls_name, _ in _COVER_TARGETS:
+        _, entity = _make_cover(cls_name, api=_session_api(words, quote))
+        e, lines = _quoted_failure(entity.async_open_cover, secret)
+        assert "Geely cover failure: denied for " in str(e), (cls_name, e)
+        _logged_error(lines, "cover.py")
 
 
 def test_the_windows_on_a_1_0_car_send_what_its_app_sends():

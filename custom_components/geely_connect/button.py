@@ -37,6 +37,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .api import GeelyControlError, redact
+from .helpers import quote_failure
 
 from .const import (
     DOMAIN,
@@ -100,6 +101,7 @@ class GeelyRefreshButton(ButtonEntity):
 
     def __init__(self, hass: HomeAssistant, bundle: dict) -> None:
         self._hass = hass
+        self._api = bundle["api"]
         self._coordinator = bundle["coordinator"]
         self._poll_state = bundle.get("poll_state")
         vin = bundle["vin"]
@@ -130,9 +132,12 @@ class GeelyRefreshButton(ButtonEntity):
             self._poll_state.pop("force_woke", None)
         await self._coordinator.async_refresh()
         if not self._coordinator.last_update_success:
+            # Quoted through the client like any caught error: an unexpected
+            # one reaches last_exception as it was raised.
             err = self._coordinator.last_exception
             raise HomeAssistantError(
-                f"Geely sync failed: {err}" if err else "Geely sync failed"
+                f"Geely sync failed: {self._api.without_secrets(err)}" if err
+                else "Geely sync failed"
             )
 
 
@@ -163,8 +168,9 @@ class GeelyTelematicsButton(ButtonEntity):
         except GeelyControlError as e:
             raise HomeAssistantError(f"Geely {self._service_id}: {e.message}") from e
         except Exception as e:
-            _LOGGER.exception("Button %s failed", self._service_id)
-            raise HomeAssistantError(f"Geely {self._service_id} failure: {e}") from e
-        _LOGGER.debug("Geely button %s response: %s", self._service_id, redact(resp))
+            said = quote_failure(_LOGGER, self._api, e, "Button %s", self._service_id)
+            raise HomeAssistantError(f"Geely {self._service_id} failure: {said}") from None
+        _LOGGER.debug("Geely button %s response: %s", self._service_id,
+                      self._api.without_secrets(redact(resp)))
 
 

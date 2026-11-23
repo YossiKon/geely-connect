@@ -6,6 +6,7 @@ temperature is silently ignored by the gateway and the user just sees a
 climate command that "did nothing".
 """
 import asyncio
+import logging
 import time
 import types
 
@@ -46,6 +47,11 @@ class _Api:
         if self.fail is not None:
             raise self.fail
         return {"success": True}
+
+    def without_secrets(self, text):
+        # The climate entity quotes an error and an answer through the client
+        # (the real one is GeelyApi.without_secrets); this fake holds none.
+        return str(text)
 
 
 class _Hass:
@@ -494,6 +500,28 @@ def test_a_crashed_rapid_is_wrapped_too():
             pass
         else:
             raise AssertionError("OSError escaped raw")
+
+
+def test_a_failed_climate_command_is_quoted_without_the_session():
+    """An error raised outside the client - a socket's that repeats what the
+    request sent - was never scrubbed where it was raised. The toast, the log
+    line and the traceback Home Assistant prints at debug quote it through
+    the client, for the AC request and for a rapid one."""
+    _ha()
+    from test_init_lifecycle import _quoted_failure, _real_quoter
+    quote, secret, words = _real_quoter()
+    c = load("climate")
+    for press, label in ((lambda e: e.async_turn_on(), "Geely climate failure: "),
+                         (lambda e: e.async_set_preset_mode(c.PRESET_RAPID_WARMING),
+                          "Geely rapid failure: ")):
+        e, api, _ = _entity(_status(), fail=OSError(words))
+        api.without_secrets = quote
+        with _quiet_refresh(c):
+            err, lines = _quoted_failure(lambda: press(e), secret)
+        assert f"{label}denied for " in str(err), err
+        errors = [text for level, text in lines if level >= logging.ERROR]
+        assert any("failed (OSError at climate.py:" in text for text in errors), errors
+        assert e.preset_mode == c.PRESET_NONE
 
 
 def test_temperatures_are_formatted_the_way_the_gateway_expects():

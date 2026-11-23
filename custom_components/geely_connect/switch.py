@@ -68,6 +68,7 @@ from .helpers import (
     api_serves,
     note_schedule_intent,
     note_slot_2_state,
+    quote_failure,
     slot_2_is_on,
     slot_2_window,
     walk as _walk,
@@ -296,10 +297,12 @@ class GeelySwitch(_OptimisticHold, CoordinatorEntity, SwitchEntity):
         except GeelyControlError as e:
             raise HomeAssistantError(f"Geely {self._service_id}: {e.message}") from e
         except Exception as e:
-            _LOGGER.exception("switch %s %s failed", self._service_id, command)
-            raise HomeAssistantError(f"Geely {self._service_id} failure: {e}") from e
+            said = quote_failure(_LOGGER, self._api, e, "switch %s %s",
+                                 self._service_id, command)
+            raise HomeAssistantError(f"Geely {self._service_id} failure: {said}") from None
         _LOGGER.debug("Geely switch %s %s params=%s response=%s",
-                      self._service_id, command, redact(params), redact(resp))
+                      self._service_id, command, redact(params),
+                      self._api.without_secrets(redact(resp)))
         self._hold(command == self._command_on)
         self._write_held_state()
         if (self._state_path[:1] == _STATE_PATH and self._poll_state is not None
@@ -382,9 +385,10 @@ class GeelyGCleanSwitch(_OptimisticHold, CoordinatorEntity, SwitchEntity):
         except GeelyControlError as e:
             raise HomeAssistantError(f"Geely G-Clean: {e.message}") from e
         except Exception as e:
-            _LOGGER.exception("g-clean %s failed", command)
-            raise HomeAssistantError(f"Geely G-Clean failure: {e}") from e
-        _LOGGER.debug("Geely g-clean %s response=%s", command, redact(resp))
+            said = quote_failure(_LOGGER, self._api, e, "g-clean %s", command)
+            raise HomeAssistantError(f"Geely G-Clean failure: {said}") from None
+        _LOGGER.debug("Geely g-clean %s response=%s", command,
+                      self._api.without_secrets(redact(resp)))
         self._hold(command == "start")
         self._write_held_state()
         schedule_refresh(self._hass, self.coordinator, 8)
@@ -439,9 +443,10 @@ class GeelyDefrostSwitch(_OptimisticHold, CoordinatorEntity, SwitchEntity):
         except GeelyControlError as e:
             raise HomeAssistantError(f"Geely Defrost: {e.message}") from e
         except Exception as e:
-            _LOGGER.exception("defrost %s failed", command)
-            raise HomeAssistantError(f"Geely Defrost failure: {e}") from e
-        _LOGGER.debug("Geely defrost %s response=%s", command, redact(resp))
+            said = quote_failure(_LOGGER, self._api, e, "defrost %s", command)
+            raise HomeAssistantError(f"Geely Defrost failure: {said}") from None
+        _LOGGER.debug("Geely defrost %s response=%s", command,
+                      self._api.without_secrets(redact(resp)))
         self._hold(command == "start")
         self._write_held_state()
         schedule_refresh(self._hass, self.coordinator, 8)
@@ -515,9 +520,10 @@ class GeelySteeringWheelHeatSwitch(CoordinatorEntity, SwitchEntity):
         except GeelyControlError as e:
             raise HomeAssistantError(f"Geely Steering Wheel Heat: {e.message}") from e
         except Exception as e:
-            _LOGGER.exception("steering wheel heat %s failed", command)
-            raise HomeAssistantError(f"Geely Steering Wheel Heat failure: {e}") from e
-        _LOGGER.debug("Geely steering wheel heat %s response=%s", command, redact(resp))
+            said = quote_failure(_LOGGER, self._api, e, "steering wheel heat %s", command)
+            raise HomeAssistantError(f"Geely Steering Wheel Heat failure: {said}") from None
+        _LOGGER.debug("Geely steering wheel heat %s response=%s", command,
+                      self._api.without_secrets(redact(resp)))
         # Server accepted: show the requested state at once (the field lags),
         # and poll twice so the real reading replaces the optimistic one.
         self._optimistic = command == "start"
@@ -625,9 +631,10 @@ class GeelyScheduledChargingSwitch(CoordinatorEntity, SwitchEntity):
         except GeelyControlError as e:
             raise HomeAssistantError(f"Geely Scheduled Charging: {e.message}") from e
         except Exception as e:
-            _LOGGER.exception("scheduled charging %s failed", command)
-            raise HomeAssistantError(f"Geely Scheduled Charging failure: {e}") from e
-        _LOGGER.debug("Geely scheduled-charging %s response=%s", command, redact(resp))
+            said = quote_failure(_LOGGER, self._api, e, "scheduled charging %s", command)
+            raise HomeAssistantError(f"Geely Scheduled Charging failure: {said}") from None
+        _LOGGER.debug("Geely scheduled-charging %s response=%s", command,
+                      self._api.without_secrets(redact(resp)))
 
         # Set the optimistic flag so is_on returns the new state for up
         # to 60s. The Geely server takes about 30s to propagate scheduled
@@ -668,9 +675,10 @@ class GeelyScheduledChargingSwitch(CoordinatorEntity, SwitchEntity):
         except GeelyControlError as e:
             raise HomeAssistantError(f"Geely Scheduled Charging: {e.message}") from e
         except Exception as e:
-            _LOGGER.exception("scheduled charging %s failed", command)
-            raise HomeAssistantError(f"Geely Scheduled Charging failure: {e}") from e
-        _LOGGER.debug("Geely scheduled-charging %s response=%s", command, redact(resp))
+            said = quote_failure(_LOGGER, self._api, e, "scheduled charging %s", command)
+            raise HomeAssistantError(f"Geely Scheduled Charging failure: {said}") from None
+        _LOGGER.debug("Geely scheduled-charging %s response=%s", command,
+                      self._api.without_secrets(redact(resp)))
         self._optimistic_on = (command == "start")
         self._optimistic_until = time.time() + 60
         note_slot_2_state(self.coordinator.data, command == "start")
@@ -725,10 +733,10 @@ class GeelyWindowVentilationSwitch(_OptimisticHold, CoordinatorEntity, SwitchEnt
         except GeelyControlError as e:
             raise HomeAssistantError(f"Geely Window Ventilation: {e.message}") from e
         except Exception as e:
-            _LOGGER.exception("vent switch %s failed", command)
-            raise HomeAssistantError(f"Geely Window Ventilation failure: {e}") from e
+            said = quote_failure(_LOGGER, self._api, e, "vent switch %s", command)
+            raise HomeAssistantError(f"Geely Window Ventilation failure: {said}") from None
         _LOGGER.debug("Geely vent switch %s params=%s response=%s",
-                      command, redact(params), redact(resp))
+                      command, redact(params), self._api.without_secrets(redact(resp)))
         self._hold(command == "start")
         self._write_held_state()
         schedule_refresh(self._hass, self.coordinator, 8)
