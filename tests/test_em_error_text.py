@@ -243,6 +243,13 @@ def test_a_value_quoted_with_an_escaped_apostrophe_is_hidden():
     masked = zc.hide_values(text, [address])
     assert masked == text.replace(escaped, api._mask(escaped)), masked
     assert "brien" not in masked, masked
+    # The escaped form in another case, as an answer naming the address as
+    # it was registered writes it.
+    text = str({"code": 10010003,
+                "message": f'Account "{address.upper()}" is not registered'})
+    assert escaped.upper() in text, text
+    masked = zc.hide_values(text, [address])
+    assert masked == text.replace(escaped.upper(), api._mask(escaped)), masked
 
 
 def test_each_quoter_writes_its_own_form_and_each_is_hidden():
@@ -277,6 +284,63 @@ def test_each_quoter_writes_its_own_form_and_each_is_hidden():
         masked = zc.hide_values(text, [value])
         assert masked == text.replace(form, api._mask(form)), (text, masked)
         assert "fake-o" not in masked and "en-0001" not in masked, masked
+
+
+def test_an_address_is_hidden_in_any_case_and_nothing_else_is():
+    """The original platform keeps the address as it was typed and the new
+    one lower-cases it, and a gateway may name it lower-cased or as the
+    account was registered. An address - a value with an @ in it - is
+    matched in any case and masked as it stands in the text. A token in
+    another case is another value, and is left."""
+    api = load("api")
+    typed = "Owner.Name+cars@Example.COM"
+    for held, said in ((typed, typed.lower()), (typed.lower(), typed),
+                       (typed, typed.upper())):
+        text = f"account {said} is locked ({said})"
+        mask = api._mask(said)
+        assert zc.hide_values(text, [held]) == \
+            f"account {mask} is locked ({mask})", (held, said)
+    # Named as it stands, it is masked as it always was - beside a copy in
+    # another case too, as an answer naming the account as it was sent and
+    # as it was registered would.
+    assert zc.hide_values(f"for {typed}.", [typed]) == f"for {api._mask(typed)}."
+    both = f"{typed.lower()} (registered as {typed})"
+    assert zc.hide_values(both, [typed.lower()]) == \
+        f"{api._mask(typed)} (registered as {api._mask(typed)})"
+    token = "AbCdEf-token-0001"
+    for said in (token.lower(), token.upper()):
+        assert zc.hide_values(f"for {said}", [token]) == f"for {said}", said
+
+
+def test_an_address_in_another_case_goes_in_its_place_in_the_order():
+    """Longest first, an address in another case as well: a local part held
+    on its own, taken out first, would leave the domain beside it, where no
+    match of the address finds it."""
+    assert zc.hide_values("to localpart@EXAMPLE.com",
+                          ["localpart", "localpart@example.com"]) == \
+        "to XXXXXXXXX*XXXXXXX*XXX"
+
+
+def test_an_address_beyond_ascii_keeps_its_length_in_any_case():
+    """A match in another case takes one character for each of the
+    address's - a capital sharp s for its ß, an I for its dotless ı - and
+    the mask is of the text as it stands, so nothing around it moves."""
+    api = load("api")
+    for held, said in (("jürgen.weiß@beispiel.de", "JÜRGEN.WEIẞ@BEISPIEL.DE"),
+                       ("kırmızı.araba@örnek.com.tr", "KIRMIZI.ARABA@ÖRNEK.COM.TR")):
+        text = f"account {said} is locked"
+        out = zc.hide_values(text, [held])
+        assert len(out) == len(text), (text, out)
+        assert out == f"account {api._mask(said)} is locked", out
+
+
+def test_a_match_in_another_case_is_masked_as_it_stands_in_the_text():
+    """Of the pairs a case-blind match takes for one another, one is a letter
+    and a mark: GREEK CAPITAL LETTER IOTA and COMBINING GREEK YPOGEGRAMMENI.
+    The mask is of the text, not of the address held, so the mark becomes an
+    asterisk, and no word boundary comes or goes."""
+    held, said = "\u0399oannis@example.gr", "\u0345oannis@example.gr"
+    assert zc.hide_values(f"for {said}.", [held]) == "for *XXXXXX*XXXXXXX*XX."
 
 
 def test_a_login_token_holding_a_line_break_is_refused_before_a_header():
@@ -451,6 +515,36 @@ def test_the_sign_in_service_leaves_out_the_email_and_the_login_token():
                 idaas.tsp_code, LOGIN)
     _clean(str(e))
     assert "401" in str(e), e
+
+
+def test_the_sign_in_service_naming_the_address_as_registered_leaves_it_out():
+    """Setup lower-cases the address it signs in with; the sign-in service
+    may name it as the account was registered."""
+    registered = "Owner.Name+cars@Example.COM"
+    idaas = zc.ZeekrIdaas()
+    e = _raises(_through, _says(200, {"success": False, "code": "3001",
+                                      "message": f"account {registered} is locked"}),
+                idaas.login_by_email_password, registered.lower(), "fake-password")
+    assert registered.lower() not in str(e).lower(), e
+    assert "3001" in str(e) and "is locked" in str(e), e
+
+
+def test_an_address_in_another_case_leaves_no_piece_and_moves_no_verdict():
+    """An address in another case is masked before the 200-character cut,
+    so a cut through it leaves no piece of it; written right against a
+    code, its mask ends no word there, so `code=401` reads as it did."""
+    c = _client()
+    said_as = EMAIL.upper()
+    head = str({"code": "079001", "message": "MARK"}).split("MARK")[0]
+    said = "x" * (200 - len(head) - 10) + said_as
+    e = _raises(_through, _says(401, {"code": "079001", "message": said}),
+                c.charging_plan_new)
+    assert said_as[:10] not in str(e), str(e)
+    assert zc._car_refused(e), e
+    e = _raises(_through, _says(500, {"message": f"code=401{said_as}"}),
+                c.vehicle_status_new_resp)
+    assert EMAIL not in str(e).lower(), str(e)
+    assert not ad._looks_authy(str(e)), str(e)
 
 
 def test_a_probe_summary_carries_no_candidate_and_no_vin():

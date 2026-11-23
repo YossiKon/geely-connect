@@ -605,6 +605,29 @@ def test_a_refusal_the_original_platform_hands_back_is_masked_in_the_report():
         assert value not in row["message"], f"the {label} survived: {row}"
 
 
+def test_an_address_the_entry_keeps_as_typed_is_masked_in_any_case():
+    """The original platform keeps the address as it was typed; a gateway
+    may name it lower-cased, in a slot's sentence or anywhere else the
+    report carries."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    api = load("api")
+    typed = "Owner.Name+cars@Example.COM"
+    a = api.GeelyApi(app_id="APPID", app_secret="0" * 32, user_id=USER_ID,
+                     vin=FAKE_VIN, cidpsso_token=TOKEN, client_id="CLIENT",
+                     vehicle_series="E245", vehicle_model="E245-J1",
+                     device_id="dev", cert_path="", key_path="", email=typed)
+    a._jwt = "jwt-session-0001-current"
+    a._headers_with_jwt = lambda: {"Authorization": a._jwt}
+    a._mtls_send = lambda host, method, path, body, extra_headers=None: (
+        200, json.dumps({"code": "8155", "httpStatus": "FORBIDDEN",
+                         "message": f"not bound to {typed.lower()}"}).encode())
+    report = _swept(a, {"email": typed, "user_id": USER_ID})
+    assert "not bound to" in report["charge_server"]["1"]["message"], report
+    for text in _strings(report):
+        assert typed.lower() not in text.lower(), text
+
+
 def test_every_string_in_the_report_is_cleared_of_what_the_entry_holds():
     """Both redaction passes mask a field by its name. A value the entry
     keeps under such a name, standing in a sentence or as a key anywhere

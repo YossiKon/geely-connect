@@ -1619,6 +1619,30 @@ def test_a_sign_in_refused_in_words_that_repeat_what_it_sent_leaves_it_out():
                 raise AssertionError(f"APAC exchange {code} was taken as a session")
 
 
+def test_a_sign_in_refusal_naming_the_address_lower_cased_leaves_it_out():
+    """The original platform keeps the address as it was typed and sends it
+    so, as receiverId; the session service may name it lower-cased - and a
+    failure here is a warning in the log, a refusal a re-authentication
+    card."""
+    typed = "Owner.Name+cars@Example.COM"
+    for code, exc in (("60000000", api.GeelyAuthError), ("8500", RuntimeError)):
+        a = _client(user_id=_USER, cidpsso_token=_CIDPSSO, email=typed,
+                    control_host="apis.ecloudkr.com")
+        a._get_access_code = lambda host=None: _ONE_TIME
+        reply = json.dumps({"resultCode": code, "resultMessage":
+                            f"receiverId {typed.lower()} not matched"}).encode()
+        with _patched(_raw_https=lambda *a_, **k: reply):
+            try:
+                a._apac_session_exchange()
+            except exc as e:
+                assert typed.lower() not in str(e).lower(), str(e)
+                assert api._mask(typed) in str(e) and "not matched" in str(e), str(e)
+            else:
+                raise AssertionError(f"APAC exchange {code} was taken as a session")
+    # What the coordinator and the actions quote goes the same way.
+    assert typed.lower() not in a.without_secrets(OSError(f"for {typed.lower()}")).lower()
+
+
 def test_a_cert_server_refusal_that_repeats_the_account_leaves_it_out():
     """Certificate provisioning sends the user id, the long-lived token and
     the app id - an owner's own for an area signed with local keys (#105);

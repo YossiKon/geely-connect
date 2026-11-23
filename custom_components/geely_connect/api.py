@@ -354,7 +354,21 @@ def hide_values(text: str, values: Iterable[Any]) -> str:
     (`code=401<token>`) included. The longest form goes first, so one held
     inside another is not split, and forms of one length in a fixed order,
     so the same text comes out on every run; a value under _HIDE_MIN_LEN
-    characters is left."""
+    characters is left.
+
+    An e-mail address - any value with an @ in it - is matched in any case:
+    the original platform keeps the address as it was typed and the new one
+    lower-cases it, and a gateway may name it lower-cased or as the account
+    was registered, so matched as it stands it went in whole. A case-blind
+    match takes one character for each of the address's - a ß a gateway
+    writes as SS is not matched - and is masked as it stands in the text,
+    so the mask keeps its shape. A letter a bytes form writes as an escape
+    is matched in its own case only: an address goes in no header, and a
+    transport that refuses one quotes it as it was sent. No other value is
+    matched in another case: a token, a VIN or an id in another case is
+    another value, and one matched in any case could be a word. A password
+    is never among the values: masked by value, one that is a word would be
+    pointed at wherever the word stood."""
     return value_mask(values)(text)
 
 
@@ -362,16 +376,32 @@ def value_mask(values: Iterable[Any]) -> Callable[[str], str]:
     """hide_values for many texts: what the returned function is given comes
     back with each of `values` masked as hide_values masks it, the forms and
     their masks worked out once rather than for every text - the diagnostics
-    report masks each of its thousands of strings."""
+    report masks each of its thousands of strings. An address's forms are
+    matched by a case-blind pattern, in their place in the order, and only
+    in a text with an @ in it: most of a report's strings have none."""
     forms = {form for v in values if v and len(str(v)) >= _HIDE_MIN_LEN
              for form in _quoted_forms(str(v))}
-    pairs = [(form, _mask(form)) for form in sorted(forms, key=lambda f: (-len(f), f))]
+    steps: list[tuple[str, str | None, re.Pattern | None]] = []
+    for form in sorted(forms, key=lambda f: (-len(f), f)):
+        if "@" in form:
+            steps.append((form, None, re.compile(re.escape(form), re.IGNORECASE)))
+        else:
+            steps.append((form, _mask(form), None))
 
     def hide(text: str) -> str:
-        for form, mask in pairs:
-            text = text.replace(form, mask)
+        has_address = "@" in text
+        for form, mask, any_case in steps:
+            if any_case is None:
+                text = text.replace(form, mask)
+            elif has_address:
+                text = any_case.sub(_mask_match, text)
         return text
     return hide
+
+
+def _mask_match(match: re.Match) -> str:
+    """A case-blind match of an address, masked as it stands in the text."""
+    return _mask(match.group())
 
 
 def _shorten_vin(text: Any, vin: str) -> Any:
