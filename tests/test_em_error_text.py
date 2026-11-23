@@ -277,6 +277,50 @@ def test_each_quoter_writes_its_own_form_and_each_is_hidden():
         assert "fake-o" not in masked and "en-0001" not in masked, masked
 
 
+def test_a_login_token_holding_a_line_break_is_refused_before_a_header():
+    """The IDaaS login token goes from leg to leg of a sign-in - setup's and
+    the adapter's silent renewal - in the Authorization header, and nothing
+    hidden() reads holds it: http.client refused one holding a bare line
+    break with an error naming it, which went whole into the coordinator's
+    warning and UpdateFailed. It is refused by name before any connection,
+    with the ValueError http.client raised. A bare CR, a bare LF, a CRLF."""
+    made = []
+
+    class _NoConnection:
+        def __init__(self, *a, **k):
+            made.append(a)
+
+    class _Idaas(zc.ZeekrIdaas):
+        def login_by_email_password(self, email, password):
+            return broken
+
+    for broken in ("idaas-tok\ren-0000001", "idaas-tok\nen-0000001",
+                   "idaas-tok\r\nen-0000001"):
+        head, tail = "idaas-tok", "en-0000001"
+        said = []
+        with patch.object(zc.http.client, "HTTPSConnection", _NoConnection):
+            for call in (lambda: zc.idaas_headers("GET", "/p", b"", token=broken),
+                         lambda: zc.ZeekrClient("", "").login_tsp(broken)):
+                e = _raises(call)
+                assert type(e) is ValueError, repr(e)
+                said.append(str(e))
+            with patch.object(ad, "ZeekrIdaas", _Idaas):
+                adapter = ad.ZeekrAdapter(
+                    email=EMAIL, vin=FAKE_VIN, user_id=USER, access_token=ACCESS,
+                    refresh_token="fake-refresh-0123", hf_token=HF,
+                    password="fake-stored-password")
+                e = _raises(adapter._renew_hf)
+                assert type(e) is ValueError, repr(e)
+                said += [str(e), adapter.without_secrets(e)]
+        assert not made, "a connection was opened for a token no header can carry"
+        for text in said:
+            assert text == "the IDaaS login token holds a line break; it was not sent", text
+            assert head not in text and tail not in text, text
+    # A token without one goes out as before.
+    headers = zc.idaas_headers("GET", "/p", b"", token=LOGIN)
+    assert headers["Authorization"] == LOGIN, headers
+
+
 def test_a_session_replaced_while_a_call_is_out_is_still_left_out():
     """Another sign-in can replace the session while a call is out: the
     error is about the session the call went out with."""

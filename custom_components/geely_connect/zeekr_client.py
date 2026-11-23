@@ -597,6 +597,15 @@ def idaas_headers(method: str, path: str, body: bytes, query: str = "",
     if profile:
         headers["Tmp-Tenant-Code"] = TMP_TENANT
     if token:
+        # The IDaaS login token: a sign-in - setup's, or the adapter's
+        # silent renewal - hands it from leg to leg, and nothing hidden()
+        # reads holds it. http.client refuses a header holding a bare line
+        # break with an error that names the value it refused, so a token
+        # holding a line break is refused here first, by name - with a
+        # ValueError, as http.client's refusal is, so a caller handles it
+        # as it handled that one.
+        if isinstance(token, str) and ("\r" in token or "\n" in token):
+            raise ValueError("the IDaaS login token holds a line break; it was not sent")
         headers["Authorization"] = token  # raw tokenValue, no Bearer prefix (app parity)
     return headers
 

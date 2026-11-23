@@ -1008,15 +1008,17 @@ class GeelyApi(CommandTrail):
     def hidden(self) -> tuple:
         """What error text built from a gateway's answer leaves out
         (hide_values): the session token, the long-lived cidpsso token, the
-        user id - the account's and the one the session was issued to - and
-        the e-mail address. The VIN is shortened instead, to its last four
-        characters, as the command trail shows it (_shorten_vin). A user id
-        shorter than six characters is left, as everywhere hide_values runs:
-        that short, it cannot be told from a code or a count. Read with
-        getattr, as the trail reads the VIN: a client built without the
-        constructor must not turn a working command into an exception."""
+        user id - the account's and the one the session was issued to - the
+        e-mail address, and the app id its signed calls send, which for an
+        area signed with local keys is the owner's own (#105). The VIN is
+        shortened instead, to its last four characters, as the command trail
+        shows it (_shorten_vin). A user id shorter than six characters is
+        left, as everywhere hide_values runs: that short, it cannot be told
+        from a code or a count. Read with getattr, as the trail reads the
+        VIN: a client built without the constructor must not turn a working
+        command into an exception."""
         return tuple(getattr(self, name, None) for name in
-                     ("_jwt", "cidpsso_token", "user_id", "_jwt_uid", "email"))
+                     ("_jwt", "cidpsso_token", "user_id", "_jwt_uid", "email", "app_id"))
 
     def _said(self, j: dict, *sent: Any) -> str:
         """An answer as error text: redact() by key, then hide_values() by

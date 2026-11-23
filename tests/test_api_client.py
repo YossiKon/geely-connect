@@ -1524,6 +1524,23 @@ def test_a_status_read_refused_in_words_that_repeat_the_session_leaves_it_out():
         raise AssertionError("a refused session read was taken as data")
 
 
+def test_a_refusal_that_repeats_the_app_id_leaves_it_out():
+    """The signed calls send the app id, which for an area signed with local
+    keys is the owner's own (#105): a refusal worded around it reached the
+    re-authentication card and the log whole, and so did an outside error
+    quoted through without_secrets()."""
+    app = "fake-app-id-0001"
+    a = _session_client(app_id=app)
+    _scripted_mtls(a, [{"code": 60000001, "message": _echo(app)}])
+    try:
+        a.vehicle_status()
+    except api.GeelyAuthError as e:
+        _left_out(str(e), (app,))
+    else:
+        raise AssertionError("a refused session read was taken as data")
+    _left_out(a.without_secrets(OSError(_echo(app))), (app,))
+
+
 def test_a_refusal_that_repeats_the_session_leaves_it_out_of_the_press_and_the_trail():
     """The platforms show a refusal's message as the error of the press, and
     the trail keeps it for the diagnostics report."""
