@@ -614,8 +614,8 @@ def test_the_diagnostics_free_text_leaves_the_token_out():
 
     class Entry:
         entry_id = "e1"
-        data = {"vin": FAKE_VIN}
-        options: dict = {}
+        data = types.MappingProxyType({"vin": FAKE_VIN})
+        options = types.MappingProxyType({})
 
     class Hass:
         data = {"geely_connect": {"e1": {"api": a, "coordinator": coordinator}}}

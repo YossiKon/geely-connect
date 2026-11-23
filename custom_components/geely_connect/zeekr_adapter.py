@@ -480,6 +480,12 @@ class ZeekrAdapter(CommandTrail):
         out = hide_values(str(text), [v for v in self._client.hidden() if v != vin])
         return _shorten_vin(out, vin)
 
+    def hidden(self) -> tuple:
+        """What the client's error text leaves out (ZeekrClient.hidden), for
+        a caller that masks it itself: the diagnostics report, which masks
+        the VIN where the trail shortens it."""
+        return self._client.hidden()
+
     # ---- x-vin -------------------------------------------------------------
 
     @property

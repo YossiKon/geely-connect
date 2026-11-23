@@ -7,6 +7,7 @@ so that cannot happen again unnoticed.
 import asyncio
 import datetime
 import json
+from types import MappingProxyType
 
 from conftest import FAKE_VIN, have_homeassistant, load
 from run import skip
@@ -36,13 +37,17 @@ def _report():
         }
 
     class Entry:
+        # Read-only mappings, as Home Assistant holds them: with dicts here
+        # the value mask passed every test and read nothing from a real
+        # entry, the VIN of an original-platform car included.
         entry_id = "e1"
-        data = {"vin": FAKE_VIN, "email": EMAIL, "cidpsso_token": TOKEN,
-                "user_id": USER_ID, "device_idfa": "8E4F1B22-9C3D",
-                "cert_path": f"/c/.storage/geely_connect/{FAKE_VIN}/cert.pem",
-                "passToken": TOKEN, "appSecret": "0" * 32,
-                "poll_mode": "manual"}
-        options = {"pressure_unit": "psi"}
+        data = MappingProxyType({
+            "vin": FAKE_VIN, "email": EMAIL, "cidpsso_token": TOKEN,
+            "user_id": USER_ID, "device_idfa": "8E4F1B22-9C3D",
+            "cert_path": f"/c/.storage/geely_connect/{FAKE_VIN}/cert.pem",
+            "passToken": TOKEN, "appSecret": "0" * 32,
+            "poll_mode": "manual"})
+        options = MappingProxyType({"pressure_unit": "psi"})
 
     class Api:
         command_trail = [
@@ -191,8 +196,8 @@ def test_the_report_lists_the_card_resource_when_lovelace_has_one():
 
     class Entry:
         entry_id = "e1"
-        data = {"vin": FAKE_VIN}
-        options = {}
+        data = MappingProxyType({"vin": FAKE_VIN})
+        options = MappingProxyType({})
 
     class _Res:
         def async_items(self):
@@ -224,8 +229,8 @@ def test_a_resource_list_that_will_not_be_read_does_not_break_the_report():
 
     class Entry:
         entry_id = "e1"
-        data = {"vin": FAKE_VIN}
-        options = {}
+        data = MappingProxyType({"vin": FAKE_VIN})
+        options = MappingProxyType({})
 
     class _Angry:
         def async_items(self):
@@ -260,8 +265,8 @@ def test_a_report_can_be_produced_before_the_coordinator_exists():
 
     class Entry:
         entry_id = "missing"
-        data = {"vin": FAKE_VIN}
-        options: dict = {}
+        data = MappingProxyType({"vin": FAKE_VIN})
+        options = MappingProxyType({})
 
     class Hass:
         data: dict = {}
@@ -277,8 +282,8 @@ def _token_report(data, options, api):
     class Entry:
         entry_id = "e1"
 
-    Entry.data = {"vin": FAKE_VIN, "platform": "zeekr", **data}
-    Entry.options = options
+    Entry.data = MappingProxyType({"vin": FAKE_VIN, "platform": "zeekr", **data})
+    Entry.options = MappingProxyType(options)
 
     class Hass:
         data = {"geely_connect": {"e1": {"api": api}}} if api else {}
@@ -356,8 +361,8 @@ def _sweep_report(get):
 
     class Entry:
         entry_id = "e1"
-        data = {"vin": FAKE_VIN}
-        options: dict = {}
+        data = MappingProxyType({"vin": FAKE_VIN})
+        options = MappingProxyType({})
 
     class Hass:
         data = {"geely_connect": {"e1": {"api": Api()}}}
@@ -400,8 +405,8 @@ def test_an_adapter_that_does_not_serve_the_endpoint_is_not_asked_either():
 
     class Entry:
         entry_id = "e1"
-        data = {"vin": FAKE_VIN}
-        options: dict = {}
+        data = MappingProxyType({"vin": FAKE_VIN})
+        options = MappingProxyType({})
 
     class Hass:
         data = {"geely_connect": {"e1": {"api": Api()}}}
@@ -505,8 +510,310 @@ def test_the_two_redaction_lists_have_not_drifted_apart():
     """diagnostics runs api.redact() as a second pass precisely so that a key
     missing from one list is still caught by the other. If that second pass is
     ever removed, this is the test that should fail."""
-    import io, os
+    import io, os, re
     from conftest import PKG
     src = io.open(os.path.join(PKG, "diagnostics.py"), encoding="utf-8").read()
-    assert "from .api import redact" in src
+    assert re.search(r"from \.api import [^\n]*\bredact\b", src)
     assert "redact(" in src, "the normalised-key pass is gone"
+
+
+def _strings(obj):
+    """Every string a report holds, a key's included."""
+    if isinstance(obj, str):
+        yield obj
+    elif isinstance(obj, dict):
+        for k, v in obj.items():
+            yield from _strings(k)
+            yield from _strings(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from _strings(v)
+
+
+def _swept(api, data=None):
+    """A report from an entry whose client is `api`, the sweep run inline."""
+    diag = load("diagnostics")
+
+    class Entry:
+        entry_id = "e1"
+        options = MappingProxyType({})
+
+    Entry.data = MappingProxyType({"vin": FAKE_VIN, **(data or {})})
+
+    class Hass:
+        data = {"geely_connect": {"e1": {"api": api}}}
+
+        async def async_add_executor_job(self, fn, *args):
+            return fn(*args)
+
+    return asyncio.run(diag.async_get_config_entry_diagnostics(Hass(), Entry()))
+
+
+def test_a_session_token_a_refused_header_quotes_stays_out_of_the_sweep():
+    """The Geely EM client sends the session token as a header, and
+    http.client refuses a value holding a line break with an error that
+    quotes it, escaped. The coordinator's warning masks it through the
+    client; the sweep's rows took out only the VIN and the vehicle token, so
+    the session token reached the report - the file an owner attaches to a
+    public issue. Asked of each row's own text: json escapes the escape, so
+    a check for the whole token in the dumped report passes either way."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    ad = load("zeekr_adapter")
+    first, second = "fake-access-AAAA", "BBBB-session-tail"
+    a = ad.ZeekrAdapter(email=EMAIL, vin=FAKE_VIN, user_id=USER_ID,
+                        access_token=f"{first}\n{second}", refresh_token=TOKEN,
+                        hf_token=TOKEN, gateway="https://unused.invalid")
+    a.adopt_enc_vin("c2VjcmV0LXZlaGljbGUtdG9rZW4tdmFsdWU=")
+    rows = _swept(a, {"platform": "zeekr"})["charge_server"]
+    for slot in ("2", "4", "6"):           # the schedule slots it maps
+        text = rows[slot]["error"]
+        assert text.startswith("ValueError: Invalid header value"), text
+        assert first not in text and second not in text, text
+    assert "not mapped yet" in rows["1"]["error"], rows["1"]
+
+
+def test_a_refusal_the_original_platform_hands_back_is_masked_in_the_report():
+    """The original platform's client hands a refused slot read back as
+    data, its sentence and all - of the refusals, only an auth failure is
+    raised - and redact() masks by name, which a value inside the sentence
+    escapes. No gateway has been seen to word a refusal around the car or
+    the account (the twenty reports from that platform attached to issues
+    answered every slot with a success), so the sentence is made up; the
+    way it takes into the report is the real client's."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    api = load("api")
+    jwt = "jwt-session-0001-current"
+    a = api.GeelyApi(app_id="APPID", app_secret="0" * 32, user_id=USER_ID,
+                     vin=FAKE_VIN, cidpsso_token=TOKEN, client_id="CLIENT",
+                     vehicle_series="E245", vehicle_model="E245-J1",
+                     device_id="dev", cert_path="", key_path="", email=EMAIL)
+    a._jwt = jwt
+    a._headers_with_jwt = lambda: {"Authorization": jwt}
+    words = (f"vehicle {FAKE_VIN} is not bound to account {USER_ID} "
+             f"({EMAIL}) for session {jwt}")
+    a._mtls_send = lambda host, method, path, body, extra_headers=None: (
+        200, json.dumps({"code": "8155", "message": words,
+                         "httpStatus": "FORBIDDEN"}).encode())
+    row = _swept(a, {"email": EMAIL, "user_id": USER_ID,
+                     "cidpsso_token": TOKEN})["charge_server"]["1"]
+    assert row["code"] == "8155", row
+    assert "is not bound to account" in row["message"], row
+    for label, value in (("VIN", FAKE_VIN), ("user id", USER_ID),
+                         ("e-mail", EMAIL), ("session token", jwt)):
+        assert value not in row["message"], f"the {label} survived: {row}"
+
+
+def test_every_string_in_the_report_is_cleared_of_what_the_entry_holds():
+    """Both redaction passes mask a field by its name. A value the entry
+    keeps under such a name, standing in a sentence or as a key anywhere
+    else in the report - a status field, a catalogue's label, a command's
+    error, the last error - is masked by value. A name only one pass
+    knows counts: `appSecret` is on redact()'s normalised lists alone, and
+    `latitude` on Home Assistant's exact one alone. A password is not
+    masked: by value, one that is a word would be pointed at wherever the
+    word stands."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    diag = load("diagnostics")
+    user_id, idfa, hmac = 8817263412, "8E4F1B22-9C3D-4A55", "hmac-access-0123456"
+    x_vin, jwt = "c2VjcmV0LXZlaGljbGUtdG9rZW4tdmFsdWU=", "jwt-session-0002-held"
+    app_secret, latitude = "app-secret-0123456", "32.0853123"
+
+    class Coord:
+        last_exception = Exception(f"status read failed for {user_id}: {x_vin}")
+        last_update_success = False
+        update_interval = None
+        data = {"_state": {"note": f"{FAKE_VIN} last seen by {EMAIL} on {idfa}",
+                           "why": "cannot reach the network"},
+                FAKE_VIN: {"odometer": "1234"},
+                "_trip": {"sent": f"session {jwt}, key {hmac}, secret "
+                                  f"{app_secret}, at {latitude}"}}
+
+    class Api:
+        command_trail = [{"command": "RCE_2 start", "outcome": "error",
+                          "message": f"refused for {TOKEN}"}]
+
+        def hidden(self):
+            return (jwt,)
+
+    class Entry:
+        entry_id = "e1"
+        data = MappingProxyType({
+            "vin": FAKE_VIN, "email": EMAIL, "cidpsso_token": TOKEN,
+            "user_id": user_id, "device_idfa": idfa,
+            "eu_app_keys": [{"eu": hmac}], "appSecret": app_secret,
+            "latitude": latitude,
+            "zeekr_password": "network", "poll_mode": "manual"})
+        options = MappingProxyType({"zeekr_enc_vin": x_vin})
+
+    class Hass:
+        data = {"geely_connect": {"e1": {
+            "coordinator": Coord(), "api": Api(),
+            "capabilities_raw": [{"functionId": "remote_climate_control_2",
+                                  "functionName": f"climate for {FAKE_VIN}"}]}}}
+
+    r = asyncio.run(diag.async_get_config_entry_diagnostics(Hass(), Entry()))
+    for text in _strings(r):
+        for value in (FAKE_VIN, EMAIL, TOKEN, str(user_id), idfa, hmac, x_vin, jwt,
+                      app_secret, latitude):
+            assert value not in text, f"{value!r} survived in {text!r}"
+    assert "last seen by" in r["status"]["_state"]["note"]
+    assert r["status"]["_state"]["why"] == "cannot reach the network", \
+        "a password was masked by value"
+    assert {"odometer": "1234"} in r["status"].values(), "a masked key lost its data"
+    assert r["recent_commands"][0]["message"].startswith("refused for "), r["recent_commands"]
+    assert r["polling"]["last_exception"].startswith("status read failed for ")
+    assert r["capabilities_raw"][0]["functionId"] == "remote_climate_control_2"
+
+
+def test_a_value_the_cut_falls_through_is_masked_before_it():
+    """A row and the last error are cut to 300 characters. Cut first, a value
+    straddling the cut would leave a prefix no mask can match."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    words = "x" * 280 + " " + TOKEN
+
+    class Api:
+        command_trail: list = []
+
+        def charge_server_get(self, slot):
+            raise RuntimeError(words)
+
+    class Coord:
+        last_exception = RuntimeError(words)
+        last_update_success = False
+        update_interval = None
+        data: dict = {}
+
+    diag = load("diagnostics")
+
+    class Entry:
+        entry_id = "e1"
+        data = MappingProxyType({"vin": FAKE_VIN, "cidpsso_token": TOKEN})
+        options = MappingProxyType({})
+
+    class Hass:
+        data = {"geely_connect": {"e1": {"api": Api(), "coordinator": Coord()}}}
+
+        async def async_add_executor_job(self, fn, *args):
+            return fn(*args)
+
+    r = asyncio.run(diag.async_get_config_entry_diagnostics(Hass(), Entry()))
+    # The row's cut leaves five characters of the token, the last error's
+    # nineteen.
+    for text in (r["charge_server"]["1"]["error"], r["polling"]["last_exception"]):
+        assert len(text) == 300 and text.endswith("XXXXX"), text[-25:]
+        assert TOKEN[:5] not in text, text[-25:]
+
+
+def test_a_token_minted_during_the_sweep_is_masked_too():
+    """A slot read can renew the session (the Geely EM adapter's
+    _authed_charge). Read once before the sweep, the values held the token
+    the session had then: a later answer naming the new one carried it
+    whole, and so did a later row quoting it - refused for a line break,
+    as http.client words it - where the row's cut fell through it, which
+    leaves a prefix no later mask can match. An answer from before the
+    renewal names the old one, which the client no longer holds."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    old, first, second = "fake-access-first-0001", "fake-access-second", "second-half"
+
+    class Api:
+        command_trail: list = []
+        token = old
+
+        def hidden(self):
+            return (self.token,)
+
+        def charge_server_get(self, slot):
+            if slot == "1":                     # renews the session as it reads
+                said, self.token = self.token, f"{first}\n{second}"
+                return {"code": "1000", "data": {"note": f"for {said!r}"}}
+            if slot == "2":
+                return {"code": "1000", "data": {"note": f"for {self.token!r}"}}
+            # "ValueError: " and the padding put the token at 286, across the
+            # cut at 300.
+            raise ValueError("x" * 271 + f" {self.token.encode()!r}")
+
+    rows = _swept(Api())["charge_server"]
+    for slot, value in (("1", old), ("2", first)):
+        note = rows[slot]["data"]["note"]
+        assert note.startswith("for '") and value not in note, note
+    for slot in ("3", "4", "5", "6", "8"):
+        text = rows[slot]["error"]
+        assert len(text) == 300 and text.startswith("ValueError: xxx"), text[:20]
+        assert "fake-acc" not in text, text[-40:]
+
+
+def test_a_token_a_read_went_out_with_is_masked_after_another_renewal():
+    """A renewal can land while a read is out - a poll's, say - and the
+    read's error quotes the token it went out with, which the client holds
+    no longer, nor did it before the sweep. The values are taken as each
+    read goes out, a failed one's included, and the whole report is masked
+    with all of them and with those held once the sweep is over. A read
+    can renew too and have its retry refused, quoting the token it was
+    renewed to, which is read as the row is written - or answer naming
+    it, as the last slot does here."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    t1 = "fake-access-mid\nmid-half"        # minted by slot 1's read
+    t4 = "fake-access-tail\ntail-half"      # minted by the last read
+
+    class Api:
+        command_trail: list = []
+        token = "fake-access-first-0001"
+
+        def hidden(self):
+            return (self.token,)
+
+        def charge_server_get(self, slot):
+            if slot == "1":                     # renews, then fails
+                self.token = t1
+                raise RuntimeError("the read was refused")
+            if slot == "2":                     # renewed while this read is out
+                sent, self.token = self.token, "fake-access-last-0003"
+                raise ValueError("x" * 271 + f" {sent.encode()!r}")
+            if slot == "3":
+                return {"code": "1000", "data": {"note": f"for {t1!r}"}}
+            if slot == "4":                     # renews, and its retry is refused
+                self.token = "fake-access-own\nown-half"
+                raise ValueError("x" * 271 + f" {self.token.encode()!r}")
+            if slot == "8":                     # renews, and answers naming it
+                self.token = t4
+                return {"code": "1000", "data": {"note": f"for {t4!r}"}}
+            raise NotImplementedError("not mapped")
+
+    rows = _swept(Api())["charge_server"]
+    assert rows["1"]["error"] == "RuntimeError: the read was refused", rows["1"]
+    for slot in ("2", "4"):
+        text = rows[slot]["error"]
+        assert len(text) == 300 and "fake-acc" not in text, (slot, text[-40:])
+    for slot in ("3", "8"):
+        note = rows[slot]["data"]["note"]
+        assert note.startswith("for '") and "fake-acc" not in note, (slot, note)
+
+
+def test_a_client_whose_hidden_values_cannot_be_read_still_gives_a_report():
+    """The values the entry keeps are masked all the same."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+
+    class Api:
+        command_trail = [{"command": "RCT start", "outcome": "error",
+                          "message": f"refused for {FAKE_VIN}"}]
+
+        def charge_server_get(self, slot):
+            raise RuntimeError(f"illegal request parameter for {FAKE_VIN}")
+
+        def hidden(self):
+            raise RuntimeError("no values")
+
+    r = _swept(Api())
+    assert FAKE_VIN not in r["recent_commands"][0]["message"], r["recent_commands"]
+    rows = r["charge_server"]
+    assert set(rows) == {"1", "2", "3", "4", "5", "6", "8"}, rows
+    for row in rows.values():
+        assert row["error"].startswith("RuntimeError: illegal request parameter for "), row
+        assert FAKE_VIN not in row["error"], row

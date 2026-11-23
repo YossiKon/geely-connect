@@ -2411,13 +2411,12 @@ def test_a_failed_poll_quotes_the_gateway_and_outside_errors_without_the_session
 _ANSWERS = {"resp", "sc", "st", "state_resp", "login_resp"}
 # Every module is held to the platforms' rules but these: __init__.py (on its
 # own, in the test after next), the clients (api, zeekr_client, zeekr_adapter
-# - they are the scrub), and three that word their errors apart: the captcha
+# - they are the scrub), and two that word their errors apart: the captcha
 # solver the config flow drives (it is sent nothing of the account, and logs
-# nothing), diagnostics (its own _scrub) and the card registration (Home
-# Assistant's own errors, no request text). A module added later is held to
-# them unless it is named here.
+# nothing) and the card registration (Home Assistant's own errors, no request
+# text). A module added later is held to them unless it is named here.
 _NOT_PLATFORM = {"__init__.py", "api.py", "zeekr_client.py", "zeekr_adapter.py",
-                 "geetest_solver.py", "diagnostics.py", "cards.py"}
+                 "geetest_solver.py", "cards.py"}
 
 
 def _platform_modules():
@@ -2652,10 +2651,13 @@ def test_every_error_a_platform_quotes_goes_through_a_scrub():
     helpers.quote_failure() counts as a scrub: it quotes through the client
     and logs no traceback. The config flow is held to them too, its own
     without_secrets() the scrub: an error that leaves a step whole is logged
-    by Home Assistant's web server with its traceback."""
+    by Home Assistant's web server with its traceback. So is the diagnostics
+    report, hide_values() over what the entry and the client hold the scrub:
+    it is the file an owner attaches to a public issue."""
     modules = _platform_modules()
-    assert {"button.py", "climate.py", "config_flow.py", "cover.py", "helpers.py",
-            "lock.py", "select.py", "switch.py", "time.py"} <= set(modules), modules
+    assert {"button.py", "climate.py", "config_flow.py", "cover.py",
+            "diagnostics.py", "helpers.py", "lock.py", "select.py", "switch.py",
+            "time.py"} <= set(modules), modules
     bare = [(module, *b) for module in modules
             for b in _quote_rule_breaks(module, strict=True)]
     assert not bare, bare

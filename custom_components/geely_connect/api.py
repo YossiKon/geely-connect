@@ -30,7 +30,7 @@ import string
 import threading
 import time
 import uuid
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import Any
 from urllib.parse import parse_qsl, quote, urlparse
 
@@ -355,11 +355,23 @@ def hide_values(text: str, values: Iterable[Any]) -> str:
     inside another is not split, and forms of one length in a fixed order,
     so the same text comes out on every run; a value under _HIDE_MIN_LEN
     characters is left."""
+    return value_mask(values)(text)
+
+
+def value_mask(values: Iterable[Any]) -> Callable[[str], str]:
+    """hide_values for many texts: what the returned function is given comes
+    back with each of `values` masked as hide_values masks it, the forms and
+    their masks worked out once rather than for every text - the diagnostics
+    report masks each of its thousands of strings."""
     forms = {form for v in values if v and len(str(v)) >= _HIDE_MIN_LEN
              for form in _quoted_forms(str(v))}
-    for form in sorted(forms, key=lambda f: (-len(f), f)):
-        text = text.replace(form, _mask(form))
-    return text
+    pairs = [(form, _mask(form)) for form in sorted(forms, key=lambda f: (-len(f), f))]
+
+    def hide(text: str) -> str:
+        for form, mask in pairs:
+            text = text.replace(form, mask)
+        return text
+    return hide
 
 
 def _shorten_vin(text: Any, vin: str) -> Any:

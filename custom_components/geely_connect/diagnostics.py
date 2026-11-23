@@ -7,13 +7,14 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .api import redact
+from .api import _IDENTIFYING_KEYS, _SECRET_KEYS, _norm_key, hide_values, redact, value_mask
 from .const import (
     CONF_PLATFORM,
     CONF_ZEEKR_ENC_VIN,
@@ -99,22 +100,69 @@ def _clean(data: Any) -> Any:
     return async_redact_data(redact(data), _REDACT)
 
 
-def _scrub(text: Any, vin: str | None, api: Any = None) -> str:
-    """Take the VIN out of a free-text field, and on a Geely EM entry the
-    vehicle token its client sends.
+def _held(entry: ConfigEntry, api: Any) -> tuple:
+    """The values the report leaves out wherever they stand in its text.
 
     Both redaction passes match on key names, which is enough for structured
-    payloads and no help at all inside a sentence. Exception messages are
-    supposed to be VIN-free already - that was fixed deliberately, and the
-    Geely EM client words its errors without the token either - but a report
-    is the wrong place to rely on every future `raise` remembering it.
-    """
-    out = "" if text is None else str(text)
-    token = getattr(api, "enc_vin", "")
-    for value in (token if isinstance(token, str) else "", vin):
-        if value and value in out:
-            out = out.replace(value, "***redacted***")
-    return out
+    payloads and no help at all inside a sentence: an error's text, an
+    answer's own words. Error text is supposed to be free of these already,
+    and the clients word theirs without them - but an error raised outside a
+    client was never scrubbed, and a report is the wrong place to rely on
+    every future `raise` remembering it. A session token holding a line break
+    reached the sweep's rows whole: http.client refuses the header and quotes
+    the value, escaped, in its error.
+
+    So these are masked in every string of the report (hide_values, which
+    matches the quoted forms too): each value the entry keeps under a name
+    either pass masks - the VIN, the account's tokens, its e-mail address,
+    its user id - and what the client's error text leaves out (hidden()):
+    the vehicle token it sends, and the session tokens as they stand now,
+    which the entry keeps an older copy of, or none. Read again as each of
+    the sweep's reads goes out and as its row is written, and once more
+    for the whole report, which is masked with every reading: a slot read
+    can renew the session (the Geely EM adapter's _authed_charge), and so
+    can a poll meanwhile, so a token one reading names may be gone by the
+    next. Not a password: masked by value, a password that is a word would
+    be pointed at wherever that word stands in the report."""
+    held = [*_under_masked_names(entry.data), *_under_masked_names(entry.options)]
+    hidden = getattr(api, "hidden", None)
+    if callable(hidden):
+        try:
+            held.extend(hidden())
+        except Exception:  # noqa: BLE001 - diagnostics must never raise
+            pass
+    return tuple(v for v in held
+                 if isinstance(v, (str, int)) and not isinstance(v, bool))
+
+
+def _under_masked_names(obj: Any, masked: bool = False):
+    """The leaves of `obj` that sit under a name either redaction pass masks,
+    leaving out a password's. An entry's data and options are read-only
+    mappings, not dicts."""
+    if isinstance(obj, Mapping):
+        for key, value in obj.items():
+            norm = _norm_key(key)
+            if norm is not None and "password" in norm:
+                continue
+            yield from _under_masked_names(value, masked or key in _REDACT or (
+                norm in _SECRET_KEYS or norm in _IDENTIFYING_KEYS))
+    elif isinstance(obj, (list, tuple)):
+        for value in obj:
+            yield from _under_masked_names(value, masked)
+    elif masked:
+        yield obj
+
+
+def _masked(obj: Any, hide: Callable[[str], str]) -> Any:
+    """`obj` with `hide` (value_mask) run over every string it holds, a
+    key's included. A number is left as it is."""
+    if isinstance(obj, str):
+        return hide(obj)
+    if isinstance(obj, Mapping):
+        return {_masked(k, hide): _masked(v, hide) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_masked(v, hide) for v in obj]
+    return obj
 
 
 async def async_get_config_entry_diagnostics(
@@ -122,8 +170,10 @@ async def async_get_config_entry_diagnostics(
 ) -> dict[str, Any]:
     bundle = (hass.data.get(DOMAIN) or {}).get(entry.entry_id) or {}
     coordinator = bundle.get("coordinator")
-    vin = entry.data.get("vin")
-    return {
+    api = bundle.get("api")
+    held = _held(entry, api)
+    seen = list(held)       # and what each of the sweep's reads went out with
+    report = {
         "entry_data": _clean(dict(entry.data)),
         "options": _clean(dict(entry.options)),
         # Whether the new platform's vehicle token is set - never its value.
@@ -134,7 +184,7 @@ async def async_get_config_entry_diagnostics(
         # Why the data in this report is as old as it is, and whether the
         # integration is talking to the car at all. A stale reading and a failing
         # fetch look identical in `status` alone, which is how #21 stayed open.
-        "polling": _polling(bundle, coordinator, vin),
+        "polling": _polling(bundle, coordinator, held),
         # The last commands sent and what came back. A command rejected because
         # the car was still busy is dropped, not retried, and leaves no trace
         # anywhere else unless debug logging happened to be on beforehand.
@@ -160,16 +210,17 @@ async def async_get_config_entry_diagnostics(
         "status": _clean((coordinator.data if coordinator else {}) or {}),
         # The charge-server schedule slots, which nothing polls - see
         # _CHARGE_SERVER_SLOTS for the two open questions this answers.
-        "charge_server": await _charge_server(hass, bundle.get("api"), vin),
+        "charge_server": await _charge_server(hass, entry, api, seen),
         # Whether the dashboard cards are actually being served, and from
         # where: the first thing to check when a card reads "Custom element
         # not found" but the vehicle itself is fine.
         "cards": _card_status(hass),
     }
+    return _masked(report, value_mask((*seen, *_held(entry, api))))
 
 
-async def _charge_server(hass: HomeAssistant, api: Any,
-                         vin: str | None) -> dict[str, Any]:
+async def _charge_server(hass: HomeAssistant, entry: ConfigEntry, api: Any,
+                         seen: list) -> dict[str, Any]:
     """Read every charge-server slot once, recording failures as results.
 
     A slot that does not exist is expected to answer with an error, and that
@@ -183,6 +234,13 @@ async def _charge_server(hass: HomeAssistant, api: Any,
     answer from the gateway's charge-manage service and the rest say they
     are not mapped (#114). An entry that failed setup before building a
     client has no method at all.
+
+    An error's text is masked before the row is cut short - a cut through a
+    value leaves a prefix no mask can match - with every value read so far
+    (`seen`, which the whole report is masked with too) and those read as
+    the row is written. Each read's values are taken as it goes out: a
+    renewal, this sweep's or a poll's, can replace the token a read carries
+    before its error comes back.
     """
     get = getattr(api, "charge_server_get", None)
     if get is None or not api_serves(api, "charge_server"):
@@ -192,10 +250,12 @@ async def _charge_server(hass: HomeAssistant, api: Any,
 
     async def _sweep() -> None:
         for slot in _CHARGE_SERVER_SLOTS:
+            seen.extend(_held(entry, api))
             try:
                 out[slot] = _clean(await hass.async_add_executor_job(get, slot))
             except Exception as e:  # noqa: BLE001 - diagnostics must never raise
-                out[slot] = {"error": _scrub(f"{type(e).__name__}: {e}", vin, api)[:300]}
+                said = hide_values(str(e), (*seen, *_held(entry, api)))
+                out[slot] = {"error": f"{type(e).__name__}: {said}"[:300]}
 
     try:
         await asyncio.wait_for(_sweep(), _SWEEP_TIMEOUT_S)
@@ -232,13 +292,15 @@ def _vehicle_token(entry: ConfigEntry, api: Any) -> dict[str, Any] | None:
     }
 
 
-def _polling(bundle: dict, coordinator: Any, vin: str | None) -> dict[str, Any]:
-    """How the poller is doing, in the terms the adaptive logic thinks in."""
+def _polling(bundle: dict, coordinator: Any, held: tuple) -> dict[str, Any]:
+    """How the poller is doing, in the terms the adaptive logic thinks in.
+    The last error is masked (_held) before it is cut short."""
     poll = dict(bundle.get("poll_state") or {})
     # The change signature is an opaque hash of the fields that decide whether
     # anything moved. The streak counted from it is the readable part.
     poll.pop("sig", None)
     interval = getattr(coordinator, "update_interval", None)
+    last = getattr(coordinator, "last_exception", None)
     return {
         "cycle": poll.get("cycle"),
         "unchanged_polls": poll.get("idle"),
@@ -246,8 +308,7 @@ def _polling(bundle: dict, coordinator: Any, vin: str | None) -> dict[str, Any]:
         "interval_seconds": (interval.total_seconds()
                              if interval is not None else None),
         "last_update_success": getattr(coordinator, "last_update_success", None),
-        "last_exception": _scrub(getattr(coordinator, "last_exception", None),
-                                 vin, bundle.get("api"))[:300],
+        "last_exception": (hide_values(str(last), held) if last else "")[:300],
     }
 
 
