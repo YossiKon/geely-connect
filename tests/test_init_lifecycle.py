@@ -2408,15 +2408,16 @@ def test_a_failed_poll_quotes_the_gateway_and_outside_errors_without_the_session
         raise AssertionError("a refused session did not ask for re-authentication")
 
 
-_ANSWERS = {"resp", "sc", "st", "state_resp"}
+_ANSWERS = {"resp", "sc", "st", "state_resp", "login_resp"}
 # Every module is held to the platforms' rules but these: __init__.py (on its
 # own, in the test after next), the clients (api, zeekr_client, zeekr_adapter
-# - they are the scrub), and four that word their errors apart: the config
-# flow and the captcha solver it drives, diagnostics (its own _scrub) and the
-# card registration (Home Assistant's own errors, no request text). A module
-# added later is held to them unless it is named here.
+# - they are the scrub), and three that word their errors apart: the captcha
+# solver the config flow drives (it is sent nothing of the account, and logs
+# nothing), diagnostics (its own _scrub) and the card registration (Home
+# Assistant's own errors, no request text). A module added later is held to
+# them unless it is named here.
 _NOT_PLATFORM = {"__init__.py", "api.py", "zeekr_client.py", "zeekr_adapter.py",
-                 "config_flow.py", "geetest_solver.py", "diagnostics.py", "cards.py"}
+                 "geetest_solver.py", "diagnostics.py", "cards.py"}
 
 
 def _platform_modules():
@@ -2435,9 +2436,11 @@ def _quote_rule_breaks(module, strict=False, src=None):
     for node in ast.walk(tree):
         for child in ast.iter_child_nodes(node):
             parents[child] = node
-    # Errors worded from this package's own text: the region keys', and the
-    # secrets.yaml key's, which names the file and the error's class only.
-    own_text = {"RegionKeysError", "LocalRegionKeysError", "PasswordKeyError"}
+    # Errors worded from this package's own text: the region keys', the
+    # secrets.yaml key's, which names the file and the error's class only,
+    # and the config flow's provisioning abort, which carries an abort key.
+    own_text = {"RegionKeysError", "LocalRegionKeysError", "PasswordKeyError",
+                "_LegacyProvisionError"}
     levels = {"debug", "info", "warning", "error", "critical", "exception", "log"}
 
     def name_of(call):
@@ -2647,10 +2650,12 @@ def test_every_error_a_platform_quotes_goes_through_a_scrub():
     coordinator's last error - the Refresh Data button shows it - is read
     like a caught one, and the retry's `last_exc` is __init__.py's alone.
     helpers.quote_failure() counts as a scrub: it quotes through the client
-    and logs no traceback."""
+    and logs no traceback. The config flow is held to them too, its own
+    without_secrets() the scrub: an error that leaves a step whole is logged
+    by Home Assistant's web server with its traceback."""
     modules = _platform_modules()
-    assert {"button.py", "climate.py", "cover.py", "helpers.py", "lock.py",
-            "select.py", "switch.py", "time.py"} <= set(modules), modules
+    assert {"button.py", "climate.py", "config_flow.py", "cover.py", "helpers.py",
+            "lock.py", "select.py", "switch.py", "time.py"} <= set(modules), modules
     bare = [(module, *b) for module in modules
             for b in _quote_rule_breaks(module, strict=True)]
     assert not bare, bare
@@ -2672,6 +2677,7 @@ def test_the_platform_rules_flag_each_shape_they_name():
         "a raise in a finally": "try:\n    a()\nfinally:\n    raise X('x')",
         "the retry's hatch": "try:\n    a()\nexcept Exception as e:\n    last_exc = e",
         "an answer": "_LOGGER.debug('%s', redact(resp))",
+        "a sign-in's answer": "_LOGGER.warning('%s', redact(login_resp))",
         "the last error": "def f(c):\n    err = c.last_exception\n    raise X(f'{err}')",
         "the last error by getattr":
             "def f(c):\n    raise X(str(getattr(c, 'last_exception', None)))",
@@ -2688,6 +2694,8 @@ def test_the_platform_rules_flag_each_shape_they_name():
                              "    raise X(e.message) from e",
         "a cancellation": "try:\n    a()\nexcept asyncio.CancelledError:\n    raise",
         "an error in its own words": "try:\n    a()\nexcept RegionKeysError:\n    raise",
+        "an abort's key": "try:\n    a()\nexcept _LegacyProvisionError as e:\n"
+                          "    return abort(reason=e.reason)",
         "the class": "try:\n    a()\nexcept Exception as e:\n"
                      "    _LOGGER.debug('%s', type(e).__name__)",
         "a call met": "async def f(h):\n    try:\n        await h.async_add_executor_job(g)\n"

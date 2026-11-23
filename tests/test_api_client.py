@@ -1620,29 +1620,32 @@ def test_a_sign_in_refused_in_words_that_repeat_what_it_sent_leaves_it_out():
 
 
 def test_a_cert_server_refusal_that_repeats_the_account_leaves_it_out():
-    """Certificate provisioning sends the user id and the long-lived token;
+    """Certificate provisioning sends the user id, the long-lived token and
+    the app id - an owner's own for an area signed with local keys (#105);
     its refusals - a fault, and the region refusal said in words - reach the
-    setup form and the log."""
+    log."""
     import importlib.util
     if importlib.util.find_spec("cryptography") is None:
         skip("cryptography not installed")
-    for info, file in (({"code": 500, "message": _echo(_USER, _CIDPSSO)}, None),
+    app = "fake-app-id-0001"
+    sent = (_USER, _CIDPSSO, app)
+    for info, file in (({"code": 500, "message": _echo(*sent)}, None),
                        ({"code": 1000, "data": {"checkCode": "chk"}},
-                        {"code": 500, "message": _echo(_USER, _CIDPSSO)}),
-                       ({"code": "1501", "message": _echo(_USER, _CIDPSSO)}, None),
+                        {"code": 500, "message": _echo(*sent)}),
+                       ({"code": "1501", "message": _echo(*sent)}, None),
                        ({"code": 1000, "data": {"checkCode": "chk"}},
-                        {"code": "1501", "message": _echo(_USER, _CIDPSSO)})):
+                        {"code": "1501", "message": _echo(*sent)})):
         def fake_raw(host, method, path, headers, body, **kw):
             return json.dumps(info if path.endswith("/info") else file).encode()
 
         with tempfile.TemporaryDirectory() as d, _patched(_raw_https=fake_raw):
             try:
                 api.provision_user_cert(
-                    app_id="a", app_secret="s", user_id=_USER, cidpsso_token=_CIDPSSO,
+                    app_id=app, app_secret="s", user_id=_USER, cidpsso_token=_CIDPSSO,
                     cert_out_path=os.path.join(d, "cert.pem"),
                     key_out_path=os.path.join(d, "key.pem"))
             except (RuntimeError, api.GeelyRegionError) as e:
-                _left_out(str(e), (_USER, _CIDPSSO))
+                _left_out(str(e), sent)
             else:
                 raise AssertionError("a refused certificate was taken as issued")
 

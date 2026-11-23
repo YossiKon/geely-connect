@@ -502,6 +502,97 @@ def test_a_server_rejection_returns_the_last_response_for_the_flow_to_show():
     assert len(session.calls) == 2
 
 
+def test_an_unreachable_captcha_host_is_named_with_the_transports_reason():
+    """The setup flow logs this error without a traceback, and at the
+    default log level the traceback's chain was where a name that did not
+    resolve, a refused connection or a reset one showed. The error requests
+    wrapped says it: a MaxRetryError's reason - its own text names the
+    request's URL, which for the verify call carries the captcha proof - or
+    the error as it came, a ProtocolError for a connection aborted
+    mid-request. An error that wraps nothing gives its class. The debug
+    line each attempt writes says the same, and no more."""
+    if not _deps():
+        skip("solver deps not installed")
+    import logging
+    import requests
+    from urllib3.exceptions import ConnectTimeoutError, MaxRetryError, ProtocolError
+    api = _api()
+    lines = []
+
+    class _Lines(logging.Handler):
+        def emit(self, record):
+            lines.append(logging.Formatter().format(record))
+
+    reason = ConnectTimeoutError("Connection to captcha4.geely.com timed out. (connect timeout=15)")
+    aborted = ProtocolError("Connection aborted.",
+                            ConnectionResetError(104, "Connection reset by peer"))
+    for cause, said in (
+            (requests.exceptions.ConnectTimeout(MaxRetryError(
+                None, "/verify?w=W-PROOF&process_token=PT-PROOF", reason=reason)),
+             "(ConnectTimeoutError: Connection to captcha4.geely.com timed out. "
+             "(connect timeout=15))"),
+            (requests.exceptions.ConnectionError(MaxRetryError(
+                None, "/verify?w=W-PROOF&process_token=PT-PROOF")), "(ConnectionError)"),
+            (requests.exceptions.ConnectionError(aborted),
+             "(ProtocolError: ('Connection aborted.', "
+             "ConnectionResetError(104, 'Connection reset by peer')))"),
+            (requests.exceptions.ConnectionError(), "(ConnectionError)")):
+        session = _Session({"success": True})
+        lines.clear()
+        handler, level = _Lines(level=logging.DEBUG), api._LOGGER.level
+        api._LOGGER.addHandler(handler)
+        api._LOGGER.setLevel(logging.DEBUG)
+        try:
+            with _solver_patch(api, [cause]), _SessionPatch(api, session):
+                try:
+                    api.cidpsso_send_otp("user@example.com", "AU")
+                except api.GeelyCaptchaUnreachableError as e:
+                    assert str(e) == ("cannot reach https://captcha4.geely.com from this "
+                                      f"Home Assistant host {said}"), str(e)
+                    assert "PROOF" not in str(e), str(e)
+                else:
+                    raise AssertionError("an unreachable captcha host was not said as such")
+        finally:
+            api._LOGGER.removeHandler(handler)
+            api._LOGGER.setLevel(level)
+        assert session.calls == [], "nothing may be sent past a dead captcha host"
+        attempt = [line for line in lines if "could not reach the host" in line]
+        assert attempt == [f"captcha attempt 1 could not reach the host: {said[1:-1]}"], lines
+        assert not any("PROOF" in line for line in lines), lines
+
+
+def test_a_refused_code_send_is_logged_at_debug_without_the_address():
+    """redact() goes by key name: a refusal worded around the address or the
+    install's identifiers the send carried logged them whole."""
+    if not _deps():
+        skip("solver deps not installed")
+    import logging
+    api = _api()
+    email = "owner@example.com"
+    idfa = "AAAAAAAA-1111-2222-3333-444444444444"
+    idfv = "BBBBBBBB-5555-6666-7777-888888888888"
+    session = _Session({"code": 500, "message": f"denied for {email} / {idfa} / {idfv}"})
+    lines = []
+
+    class _Lines(logging.Handler):
+        def emit(self, record):
+            lines.append(logging.Formatter().format(record))
+
+    handler, level = _Lines(level=logging.DEBUG), api._LOGGER.level
+    api._LOGGER.addHandler(handler)
+    api._LOGGER.setLevel(logging.DEBUG)
+    try:
+        with _solver_patch(api, [_GOOD_CAPTCHA]), _SessionPatch(api, session):
+            api.cidpsso_send_otp(email, "AU", max_attempts=1, idfa=idfa, idfv=idfv)
+    finally:
+        api._LOGGER.removeHandler(handler)
+        api._LOGGER.setLevel(level)
+    refused = [line for line in lines if "server-rejected" in line]
+    assert len(refused) == 1, lines
+    for value in (email, idfa, idfv):
+        assert value not in refused[0] and api._mask(value) in refused[0], refused
+
+
 def test_all_attempts_missing_raises_with_the_last_error():
     if not _deps():
         skip("solver deps not installed")

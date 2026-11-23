@@ -73,7 +73,7 @@ from .const import (
     CONF_VIN,
     DOMAIN,
 )
-from .helpers import PasswordKeyError, password_encrypt, vehicle_metadata
+from .helpers import PasswordKeyError, password_encrypt, quote_failure, vehicle_metadata
 from .region_keys import LocalRegionKeysError, load_region_backend
 from .zeekr_regions import (
     RegionKeysError, ZeekrRegion, load_region_profile,
@@ -172,6 +172,10 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._poll_mode: str = DEFAULT_POLL_MODE
         self._cidpsso_token: str | None = None
         self._user_id: str | None = None
+        # The one-time code the last login sent, and the VINs the account's
+        # garage listed: what without_secrets() hides besides the above.
+        self._otp: str | None = None
+        self._vins: list[str] = []
         self._vehicles: list[dict] = []
         self._idfa: str | None = None
         self._idfv: str | None = None
@@ -187,6 +191,27 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # Set when this flow is a re-auth. We update the existing entry's
         # token instead of creating a new one in that case.
         self._reauth_entry: config_entries.ConfigEntry | None = None
+
+    def without_secrets(self, text: Any) -> str:
+        """`text` with what this flow sent or was handed taken out
+        (hide_values), for a log line that quotes an error or an answer.
+
+        The form shows a translation key, never the text, so the log is
+        where a value could go: the address and the one-time code a sign-in
+        sends, the session token and user id the original platform's login
+        hands back, the install fingerprint each of its calls carries, the
+        VINs the garage listed, and the new platform's session tokens with
+        what its logged-in client hides itself. Not that platform's
+        password: it goes out RSA-encrypted, so no answer can repeat it, and
+        masking it wherever it stood in other words would point at a
+        password that is a common word."""
+        held = getattr(self._zeekr_client, "hidden", None)
+        return geely_api.hide_values(str(text), (
+            self._email, self._otp, self._cidpsso_token, self._user_id,
+            self._idfa, self._idfv, *self._vins,
+            *(self._zeekr_tokens or ()), self._zeekr_hf_token,
+            *(held() if callable(held) else ()),
+        ))
 
     # ---- Step 0: which backend? ----
 
@@ -242,17 +267,21 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         idfa=self._idfa, idfv=self._idfv,
                     )
                 )
-            except geely_api.GeelyCaptchaUnreachableError:
+            except geely_api.GeelyCaptchaUnreachableError as e:
                 # Issue #5: a generic "try again in a minute" on a
                 # network-level failure sent users into a useless retry loop.
-                _LOGGER.exception("send-otp failed: captcha host unreachable")
+                # No traceback, here or below: it printed the error whole.
+                # The class, the hops and the scrubbed words are what a
+                # report needs (quote_failure).
+                quote_failure(_LOGGER, self, e, "send-otp")
                 errors["base"] = "captcha_unreachable"
-            except Exception:
-                _LOGGER.exception("send-otp failed")
+            except Exception as e:  # noqa: BLE001 - logged, shown as a key
+                quote_failure(_LOGGER, self, e, "send-otp")
                 errors["base"] = "send_code_failed"
             else:
                 if resp.get("code") and resp.get("code") != 10000000:
-                    _LOGGER.warning("OTP send response: %s", geely_api.redact(resp))
+                    _LOGGER.warning("OTP send response: %s",
+                                    self.without_secrets(geely_api.redact(resp)))
                     errors["base"] = "send_code_failed"
                 else:
                     return await self.async_step_code()
@@ -289,6 +318,7 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_code(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
+            self._otp = user_input["code"]
             try:
                 login_resp = await self.hass.async_add_executor_job(
                     lambda: geely_api.cidpsso_login(
@@ -296,12 +326,13 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         idfa=self._idfa, idfv=self._idfv,
                     )
                 )
-            except Exception:
-                _LOGGER.exception("login failed")
+            except Exception as e:  # noqa: BLE001 - logged, shown as a key
+                quote_failure(_LOGGER, self, e, "login")
                 errors["code"] = "invalid_code"
             else:
                 if login_resp.get("code") != 10000000:
-                    _LOGGER.warning("login resp: %s", geely_api.redact(login_resp))
+                    _LOGGER.warning("login resp: %s",
+                                    self.without_secrets(geely_api.redact(login_resp)))
                     errors["code"] = "invalid_code"
                 else:
                     data = login_resp.get("data") or {}
@@ -327,6 +358,7 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                                 )
                             )
                             all_v = [v for v in (all_v_raw or []) if _valid_vin(v.get("vin"))]
+                            self._vins = [v["vin"] for v in all_v]
                             # Counts, not records (VIN). Before this the empty
                             # case set no_vehicles with no log at all, so an
                             # owner with DEBUG on had nothing to go on (#32).
@@ -336,8 +368,8 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                                 len(all_v_raw or []), len(all_v))
                             if all_v_raw and not all_v:
                                 _LOGGER.error("all vehicles had malformed VINs; aborting")
-                        except Exception:
-                            _LOGGER.exception("list_vehicles failed")
+                        except Exception as e:  # noqa: BLE001 - logged, shown as a key
+                            quote_failure(_LOGGER, self, e, "list_vehicles")
                             errors["base"] = "no_vehicles"
                         else:
                             # Reauth: update THIS entry's token, don't filter
@@ -415,15 +447,16 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # The fields region resolution reads, logged so an unrecognised market
         # can be diagnosed from a normal debug log. Region/market codes only -
         # but the record also carries the VIN and nickname, so it goes through
-        # redact() rather than being printed whole.
+        # redact() rather than being printed whole, and through this flow's
+        # scrub for a VIN under a name redact() does not know.
         _LOGGER.debug(
             "vehicle region fields: %s",
-            geely_api.redact({
+            self.without_secrets(geely_api.redact({
                 k: vehicle.get(k) for k in (
                     "tspInfo", "edgeInfo", "serviceRegion", "saleMarket",
                     "dcCode", "deliveryCountryCode", "tcamMarket",
                 )
-            }),
+            })),
         )
         detected = resolve_vehicle_region(vehicle)
         region = detected or DEFAULT_REGION
@@ -444,7 +477,13 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except LocalRegionKeysError as e:
                 _LOGGER.error("vehicle %s is registered in the %s region: %s",
                               vin[-4:], region, e)
-                raise _LegacyProvisionError("wrong_region") from e
+                raise _LegacyProvisionError("wrong_region") from None
+            except Exception as e:  # noqa: BLE001 - the reader words what it expects
+                # Past the reader's own error, one it did not expect would
+                # leave the step whole, and Home Assistant's web server logs
+                # that with its traceback.
+                quote_failure(_LOGGER, self, e, "reading the %s area's keys", region)
+                raise _LegacyProvisionError("wrong_region") from None
         else:
             backend = region_config(region)
         _LOGGER.debug("provisioning against the %s backend (%s)",
@@ -478,11 +517,12 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             _LOGGER.error(
                 "cert provisioning refused for a vehicle %s: %s%s",
                 f"detected as region {detected}" if detected
-                else f"whose record names no region (tried {region})", e, hint)
-            raise _LegacyProvisionError("wrong_region") from e
-        except Exception as e:
-            _LOGGER.exception("cert provisioning failed")
-            raise _LegacyProvisionError("cert_failed") from e
+                else f"whose record names no region (tried {region})",
+                self.without_secrets(e), hint)
+            raise _LegacyProvisionError("wrong_region") from None
+        except Exception as e:  # noqa: BLE001 - logged, shown as an abort
+            quote_failure(_LOGGER, self, e, "cert provisioning")
+            raise _LegacyProvisionError("cert_failed") from None
 
         return {
             CONF_REGION:    region,
@@ -655,6 +695,7 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                                 "garage found on the new-platform "
                                 "ms-app-bff route")
                     self._vehicles = [v for v in raw if _valid_vin(vehicle_vin(v))]
+                    self._vins = [vehicle_vin(v) for v in self._vehicles]
                     if self._reauth_entry is not None and self._vehicles:
                         self._vehicles = self._reauth_candidates(self._vehicles)
                         if not self._vehicles:
@@ -668,7 +709,7 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except RegionKeysError:
                 errors["base"] = "eu_app_keys_required"
             except (ZeekrAuthError, ZeekrApiError) as e:
-                _LOGGER.warning("zeekr login rejected: %s", e)
+                _LOGGER.warning("zeekr login rejected: %s", self.without_secrets(e))
                 errors["base"] = "invalid_credentials"
             except PasswordKeyError as e:
                 # The login worked; storing the password did not. Nothing is
@@ -677,8 +718,8 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 _LOGGER.error("%s; fix secrets.yaml, or sign in without storing "
                               "the password", e)
                 errors["base"] = "unknown"
-            except Exception:
-                _LOGGER.exception("zeekr login failed")
+            except Exception as e:  # noqa: BLE001 - logged, shown as a key
+                quote_failure(_LOGGER, self, e, "zeekr login")
                 errors["base"] = "network_unreachable"
 
         defaults: dict[str, Any] = {}
@@ -759,8 +800,16 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         # password_encrypt reads secrets.yaml (and may run AES-GCM); keep that
         # blocking work off the event loop. Computed once for whichever branch.
-        enc_password = await self.hass.async_add_executor_job(
-            password_encrypt, self.hass, self._zeekr_password or "")
+        # Its own error goes on to the callers, which say what to fix; one it
+        # did not expect would leave the vehicle picker whole.
+        try:
+            enc_password = await self.hass.async_add_executor_job(
+                password_encrypt, self.hass, self._zeekr_password or "")
+        except PasswordKeyError:
+            raise
+        except Exception as e:  # noqa: BLE001 - logged, shown as an abort
+            quote_failure(_LOGGER, self, e, "storing the password")
+            return self.async_abort(reason="unknown")
 
         # Auto-derive the new-platform x-vin from the VIN where the app build is
         # known, verifying the gateway accepts it before storing. The
@@ -781,9 +830,10 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             try:
                 enc_vin = await self.hass.async_add_executor_job(
                     self._zeekr_client.probe_x_vin, vin) or ""
-            except Exception:  # noqa: BLE001 - derivation is best-effort only
-                _LOGGER.debug("x-vin auto-derivation failed; "
-                              "falling back to the manual option", exc_info=True)
+            except Exception as e:  # noqa: BLE001 - derivation is best-effort only
+                _LOGGER.debug("x-vin auto-derivation failed (%s: %s); falling "
+                              "back to the manual option",
+                              type(e).__name__, self.without_secrets(e))
                 enc_vin = ""
             if enc_vin:
                 _LOGGER.info("derived a working new-platform x-vin for this vehicle")

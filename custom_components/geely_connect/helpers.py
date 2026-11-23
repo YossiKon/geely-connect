@@ -522,7 +522,9 @@ def quote_failure(logger: logging.Logger, api: Any, err: BaseException,
     the caller raises `from None`, since a chained error prints whole in the
     traceback Home Assistant logs at debug. The log line used to be that
     traceback; it names the error's class and its hops through this package
-    instead, which is what finds the line.
+    instead, which is what finds the line. The setup flow logs its steps'
+    errors here as well, through its own without_secrets(): its form shows a
+    key, not the text.
 
     It must not raise: it runs in the except block that raises the user's
     error, and an error of its own would reach Home Assistant whole, chained

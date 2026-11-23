@@ -156,8 +156,10 @@ def test_a_value_with_nothing_to_escape_is_matched_as_it_stands_only():
     classifier test here reads the same text it read before them."""
     api = load("api")
     import test_api_client as tac
+    import test_config_flow_error_text as tcf
     fixtures = (*SECRETS, "fake-refresh-0123", "fake-newer-session-0123",
-                tac._JWT, tac._CIDPSSO, tac._USER, tac._EMAIL)
+                tac._JWT, tac._CIDPSSO, tac._USER, tac._EMAIL,
+                tcf.EMAIL, tcf.OTP, tcf.TOKEN, tcf.USER_ID, tcf.IDFA, tcf.IDFV)
     for value in fixtures:
         assert api._quoted_forms(value) == {value}, value
 

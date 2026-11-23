@@ -1722,8 +1722,10 @@ def provision_user_cert(*, app_id: str, app_secret: str, user_id: str,
 
     # Pin store lives alongside the cert we're about to write.
     pin_path = os.path.join(os.path.dirname(cert_out_path), "server_pins.json")
-    # What the requests below send that an answer could repeat (hide_values).
-    sent = (cidpsso_token, user_id)
+    # What the requests below send that an answer could repeat (hide_values):
+    # the app id too, which for an area signed with local keys is the
+    # owner's own (#105). The secret only signs; it is never sent.
+    sent = (cidpsso_token, user_id, app_id)
 
     # 1. Generate keypair
     priv = ec.generate_private_key(ec.SECP256R1())
@@ -1850,8 +1852,9 @@ def provision_user_cert(*, app_id: str, app_secret: str, user_id: str,
             fh.write(key_bytes)
     except OSError as e:
         # The OS error names the file it could not write, and the file sits in
-        # a directory named after the VIN. config_flow logs this with its
-        # traceback, so the original is dropped rather than chained.
+        # a directory named after the VIN. config_flow quotes this error's
+        # words; the original is dropped rather than chained, so no traceback
+        # printed anywhere could carry it.
         raise OSError(f"could not store the vehicle certificate: {mask_path(e)}") from None
     try:
         os.chmod(key_out_path, 0o600)
@@ -1975,11 +1978,27 @@ def cidpsso_send_otp(email: str, country_code: str = "GB", *,
         except requests.exceptions.ConnectionError as e:
             # Network-level failure, not solver inaccuracy: fail fast with
             # the host name instead of burning every retry on a dead route.
+            # The fault - a name that did not resolve, a connection refused
+            # or reset, a handshake - goes into the message as the error
+            # requests wrapped: a MaxRetryError's reason, never its text,
+            # which names the request's URL - the verify call's carries the
+            # captcha proof, the session material geetest_solver keeps out
+            # of log text - and otherwise the error as it came: a
+            # ProtocolError for a connection aborted mid-request, or an
+            # OSError, neither worded with the URL. The setup flow logs the
+            # message, and no traceback.
+            from urllib3.exceptions import MaxRetryError
+
+            cause = e.args[0] if e.args else None
+            if isinstance(cause, MaxRetryError):
+                cause = cause.reason
+            why = (f"{type(cause).__name__}: {cause}"
+                   if isinstance(cause, BaseException) else type(e).__name__)
             _LOGGER.debug("captcha attempt %d could not reach the host: %s",
-                          attempt, e)
+                          attempt, why)
             raise GeelyCaptchaUnreachableError(
                 f"cannot reach {geetest_solver.GEELY_HOST} from this "
-                "Home Assistant host") from e
+                f"Home Assistant host ({why})") from e
         except Exception as e:  # noqa: BLE001
             last_error = f"captcha solve threw: {e}"
             _LOGGER.debug("captcha attempt %d threw: %s", attempt, e)
@@ -2006,7 +2025,10 @@ def cidpsso_send_otp(email: str, country_code: str = "GB", *,
         last_response = resp
         if resp.get("success") or resp.get("code") == 10000000:
             return resp
-        _LOGGER.debug("getCaptcha attempt %d server-rejected: %s", attempt, redact(resp))
+        # redact() goes by key name: a refusal worded around the address or
+        # the install's identifiers it was sent would carry them whole.
+        _LOGGER.debug("getCaptcha attempt %d server-rejected: %s", attempt,
+                      hide_values(str(redact(resp)), (email, idfa, idfv)))
 
     if last_response is not None:
         return last_response
