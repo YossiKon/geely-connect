@@ -2576,8 +2576,9 @@ def _quote_rule_breaks(module, strict=False, src=None):
     # A raise in an except block keeps the error it caught, as its cause or
     # as its context, unless it is `from None`; a bare raise passes it on
     # whole. A refusal is the client's own words, an error of own_text this
-    # package's, and a cancellation has none.
-    passed_on = {"CancelledError", "GeelyControlError", *own_text}
+    # package's, a cancellation has none, and a flow's abort carries its
+    # reason's key, which Home Assistant shows as the abort.
+    passed_on = {"AbortFlow", "CancelledError", "GeelyControlError", *own_text}
     for handler in ast.walk(tree):
         if not isinstance(handler, ast.ExceptHandler):
             continue
@@ -2695,6 +2696,7 @@ def test_the_platform_rules_flag_each_shape_they_name():
         "a refusal's words": "try:\n    a()\nexcept api.GeelyControlError as e:\n"
                              "    raise X(e.message) from e",
         "a cancellation": "try:\n    a()\nexcept asyncio.CancelledError:\n    raise",
+        "a flow's abort": "try:\n    a()\nexcept AbortFlow:\n    raise",
         "an error in its own words": "try:\n    a()\nexcept RegionKeysError:\n    raise",
         "an abort's key": "try:\n    a()\nexcept _LegacyProvisionError as e:\n"
                           "    return abort(reason=e.reason)",

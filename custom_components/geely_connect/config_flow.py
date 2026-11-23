@@ -23,7 +23,7 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.core import callback
-from homeassistant.data_entry_flow import FlowResult
+from homeassistant.data_entry_flow import AbortFlow, FlowResult
 from homeassistant.helpers import entity_registry as er
 
 from . import api as geely_api
@@ -718,6 +718,11 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 _LOGGER.error("%s; fix secrets.yaml, or sign in without storing "
                               "the password", e)
                 errors["base"] = "unknown"
+            except AbortFlow:
+                # _finish_zeekr's unique id, held already by another setup
+                # flow or by an entry: Home Assistant shows the abort. Caught
+                # below, it read as a server out of reach, the form left up.
+                raise
             except Exception as e:  # noqa: BLE001 - logged, shown as a key
                 quote_failure(_LOGGER, self, e, "zeekr login")
                 errors["base"] = "network_unreachable"

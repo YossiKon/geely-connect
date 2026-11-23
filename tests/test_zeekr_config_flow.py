@@ -182,6 +182,26 @@ def test_zeekr_login_rejects_bad_credentials_with_an_error():
     assert res["type"] == "form" and res["errors"]["base"] == "invalid_credentials"
 
 
+def test_a_second_setup_of_the_same_car_is_aborted_not_called_unreachable():
+    """Two setup flows for one car: Home Assistant refuses the second the
+    unique id another flow holds with AbortFlow("already_in_progress"). On
+    a one-car account that is raised inside the sign-in step, whose
+    catch-all read it as a server out of reach and left the form up."""
+    from homeassistant.data_entry_flow import AbortFlow
+    cf, flow = _flow()
+    cf._zeekr_login_password = lambda e, p, c: _FakeClient()
+    asyncio.run(flow.async_step_user({"platform": "zeekr"}))
+    flow.hass.config_entries.flow.async_progress_by_handler = (
+        lambda *a, **k: [{"flow_id": "the-other-flow",
+                          "context": {"source": "user"}}])
+    try:
+        res = asyncio.run(flow.async_step_zeekr_login(_zeekr_login_input()))
+    except AbortFlow as e:
+        assert e.reason == "already_in_progress", e.reason
+    else:
+        raise AssertionError(f"the flow went on: {res}")
+
+
 def test_zeekr_login_with_no_vehicles_shows_an_error():
     cf, flow = _flow()
 

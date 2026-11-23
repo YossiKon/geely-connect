@@ -66,6 +66,7 @@
     },
     "abort": {
       "already_configured": "Ce véhicule est déjà configuré.",
+      "already_in_progress": "La configuration de ce véhicule Geely est déjà en cours. Terminez ou annulez d'abord l'autre configuration.",
       "all_configured": "Tous les véhicules du compte sont déjà configurés.",
       "cert_failed": "Échec de l'émission du certificat mTLS.",
       "wrong_region": "Ce compte Geely est servi par un backend régional pour lequel cette intégration n'a pas d'identifiants. Elle prend en charge les clouds UE/International, Amérique du Nord et APAC ; les autres régions nécessitent leurs propres identifiants d'application, qui ne sont pas publics. La ligne de journal indique la région détectée.",
