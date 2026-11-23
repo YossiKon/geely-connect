@@ -487,12 +487,17 @@ def _error_kind(err: BaseException) -> str:
     return f"{kind.__module__}.{kind.__qualname__}"
 
 
-def _package_hops(err: BaseException, keep: int = 6) -> str:
-    """The error's way through this package, as `file.py:line` hops.
+def _package_hops(err: BaseException) -> str:
+    """The error's way through this package, as `file.py:line` hops, from the
+    platform's call to where it was raised.
 
     What a traceback tells a bug report, less what it must not carry: the
     error's own words, and the source lines, which can quote them. An error
     raised in the executor brings its frames there along on its traceback.
+    Up to eight are kept whole; past that, the first two - the platform's
+    call and the next - and the five nearest the fault. A cap that kept
+    only the innermost dropped the platform's own hop once the client went
+    six frames deep.
     """
     hops = []
     tb = err.__traceback__
@@ -501,7 +506,9 @@ def _package_hops(err: BaseException, keep: int = 6) -> str:
         if os.path.normcase(os.path.dirname(os.path.abspath(path))) == _PACKAGE_DIR:
             hops.append(f"{os.path.basename(path)}:{tb.tb_lineno}")
         tb = tb.tb_next
-    return " > ".join(hops[-keep:]) or "outside this integration"
+    if len(hops) > 8:
+        hops = [*hops[:2], "...", *hops[-5:]]
+    return " > ".join(hops) or "outside this integration"
 
 
 def quote_failure(logger: logging.Logger, api: Any, err: BaseException,
@@ -519,12 +526,12 @@ def quote_failure(logger: logging.Logger, api: Any, err: BaseException,
 
     It must not raise: it runs in the except block that raises the user's
     error, and an error of its own would reach Home Assistant whole, chained
-    to the one it was quoting. The two steps that can fail are each caught -
-    an error the client cannot quote leaves its class name, never str(), and
-    a logger call that raises leaves no line. A handler that fails inside
-    emit is logging's to report, on stderr with the caught error chained, so
-    the format must match its arguments. Only the error's class is read
-    unguarded.
+    to the one it was quoting. An error the client cannot quote leaves its
+    class name, never str(). The line is put together here and handed to the
+    logger whole, so a `what` its arguments do not fit is caught here and
+    leaves no line: formatted in a handler, the same mistake is logging's to
+    report, on stderr, with the caught error chained. Only the error's class
+    is read unguarded.
     """
     kind = _error_kind(err)
     try:
@@ -532,8 +539,8 @@ def quote_failure(logger: logging.Logger, api: Any, err: BaseException,
     except Exception:  # noqa: BLE001 - see above
         said = kind
     try:
-        logger.error(what + " failed (%s at %s): %s", *args, kind,
-                     _package_hops(err), said)
+        line = f"{what % args} failed ({kind} at {_package_hops(err)}): {said}"
+        logger.error("%s", line)
     except Exception:  # noqa: BLE001 - see above
         pass
     return said

@@ -223,15 +223,53 @@ def test_quote_failure_never_raises_and_never_quotes_unscrubbed():
     assert said.endswith("Unreadable") and "." in said, said
     assert h.quote_failure(BrokenLog(), Quoter(), OSError("socket closed"), "x") \
         == "socket closed"
+    # A `what` its arguments do not fit is caught here and leaves no line.
+    # Put together in a real handler, the mistake is logging's to report: on
+    # stderr, with the error being handled - the raw one - chained.
+    import contextlib
+    import io
+    import logging
+    real = logging.getLogger("geely_connect_test.quote_failure")
+    out, stderr = io.StringIO(), io.StringIO()
+    handler = logging.StreamHandler(out)
+    real.addHandler(handler)
+    real.propagate = False
+    try:
+        try:
+            raise OSError("raw words")
+        except OSError as raw:
+            with contextlib.redirect_stderr(stderr):
+                said = h.quote_failure(real, Quoter(), raw, "lock %s %s", "RDL")
+    finally:
+        real.removeHandler(handler)
+    assert said == "raw words", said
+    assert out.getvalue() == "" and stderr.getvalue() == "", (out.getvalue(), stderr.getvalue())
     # The hops are this package's frames only, as file:line.
     try:
         h.vehicle_metadata(None)
     except AttributeError as err:
         hops = h._package_hops(err)
+        frame = err.__traceback__.tb_next.tb_frame      # vehicle_metadata's
     else:
         raise AssertionError("vehicle_metadata(None) read as a record")
     assert hops.startswith("helpers.py:") and " > " not in hops, hops
     assert hops.split(":")[1].isdigit(), hops
+    # The platform's hop stays, first: a cap that kept the innermost six
+    # dropped it once the client went that deep. Up to eight hops are kept
+    # whole, and past that the first two and the last five - on tracebacks
+    # put together by hand through a frame of this package.
+    import types
+
+    def through(depth):
+        tb = None
+        for line in range(depth, 0, -1):
+            tb = types.TracebackType(tb, frame, 0, line)
+        return h._package_hops(OSError("x").with_traceback(tb))
+
+    assert through(8) == " > ".join(f"helpers.py:{n}" for n in range(1, 9)), through(8)
+    assert through(12) == " > ".join(
+        [f"helpers.py:{n}" for n in (1, 2)] + ["..."]
+        + [f"helpers.py:{n}" for n in range(8, 13)]), through(12)
 
 
 # -------------------------------------------------------------------- sensor ---

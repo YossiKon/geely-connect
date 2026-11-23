@@ -2409,20 +2409,27 @@ def test_a_failed_poll_quotes_the_gateway_and_outside_errors_without_the_session
 
 
 _ANSWERS = {"resp", "sc", "st", "state_resp"}
-# Held to the rules below with the platforms' two added: every module that
-# words an error for the user or the log, but __init__.py (on its own, in the
-# test after next), the clients (api, zeekr_client, zeekr_adapter - they are
-# the scrub) and the config flow (worded apart).
-_PLATFORM_MODULES = ("binary_sensor.py", "button.py", "climate.py", "cover.py",
-                     "device_tracker.py", "helpers.py", "lock.py", "select.py",
-                     "sensor.py", "switch.py", "time.py")
+# Every module is held to the platforms' rules but these: __init__.py (on its
+# own, in the test after next), the clients (api, zeekr_client, zeekr_adapter
+# - they are the scrub), and four that word their errors apart: the config
+# flow and the captcha solver it drives, diagnostics (its own _scrub) and the
+# card registration (Home Assistant's own errors, no request text). A module
+# added later is held to them unless it is named here.
+_NOT_PLATFORM = {"__init__.py", "api.py", "zeekr_client.py", "zeekr_adapter.py",
+                 "config_flow.py", "geetest_solver.py", "diagnostics.py", "cards.py"}
 
 
-def _quote_rule_breaks(module, strict=False):
-    """Where `module` quotes an error, an answer or the coordinator's last
-    error without a scrub, as (line, source) pairs. The rules are the two
-    tests' below; `strict` adds the platforms' two."""
-    src = open(os.path.join(PKG, module), encoding="utf-8").read()
+def _platform_modules():
+    return sorted(name for name in os.listdir(PKG)
+                  if name.endswith(".py") and name not in _NOT_PLATFORM)
+
+
+def _quote_rule_breaks(module, strict=False, src=None):
+    """Where `module` - or `src`, given its text - quotes an error, an answer
+    or the coordinator's last error without a scrub, as (line, source)
+    pairs. The rules are the tests' below; `strict` adds the platforms'."""
+    if src is None:
+        src = open(os.path.join(PKG, module), encoding="utf-8").read()
     tree = ast.parse(src)
     parents = {}
     for node in ast.walk(tree):
@@ -2443,6 +2450,13 @@ def _quote_rule_breaks(module, strict=False):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 return node
         return None
+
+    def caught(handler):
+        """The class an except block names, without its module path."""
+        return "" if handler.type is None else ast.unparse(handler.type).rsplit(".", 1)[-1]
+
+    def from_none(node):
+        return isinstance(node.cause, ast.Constant) and node.cause.value is None
 
     def is_scrub(call):
         name = name_of(call)
@@ -2465,7 +2479,7 @@ def _quote_rule_breaks(module, strict=False):
             return True
         if isinstance(p, ast.Attribute) and p.attr in {"message", "code"}:
             return True
-        if isinstance(p, ast.Assign) and all(
+        if not strict and isinstance(p, ast.Assign) and all(   # the retry's
                 isinstance(t, ast.Name) and t.id == "last_exc" for t in p.targets):
             return True
         if isinstance(p, (ast.If, ast.IfExp)) and p.test is node:
@@ -2504,7 +2518,7 @@ def _quote_rule_breaks(module, strict=False):
     for handler in ast.walk(tree):
         if not isinstance(handler, ast.ExceptHandler) or not handler.name:
             continue
-        if handler.type is not None and ast.unparse(handler.type) in own_text:
+        if caught(handler) in own_text:
             continue
         for stmt in handler.body:
             for node in ast.walk(stmt):
@@ -2538,10 +2552,14 @@ def _quote_rule_breaks(module, strict=False):
     if not strict:
         return bare
 
-    # The coordinator's last error, read in place or held in a name.
+    # The coordinator's last error, read in place or held in a name - as an
+    # attribute or through getattr().
     for node in ast.walk(tree):
-        if not (isinstance(node, ast.Attribute) and node.attr == "last_exception"
-                and isinstance(node.ctx, ast.Load)):
+        if not ((isinstance(node, ast.Attribute) and node.attr == "last_exception"
+                 and isinstance(node.ctx, ast.Load))
+                or (isinstance(node, ast.Call) and name_of(node) == "getattr"
+                    and len(node.args) > 1 and isinstance(node.args[1], ast.Constant)
+                    and node.args[1].value == "last_exception")):
             continue
         p = parents.get(node)
         if (isinstance(p, ast.Assign) and len(p.targets) == 1
@@ -2554,18 +2572,52 @@ def _quote_rule_breaks(module, strict=False):
         elif not read_safely(node):
             bare.append(where(node))
     # A raise in an except block keeps the error it caught, as its cause or
-    # as its context, unless it is `from None`.
+    # as its context, unless it is `from None`; a bare raise passes it on
+    # whole. A refusal is the client's own words, an error of own_text this
+    # package's, and a cancellation has none.
+    passed_on = {"CancelledError", "GeelyControlError", *own_text}
     for handler in ast.walk(tree):
         if not isinstance(handler, ast.ExceptHandler):
             continue
-        if handler.type is not None and ast.unparse(handler.type) == "GeelyControlError":
-            continue
+        kind = caught(handler)
         for stmt in handler.body:
             for node in ast.walk(stmt):
-                if (isinstance(node, ast.Raise) and node.exc is not None
-                        and not (isinstance(node.cause, ast.Constant)
-                                 and node.cause.value is None)):
+                if not isinstance(node, ast.Raise):
+                    continue
+                if node.exc is None:
+                    if kind not in passed_on:
+                        bare.append((node.lineno, "re-raised as it came"))
+                elif kind != "GeelyControlError" and not from_none(node):
                     bare.append((node.lineno, "raised without `from None`"))
+    # A finally block runs while an error is on its way out, and a raise
+    # there takes it as context.
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Try, getattr(ast, "TryStar", ast.Try))):
+            for stmt in node.finalbody:
+                for r in ast.walk(stmt):
+                    if isinstance(r, ast.Raise) and r.exc is not None and not from_none(r):
+                        bare.append((r.lineno, "raised in a finally without `from None`"))
+
+    # A call into the client runs in the executor, and whatever it raises
+    # meets the rules above only inside a try that catches Exception: past
+    # one, it reaches Home Assistant's "Unexpected exception", which logs a
+    # traceback and shows the raw text.
+    def guarded(call):
+        child, up = call, parents.get(call)
+        while up is not None and not isinstance(
+                up, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            if (isinstance(up, ast.Try) and any(child is s for s in up.body)
+                    and any(h.type is None or caught(h) in {"Exception", "BaseException"}
+                            for h in up.handlers)):
+                return True
+            child, up = up, parents.get(up)
+        return False
+
+    threads = {"async_add_executor_job", "run_in_executor", "to_thread"}
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and name_of(node) in threads
+                and not guarded(node)):
+            bare.append((node.lineno, "an executor call no `except Exception` meets"))
     return bare
 
 
@@ -2585,17 +2637,70 @@ def test_every_error_the_integration_quotes_goes_through_a_scrub():
 
 
 def test_every_error_a_platform_quotes_goes_through_a_scrub():
-    """The platforms and helpers.py, held to the same three rules and two
-    more. A raise inside an except block is `from None`, unless the block
-    caught a GeelyControlError, which the client words itself: a `from e`
-    cause, or the context any other raise keeps, prints the caught error
-    whole in the traceback Home Assistant logs at debug for a failed service
-    call. And the coordinator's last error - the Refresh Data button shows
-    it - is read like a caught one. helpers.quote_failure() counts as a
-    scrub: it quotes through the client and logs no traceback."""
-    bare = [(module, *b) for module in _PLATFORM_MODULES
+    """The platforms, helpers.py and every module not named apart, held to
+    the same three rules and these. A raise inside an except block is `from
+    None`, unless the block caught a GeelyControlError, which the client
+    words itself: a `from e` cause, or the context any other raise keeps,
+    prints the caught error whole in the traceback Home Assistant logs at
+    debug for a failed service call - and a bare raise, or a call into the
+    client no `except Exception` meets, hands it to Home Assistant raw. The
+    coordinator's last error - the Refresh Data button shows it - is read
+    like a caught one, and the retry's `last_exc` is __init__.py's alone.
+    helpers.quote_failure() counts as a scrub: it quotes through the client
+    and logs no traceback."""
+    modules = _platform_modules()
+    assert {"button.py", "climate.py", "cover.py", "helpers.py", "lock.py",
+            "select.py", "switch.py", "time.py"} <= set(modules), modules
+    bare = [(module, *b) for module in modules
             for b in _quote_rule_breaks(module, strict=True)]
     assert not bare, bare
+
+
+def test_the_platform_rules_flag_each_shape_they_name():
+    """The rules are a test of their own: each shape they name, written out
+    in a few lines, is flagged, and each they let through is not. A review
+    found the bare raise by trying one."""
+    flagged = {
+        "a traceback": "_LOGGER.exception('x')",
+        "exc_info": "_LOGGER.debug('x', exc_info=True)",
+        "the raw text": "try:\n    a()\nexcept Exception as e:\n    raise X(f'{e}') from None",
+        "a cause": "try:\n    a()\nexcept Exception as e:\n"
+                   "    raise X(quote_failure(L, api, e, 'x')) from e",
+        "the context": "try:\n    a()\nexcept Exception as e:\n"
+                       "    raise X(quote_failure(L, api, e, 'x'))",
+        "a bare raise": "try:\n    a()\nexcept Exception:\n    raise",
+        "a raise in a finally": "try:\n    a()\nfinally:\n    raise X('x')",
+        "the retry's hatch": "try:\n    a()\nexcept Exception as e:\n    last_exc = e",
+        "an answer": "_LOGGER.debug('%s', redact(resp))",
+        "the last error": "def f(c):\n    err = c.last_exception\n    raise X(f'{err}')",
+        "the last error by getattr":
+            "def f(c):\n    raise X(str(getattr(c, 'last_exception', None)))",
+        "a call nothing meets": "async def f(h):\n    await h.async_add_executor_job(g)",
+        "a thread nothing meets": "async def f():\n    await asyncio.to_thread(g)",
+        "a call a narrow except meets":
+            "async def f(h):\n    try:\n        await h.async_add_executor_job(g)\n"
+            "    except OSError:\n        pass",
+    }
+    allowed = {
+        "the scrub": "try:\n    a()\nexcept Exception as e:\n"
+                     "    raise X(quote_failure(L, api, e, 'x')) from None",
+        "a refusal's words": "try:\n    a()\nexcept api.GeelyControlError as e:\n"
+                             "    raise X(e.message) from e",
+        "a cancellation": "try:\n    a()\nexcept asyncio.CancelledError:\n    raise",
+        "an error in its own words": "try:\n    a()\nexcept RegionKeysError:\n    raise",
+        "the class": "try:\n    a()\nexcept Exception as e:\n"
+                     "    _LOGGER.debug('%s', type(e).__name__)",
+        "a call met": "async def f(h):\n    try:\n        await h.async_add_executor_job(g)\n"
+                      "    except Exception:\n        pass",
+        "the last error scrubbed": "def f(c, api):\n    err = c.last_exception\n"
+                                   "    raise X(api.without_secrets(err) if err else 'x')",
+        "an answer scrubbed": "_LOGGER.debug('%s', api.without_secrets(redact(resp)))",
+    }
+    for what, src in flagged.items():
+        assert _quote_rule_breaks("<case>", strict=True, src=src), what
+    for what, src in allowed.items():
+        assert not _quote_rule_breaks("<case>", strict=True, src=src), \
+            (what, _quote_rule_breaks("<case>", strict=True, src=src))
 
 
 def test_an_action_quotes_an_outside_error_without_the_session():

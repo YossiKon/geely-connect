@@ -25,7 +25,8 @@ ACCESS = "fake-access-token-0123456789"
 HF = "fake-hf-jwt-0123456789"
 EMAIL = "owner@example.invalid"
 LOGIN = "fake-idaas-token-value-0123"
-SECRETS = (TOKEN, FAKE_VIN, ACCESS, HF, EMAIL, LOGIN)
+USER = "fake-user-0001"
+SECRETS = (TOKEN, FAKE_VIN, ACCESS, HF, EMAIL, LOGIN, USER)
 
 
 def _clean(text):
@@ -85,12 +86,13 @@ def _client():
     c.hf_token = HF
     c.enc_vin = TOKEN
     c.vin = FAKE_VIN
+    c.user_id = USER
     return c
 
 
 def _adapter():
     return ad.ZeekrAdapter(
-        email=EMAIL, vin=FAKE_VIN, user_id="fake-user-0001",
+        email=EMAIL, vin=FAKE_VIN, user_id=USER,
         access_token=ACCESS, refresh_token="fake-refresh-0123",
         hf_token=HF, hf_expiry=10 ** 15, gateway="https://gw.example.invalid",
         enc_vin=TOKEN)
@@ -354,6 +356,64 @@ def test_text_from_outside_the_client_reaches_the_trail_without_the_session():
     note, = a.command_trail
     assert note["outcome"] == "error" and "connection reset" in note["message"], note
     _clean(json.dumps(note))
+
+
+def test_an_answer_naming_the_user_id_leaves_it_out():
+    """The old route sends the account's user id - the status read in its
+    query, a command in its body - and a gateway can name it back. It was
+    the one value the client's error text kept: a refusal reached the
+    toast and the trail with it, and so did an error from outside the
+    client, through the adapter's quote."""
+    said = f"user {USER} is not bound to this car"
+    c = _client()
+    for status, body in ((200, {"code": 8060, "message": said}),
+                         (403, {"message": said})):
+        e = _raises(_through, _says(status, body), c.vehicle_status_resp, FAKE_VIN)
+        _clean(str(e))
+        assert zc._mask(USER) in str(e), str(e)
+    a = _adapter()
+    e = _raises(_through, _says(200, {"success": False, "code": "079025",
+                                      "message": said}),
+                a.control, "RDL_2", [], "start")
+    assert isinstance(e, ad.GeelyControlError) and e.code == "079025", e
+    _clean(e.message)
+    note, = a.command_trail
+    _clean(json.dumps(note))
+    _clean(a.without_secrets(OSError(said)))
+
+
+def test_masking_the_user_id_moves_a_classifier_only_through_the_id():
+    """What decides a password login reads the masked text the way it read
+    the raw one wherever the id stands apart from the hints: a mask writes
+    only X and *, each where a character of the same kind stood, and adds no
+    hint. What it can take away is a hint the id made part of - a 401 inside
+    a numeric id - and since 079001 and 079025 veto a dead session, taking
+    one of those away, run into the id, turns that verdict on."""
+    hints = sorted({*zc._SESSION_DEAD_HINTS, *zc._CAR_REFUSED_HINTS,
+                    *zc._X_VIN_REJECTED_HINTS, *ad._AUTH_HINTS,
+                    *ad._SESSION_REPLACED, "HTTP 401:", "code=403 ", "'code': '401'"})
+
+    def verdicts(text):
+        err = zc.ZeekrApiError(text)
+        return (zc._x_vin_rejected(err), zc._car_refused(err), zc._session_dead(err),
+                ad._looks_authy(text), ad._refusal_code(err),
+                any(h in text.lower() for h in ad._SESSION_REPLACED))
+
+    for uid in (USER, "1764023456789", "a1b2c3d4e5"):
+        for hint in hints:
+            for text in (f"{hint} for {uid}", f"{uid} {hint}", f"{uid}{hint}",
+                         f"{hint}{uid}", f"code={hint} message=user {uid}",
+                         f"user {uid} says nothing"):
+                masked = zc.hide_values(text, [uid])
+                assert uid not in masked, masked
+                assert verdicts(masked) == verdicts(text), (uid, hint, text, masked)
+    inside = "busy for 1401234567890"
+    assert zc._session_dead(zc.ZeekrApiError(inside))
+    assert not zc._session_dead(zc.ZeekrApiError(zc.hide_values(inside, ["1401234567890"])))
+    # The veto: 079001 across the code's end and the id's first digit.
+    glued = "HTTP 401: 07900" + "1764023456789"
+    assert not zc._session_dead(zc.ZeekrApiError(glued))
+    assert zc._session_dead(zc.ZeekrApiError(zc.hide_values(glued, ["1764023456789"])))
 
 
 def test_the_diagnostics_free_text_leaves_the_token_out():

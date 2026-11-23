@@ -808,13 +808,26 @@ class ZeekrClient:
     def hidden(self) -> tuple:
         """What error text built here leaves out (hide_values): the vehicle
         token in use - a probe's candidate too, since the probe sets each one
-        here - the VIN, the session tokens and the account's email address.
-        A transport reads it as its call goes out, so the values are the ones
+        here - the VIN, the session tokens, the account's email address and
+        its user id, which the old route's reads and commands send. A
+        transport reads it as its call goes out, so the values are the ones
         the call sent even if another sign-in replaces the session meanwhile;
         the sign-in that replaces one keeps what it sent as well
-        (_ms_user_auth_login)."""
+        (_ms_user_auth_login).
+
+        The user id was left out at first as short enough to stand inside
+        other text. hide_values leaves anything under six characters, and the
+        mask adds no hint the classifiers match: it writes only X and *, each
+        where a character of the same kind stood. It can take one away only
+        where the value made part of it - never one wholly in the gateway's
+        own words. That cuts both ways once: 079001 and 079025 veto a dead
+        session - in _session_dead, and 079001 in the adapter's
+        _authed_charge too - so a code run into the id with no delimiter
+        between them, or an id that is a code, taken away, leaves a dead
+        session where there was none. No gateway answer seen words a code
+        that way."""
         return (self.enc_vin, self.vin, self.access_token, self.refresh_token,
-                self.hf_token, self.email)
+                self.hf_token, self.email, self.user_id)
 
     def without_secrets(self, text: Any) -> str:
         """`text` with what hidden() names taken out, for a caller that words
