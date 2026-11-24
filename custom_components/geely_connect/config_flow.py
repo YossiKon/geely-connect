@@ -116,6 +116,11 @@ def _valid_vin(vin: Any) -> bool:
     return isinstance(vin, str) and bool(_VIN_RE.match(vin))
 
 
+def _normalized_vin(vin: Any) -> Any:
+    """Compare valid identifiers case-insensitively without sanitizing bad input."""
+    return vin.upper() if _valid_vin(vin) else vin
+
+
 def _valid_user_id(uid: Any) -> bool:
     return isinstance(uid, str) and bool(_USER_ID_RE.match(uid))
 
@@ -658,6 +663,8 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             email = user_input[CONF_EMAIL].strip().lower()
             self._email = email
+            if self._reauth_account_mismatch():
+                return self.async_abort(reason="reauth_account_mismatch")
             self._zeekr_region = user_input.get(CONF_ZEEKR_REGION, self._zeekr_region)
             self._country_code = user_input[CONF_COUNTRY_CODE].strip().upper()
             self._pressure_unit = user_input.get(CONF_PRESSURE_UNIT, DEFAULT_PRESSURE_UNIT)
@@ -683,14 +690,26 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 else:
                     raw = await self.hass.async_add_executor_job(
                         client.list_vehicles, client.user_id)
-                    if not raw:
-                        # Fail-only: an account migrated to the new app can
-                        # have an empty old-platform garage while its car is
-                        # listed on the new gateway. An account that lists
-                        # cars today cannot reach this.
-                        raw = await self.hass.async_add_executor_job(
-                            client.list_vehicles_bff)
-                        if raw:
+                    self._vins = [
+                        v_vin for v in raw if _valid_vin(v_vin := vehicle_vin(v))
+                    ]
+                    # Re-authentication must find this entry's car across both
+                    # garages before offering any other car. A nonempty legacy
+                    # garage can belong to a different vehicle on this account.
+                    own_vin = (_normalized_vin(self._reauth_entry.data.get(CONF_VIN))
+                               if self._reauth_entry is not None else None)
+                    if not raw or (own_vin is not None and not any(
+                            _normalized_vin(vehicle_vin(v)) == own_vin for v in raw)):
+                        try:
+                            bff = await self.hass.async_add_executor_job(
+                                client.list_vehicles_bff)
+                        except Exception as e:  # noqa: BLE001 - best-effort extra garage
+                            _LOGGER.debug(
+                                "new-platform garage read failed (%s: %s)",
+                                type(e).__name__, self.without_secrets(e))
+                            bff = []
+                        if bff:
+                            raw = [*raw, *bff]
                             _LOGGER.info(
                                 "garage found on the new-platform "
                                 "ms-app-bff route")
@@ -702,7 +721,9 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             return self.async_abort(reason="already_configured")
                     if not self._vehicles:
                         errors["base"] = "no_vehicles"
-                    elif len(self._vehicles) == 1:
+                    elif len(self._vehicles) == 1 and (
+                            self._reauth_entry is None
+                            or _normalized_vin(vehicle_vin(self._vehicles[0])) == own_vin):
                         return await self._finish_zeekr(self._vehicles[0])
                     else:
                         return await self.async_step_zeekr_pick()
@@ -766,12 +787,12 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         platform can renumber it), the cars other entries hold are left out
         and whatever remains is offered.
         """
-        own_vin = self._reauth_entry.data.get(CONF_VIN)
-        own = [v for v in vehicles if vehicle_vin(v) == own_vin]
+        own_vin = _normalized_vin(self._reauth_entry.data.get(CONF_VIN))
+        own = [v for v in vehicles if _normalized_vin(vehicle_vin(v)) == own_vin]
         if own:
             return own
-        held = _already_configured_vins(self.hass) - {own_vin}
-        return [v for v in vehicles if vehicle_vin(v) not in held]
+        held = {_normalized_vin(vin) for vin in _already_configured_vins(self.hass)} - {own_vin}
+        return [v for v in vehicles if _normalized_vin(vehicle_vin(v)) not in held]
 
     async def async_step_zeekr_pick(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         if user_input is not None:
@@ -796,12 +817,26 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema({vol.Required("vin"): vol.In(options)}),
         )
 
+    def _reauth_account_mismatch(self) -> bool:
+        """Reject another account before garage probing or token derivation."""
+        previous_email = (self._reauth_entry.data.get(CONF_EMAIL) or ""
+                          if self._reauth_entry is not None else "")
+        if previous_email and (self._email or "").lower() != previous_email.lower():
+            _LOGGER.error(
+                "re-authentication used a different Geely account than the "
+                "one this entry was created with; aborting")
+            return True
+        return False
+
     async def _finish_zeekr(self, vehicle: dict) -> FlowResult:
         vin = vehicle_vin(vehicle)
         tokens = self._zeekr_tokens
         if not _valid_vin(vin) or not _valid_user_id(self._user_id) or tokens is None:
             _LOGGER.error("refusing to finish zeekr setup with malformed VIN/user_id")
             return self.async_abort(reason="unknown")
+
+        if self._reauth_account_mismatch():
+            return self.async_abort(reason="reauth_account_mismatch")
 
         # password_encrypt reads secrets.yaml (and may run AES-GCM); keep that
         # blocking work off the event loop. Computed once for whichever branch.
@@ -817,13 +852,22 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="unknown")
 
         # Auto-derive the new-platform x-vin from the VIN where the app build is
-        # known, verifying the gateway accepts it before storing. The
-        # owner-supplied `zeekr_enc_vin` option still overrides, and stays the
-        # fallback when no known build matches (nothing is stored then, so the
-        # entry behaves exactly as before this change). Mechanism per PR #57;
-        # the material is public app package data, not an account credential.
+        # known, verifying the gateway accepts it before storing. For an
+        # unchanged car, an owner-supplied `zeekr_enc_vin` option overrides; on
+        # a changed VIN, a verified token replaces the option, which otherwise
+        # stays as the fallback when no known build matches (nothing is stored
+        # in entry data then, so the entry behaves as before). Mechanism per
+        # PR #57; the material is public app package data, not an account
+        # credential.
         existing_x_vin = ""
-        if self._reauth_entry is not None:
+        vin_changed = (self._reauth_entry is not None
+                       and _normalized_vin(vin) != _normalized_vin(
+                           self._reauth_entry.data.get(CONF_VIN)))
+        # A changed VIN drops the vehicle token stored in entry data and
+        # re-probes for the selected car. A manual override in options may
+        # already target the selected car, so keep it unless the probe verifies
+        # a replacement for that car.
+        if self._reauth_entry is not None and not vin_changed:
             entry = self._reauth_entry
             existing_x_vin = entry.options.get(CONF_ZEEKR_ENC_VIN) or ""
             # A derived token belongs to its server region. Re-probe when the
@@ -845,13 +889,6 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if self._reauth_entry is not None:
             entry = self._reauth_entry
-            previous_email = entry.data.get(CONF_EMAIL) or ""
-            if previous_email and (self._email or "").lower() != previous_email.lower():
-                _LOGGER.error(
-                    "re-authentication used a different Geely account than the "
-                    "one this entry was created with; aborting"
-                )
-                return self.async_abort(reason="reauth_account_mismatch")
             new_data = dict(entry.data)
             new_data[CONF_PLATFORM] = PLATFORM_ZEEKR
             new_data[CONF_ZEEKR_REGION] = self._zeekr_region
@@ -864,7 +901,10 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             # Migration in place: the account's vehicle record now carries the
             # NEW platform's VIN (the legacy VIN is dead there), so the entry
             # must be re-pointed at the picked vehicle + its metadata.
-            new_data[CONF_VIN] = vin
+            # Preserve existing registry/device identifiers when only the
+            # garage's capitalization changed. Keep the garage's own spelling
+            # on an actual move so runtime comparisons and derived tokens match.
+            new_data[CONF_VIN] = vin if vin_changed else entry.data[CONF_VIN]
             new_data.update(vehicle_metadata(vehicle))
             if enc_vin:
                 new_data[CONF_ZEEKR_ENC_VIN] = enc_vin
@@ -883,10 +923,29 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             new_data[CONF_PRESSURE_UNIT] = self._pressure_unit
             new_data[CONF_POLL_MODE] = self._poll_mode
             update: dict[str, Any] = {"data": new_data}
-            if vin != entry.data.get(CONF_VIN):
+            if vin_changed:
                 # Re-pointed at a renumbered car: the unique id follows, or
                 # the old VIN stays claimed and can never be added again.
                 update["unique_id"] = f"zeekr:{self._email}:{vin}"
+                old_token = entry.data.get(CONF_ZEEKR_ENC_VIN) or ""
+                manual = entry.options.get(CONF_ZEEKR_ENC_VIN) or ""
+                if old_token and old_token != manual:
+                    _LOGGER.warning(
+                        "Vehicle changed; discarded the previously stored "
+                        "vehicle token")
+                if manual:
+                    if enc_vin:
+                        new_options = dict(entry.options)
+                        new_options.pop(CONF_ZEEKR_ENC_VIN, None)
+                        update["options"] = new_options
+                        _LOGGER.warning(
+                            "Vehicle changed; replaced the manual vehicle-token "
+                            "override with a verified token for the selected vehicle")
+                    else:
+                        _LOGGER.warning(
+                            "Vehicle changed; kept the manual vehicle-token override "
+                            "because no replacement was verified; confirm that it "
+                            "belongs to the selected vehicle")
             self.hass.config_entries.async_update_entry(entry, **update)
             await self.hass.config_entries.async_reload(entry.entry_id)
             return self.async_abort(
@@ -894,7 +953,7 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 if self.context.get("source") == "reconfigure"  # config_entries.SOURCE_RECONFIGURE (absent on some HA versions)
                 else "reauth_successful")
 
-        if vin in _already_configured_vins(self.hass):
+        if _normalized_vin(vin) in {_normalized_vin(v) for v in _already_configured_vins(self.hass)}:
             return self.async_abort(reason="already_configured")
         await self.async_set_unique_id(f"zeekr:{self._email}:{vin}")
         self._abort_if_unique_id_configured()
