@@ -150,9 +150,13 @@ class GeelyScheduledChargingTime(CoordinatorEntity, TimeEntity):
         sched = self._sched()
         new_start = _fmt_hhmm(value) if self._kind == "start" else (sched.get("rbcStartTime") or "23:00")
         new_end   = _fmt_hhmm(value) if self._kind == "end"   else (sched.get("rbcEndTime")   or "07:00")
-        # Preserve current on/off - if schedule is currently active,
-        # command=start re-asserts it; if not active, command=stop pushes
-        # times without enabling.
+        # Preserve the current on/off: while the schedule is on, command=start
+        # re-asserts it with the new window. While it is off, command=stop
+        # goes with the window, which the car may not keep: `stop` forwards
+        # only the off (scheduled_charging_set, checked live in May), and one
+        # car on the original route answered such an edit with 1000 and read
+        # its old window a minute later (#123). It goes out as before until a
+        # second car on that route shows the same.
         command = "start" if self._is_on(_truthy(sched.get("bcCycleActive"))) else "stop"
         # A new platform car keeps a window only when it comes with `start`
         # (zeekr_adapter.stores_window_only_with_start): refused here, where a
