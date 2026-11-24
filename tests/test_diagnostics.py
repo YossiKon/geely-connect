@@ -181,7 +181,7 @@ def test_the_report_is_still_worth_reading():
     assert set(r) == {"entry_data", "options", "vehicle_token", "polling",
                       "recent_commands", "logging", "capabilities",
                       "capabilities_raw", "capabilities_new_raw", "status",
-                      "charge_server", "cards"}
+                      "charge_server", "charge_soc", "cards"}
     assert r["options"]["pressure_unit"] == "psi"
     assert r["status"]["_state"]["parkComfortState"] == "1"
 
@@ -626,6 +626,145 @@ def test_an_address_the_entry_keeps_as_typed_is_masked_in_any_case():
     assert "not bound to" in report["charge_server"]["1"]["message"], report
     for text in _strings(report):
         assert typed.lower() not in text.lower(), text
+
+
+def _legacy_client():
+    """The original platform's real client with a session already held, so
+    a read goes straight out through _mtls_send."""
+    api = load("api")
+    a = api.GeelyApi(app_id="APPID", app_secret="0" * 32, user_id=USER_ID,
+                     vin=FAKE_VIN, cidpsso_token=TOKEN, client_id="CLIENT",
+                     vehicle_series="E245", vehicle_model="E245-J1",
+                     device_id="dev", cert_path="", key_path="", email=EMAIL)
+    a._jwt = "jwt-session-0003-current"
+    a._headers_with_jwt = lambda: {"Authorization": a._jwt}
+    return a
+
+
+def test_the_charge_limit_and_the_discharge_floor_are_read_as_the_app_reads_them():
+    """#107 found the app's own read of both on an EU EX5: one GET each, on
+    the session every other read uses. #131 asks whether an E2 answers it.
+    Each row is the answer through both redaction passes, and the slots are
+    read as before."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    a = _legacy_client()
+    calls = []
+
+    def send(host, method, path, body, extra_headers=None):
+        calls.append((host, method, path, body, (extra_headers or {}).get("Authorization")))
+        if "/status/soc/" in path:
+            soc = "1000" if path.endswith("?setting=charging") else "200"
+            answer = {"code": "1000", "message": "operation succeed",
+                      "data": {"soc": soc, "socTime": "1793213264334", "vin": FAKE_VIN}}
+        else:
+            answer = {"code": "1000", "data": {"bizType": path[-1]}}
+        return 200, json.dumps(answer).encode()
+
+    a._mtls_send = send
+    report = _swept(a, {"email": EMAIL, "user_id": USER_ID})
+    soc = report["charge_soc"]
+    assert set(soc) == {"charging", "discharging"}, soc
+    assert soc["charging"]["data"]["soc"] == "1000", soc
+    assert soc["discharging"]["data"]["soc"] == "200", soc
+    assert soc["charging"]["data"]["socTime"] == "1793213264334", soc
+    assert FAKE_VIN not in json.dumps(report), "the VIN an answer names survived"
+    path = f"/remote-control/vehicle/status/soc/{FAKE_VIN}?setting="
+    assert [c for c in calls if "/status/soc/" in c[2]] == [
+        ("apis.ecloudeu.com", "GET", path + "charging", b"", a._jwt),
+        ("apis.ecloudeu.com", "GET", path + "discharging", b"", a._jwt),
+    ], calls
+    assert len([c for c in calls if "/charge-server/" in c[2]]) == 7, calls
+
+
+def test_a_charge_limit_read_that_fails_is_a_row_with_its_error_masked():
+    """A backend without the read answers with an error, and the error is
+    the finding - recorded, never raised, and masked before its cut: the
+    session token here runs across the 300th character, where a mask after
+    the cut would leave its first half, which no later mask can match."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    a = _legacy_client()
+    head = f"OSError: no route for {FAKE_VIN} of {EMAIL} "
+    words = head[len("OSError: "):] + "x" * (300 - len(head) - 10) + a._jwt + " later"
+
+    def send(host, method, path, body, extra_headers=None):
+        if path.endswith("?setting=charging"):
+            raise OSError(words)
+        return 200, json.dumps({"code": "1000", "data": {"soc": "200"}}).encode()
+
+    a._mtls_send = send
+    soc = _swept(a, {"email": EMAIL, "user_id": USER_ID})["charge_soc"]
+    row = soc["charging"]["error"]
+    assert row.startswith("OSError: no route for ") and len(row) == 300, row
+    for value in (FAKE_VIN, EMAIL, a._jwt[:10]):
+        assert value not in row, (value, row)
+    assert soc["discharging"]["data"]["soc"] == "200", soc
+
+
+def test_a_geely_em_entry_is_not_asked_for_the_charge_limit():
+    """The read is the original platform's; the new one's adapter has no
+    such method, and its report has no such rows."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    ad = load("zeekr_adapter")
+    a = ad.ZeekrAdapter(email=EMAIL, vin=FAKE_VIN, user_id=USER_ID,
+                        access_token="fake-access-0123456789",
+                        refresh_token="fake-refresh-0123456789",
+                        hf_token="fake-hf-0123456789",
+                        gateway="https://unused.invalid")
+    assert not hasattr(a, "charge_soc_get")
+    assert _swept(a, {"platform": "zeekr"})["charge_soc"] == {}
+
+
+def test_the_charge_limit_reads_come_out_of_the_sweep_s_time():
+    """The slots and the two settings share one budget: a sweep that uses
+    all of it leaves the settings unasked rather than making the report
+    wait a second time."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    import time
+    diag = load("diagnostics")
+    asked = []
+
+    class Api:
+        command_trail: list = []
+
+        def charge_server_get(self, slot):
+            time.sleep(0.5)
+            return {}
+
+        def charge_soc_get(self, setting):
+            asked.append(setting)
+            return {"code": "1000", "data": {"soc": "1000"}}
+
+    class Entry:
+        entry_id = "e1"
+        data = MappingProxyType({"vin": FAKE_VIN})
+        options = MappingProxyType({})
+
+    class Hass:
+        data = {"geely_connect": {"e1": {"api": Api()}}}
+
+        async def async_add_executor_job(self, fn, *args):
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(None, fn, *args)
+
+    original = diag._SWEEP_TIMEOUT_S
+    diag._SWEEP_TIMEOUT_S = 0.1
+    try:
+        began = time.monotonic()
+        report = asyncio.run(diag.async_get_config_entry_diagnostics(Hass(), Entry()))
+        took = time.monotonic() - began
+    finally:
+        diag._SWEEP_TIMEOUT_S = original
+    assert "cut short" in report["charge_server"]["truncated"], report["charge_server"]
+    assert report["charge_soc"] == {
+        "truncated": "the sweep passed 0.1s before these were asked"}, report["charge_soc"]
+    assert asked == [], asked
+    # One budget, not two: the report waited for the stalled slot's thread
+    # (asyncio.run joins it) but asked the settings nothing after it.
+    assert took < 1.0, took
 
 
 def test_every_string_in_the_report_is_cleared_of_what_the_entry_holds():

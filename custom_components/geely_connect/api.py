@@ -1454,6 +1454,19 @@ class GeelyApi(CommandTrail):
         path = f"/charge-server/ecarx_charge_set/{self.vin}?bizType={biz_type}"
         return self._authed_apis_call("GET", path, b"")
 
+    def charge_soc_get(self, setting: str) -> dict:
+        """GET /remote-control/vehicle/status/soc/{VIN}?setting=charging|discharging.
+
+        The app's own read of the charge limit and the discharge (V2L) floor:
+        its getChargeSOC, SocType CHARGE "charging" and DISCHARGE
+        "discharging" (#107). An EU EX5 answered `{"soc": "1000", "socTime":
+        <epoch ms>}` and `"soc": "200"`; as tenths of a percent they would be
+        a 100 % limit and a 20 % floor, a reading no change of the limit has
+        confirmed yet. Only the diagnostics report asks it.
+        """
+        path = f"/remote-control/vehicle/status/soc/{self.vin}?setting={setting}"
+        return self._authed_apis_call("GET", path, b"")
+
     def scheduled_charging_set(self, *, command: str, start_time: str,
                                 end_time: str, rbc_target: str = "2",
                                 rbc: str = "2", charge_model: str = "0") -> dict:

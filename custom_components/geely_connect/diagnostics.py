@@ -84,9 +84,17 @@ _REDACT = {
 # error that is recorded rather than raised.
 _CHARGE_SERVER_SLOTS = ("1", "2", "3", "4", "5", "6", "8")
 
+# The charge limit and the discharge (V2L) floor, read as the app reads them
+# (its getChargeSOC, "charging" and "discharging", #107) on the original
+# platform. An EU EX5 answered `soc` "1000" and "200", which as tenths of a
+# percent would be a 100 % limit and a 20 % floor - no change of the limit
+# has been seen to move it yet. An E2's app has no limit among the functions
+# captured in #72, and the report asks whether such a car answers (#131).
+_CHARGE_SOC_SETTINGS = ("charging", "discharging")
+
 # A sweep is worth ~a second per slot on a healthy connection and must not be
 # what makes a report impossible to produce on a sick one. Whatever has
-# arrived by then is kept.
+# arrived by then is kept. The charge-limit reads come out of the same time.
 _SWEEP_TIMEOUT_S = 25
 
 
@@ -173,6 +181,7 @@ async def async_get_config_entry_diagnostics(
     api = bundle.get("api")
     held = _held(entry, api)
     seen = list(held)       # and what each of the sweep's reads went out with
+    deadline = asyncio.get_running_loop().time() + _SWEEP_TIMEOUT_S
     report = {
         "entry_data": _clean(dict(entry.data)),
         "options": _clean(dict(entry.options)),
@@ -210,7 +219,9 @@ async def async_get_config_entry_diagnostics(
         "status": _clean((coordinator.data if coordinator else {}) or {}),
         # The charge-server schedule slots, which nothing polls - see
         # _CHARGE_SERVER_SLOTS for the two open questions this answers.
-        "charge_server": await _charge_server(hass, entry, api, seen),
+        "charge_server": await _charge_server(hass, entry, api, seen, deadline),
+        # The charge limit and the discharge floor - see _CHARGE_SOC_SETTINGS.
+        "charge_soc": await _charge_soc(hass, entry, api, seen, deadline),
         # Whether the dashboard cards are actually being served, and from
         # where: the first thing to check when a card reads "Custom element
         # not found" but the vehicle itself is fine.
@@ -220,7 +231,7 @@ async def async_get_config_entry_diagnostics(
 
 
 async def _charge_server(hass: HomeAssistant, entry: ConfigEntry, api: Any,
-                         seen: list) -> dict[str, Any]:
+                         seen: list, deadline: float | None = None) -> dict[str, Any]:
     """Read every charge-server slot once, recording failures as results.
 
     A slot that does not exist is expected to answer with an error, and that
@@ -245,24 +256,53 @@ async def _charge_server(hass: HomeAssistant, entry: ConfigEntry, api: Any,
     get = getattr(api, "charge_server_get", None)
     if get is None or not api_serves(api, "charge_server"):
         return {}
+    return await _reads(hass, entry, api, seen, get, _CHARGE_SERVER_SLOTS,
+                        deadline, "the slots above")
 
+
+async def _charge_soc(hass: HomeAssistant, entry: ConfigEntry, api: Any,
+                      seen: list, deadline: float | None = None) -> dict[str, Any]:
+    """The charge limit and the discharge floor as the app reads them
+    (_CHARGE_SOC_SETTINGS), each read once the way a charge-server slot is,
+    in what is left of the sweep's time. Only the original platform's client
+    has the read; a Geely EM entry gets nothing."""
+    get = getattr(api, "charge_soc_get", None)
+    if get is None:
+        return {}
+    return await _reads(hass, entry, api, seen, get, _CHARGE_SOC_SETTINGS,
+                        deadline, "the settings above")
+
+
+async def _reads(hass: HomeAssistant, entry: ConfigEntry, api: Any, seen: list,
+                 get: Callable[[str], Any], keys: tuple[str, ...],
+                 deadline: float | None, kept: str) -> dict[str, Any]:
+    """`get(key)` for each of `keys`, a failure recorded as its row and
+    masked before its cut (see _charge_server), until `deadline` on the
+    loop's clock - _SWEEP_TIMEOUT_S from now when there is none. With no
+    time left nothing is asked at all, and the row says so."""
     out: dict[str, Any] = {}
+    cut = (f"the sweep passed {_SWEEP_TIMEOUT_S}s and was cut short; "
+           f"{kept} are what came back in time")
 
     async def _sweep() -> None:
-        for slot in _CHARGE_SERVER_SLOTS:
+        for key in keys:
             seen.extend(_held(entry, api))
             try:
-                out[slot] = _clean(await hass.async_add_executor_job(get, slot))
+                out[key] = _clean(await hass.async_add_executor_job(get, key))
             except Exception as e:  # noqa: BLE001 - diagnostics must never raise
                 said = hide_values(str(e), (*seen, *_held(entry, api)))
-                out[slot] = {"error": f"{type(e).__name__}: {said}"[:300]}
+                out[key] = {"error": f"{type(e).__name__}: {said}"[:300]}
 
+    loop = asyncio.get_running_loop()
+    left = (_SWEEP_TIMEOUT_S if deadline is None else deadline - loop.time())
+    if left <= 0:
+        out["truncated"] = (f"the sweep passed {_SWEEP_TIMEOUT_S}s before "
+                            "these were asked")
+        return out
     try:
-        await asyncio.wait_for(_sweep(), _SWEEP_TIMEOUT_S)
+        await asyncio.wait_for(_sweep(), left)
     except (TimeoutError, asyncio.TimeoutError):
-        out["truncated"] = (
-            f"the sweep passed {_SWEEP_TIMEOUT_S}s and was cut short; "
-            "the slots above are what came back in time")
+        out["truncated"] = cut
     return out
 
 
