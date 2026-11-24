@@ -15,6 +15,7 @@ import hashlib
 import logging
 import math
 import os
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -422,6 +423,29 @@ def note_schedule_intent(coordinator, on: bool, until: float) -> None:
     each poll's data dict, and is read by `schedule_intent`.
     """
     coordinator.geely_schedule_intent = (bool(on), float(until))
+
+
+def note_schedule_write(coordinator) -> None:
+    """Protect the locally written window from an early charge-server read.
+
+    An accepted original-APAC write was visible at the first read under 8 s.
+    Keep early timer polls from replacing its local copy until the existing
+    first post-command refresh at 15 s. This is a short read-side guard, not
+    a guarantee about propagation on other vehicles or backends.
+    """
+    coordinator.geely_schedule_written_at = time.monotonic()
+
+
+def schedule_read_result(coordinator, result: dict, read_started: float) -> dict:
+    """Choose server truth, except for a read that could predate our write."""
+    written_at = getattr(coordinator, "geely_schedule_written_at", None)
+    current = (coordinator.data or {}).get("_scheduled_charging")
+    if (written_at is not None and isinstance(current, dict)
+            and read_started < written_at + 15):
+        # Read the current copy here: a command may have patched it while
+        # this poll awaited the charging GET or a later secondary read.
+        return current
+    return result
 
 
 def schedule_intent(coordinator, now: float) -> bool | None:
