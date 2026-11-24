@@ -86,7 +86,8 @@ from .const import (
 )
 from .helpers import (api_can_send, api_reads_charge_server, api_serves,
                       password_decrypt, vehicle_metadata, schedule_refresh,
-                      speed_is_stale, schedule_read_due, schedule_read_result)
+                      speed_is_stale, schedule_read_due, schedule_read_missed,
+                      schedule_read_result)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -964,8 +965,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     _LOGGER.debug("vehicle_status_state non-fatal failure: %s",
                                   api.without_secrets(e))
             if api_reads_charge_server(api):
+                schedule_read_started = monotonic()
                 try:
-                    schedule_read_started = monotonic()
                     sc = await _call_with_retry(api.charge_server_get,
                                                 poll_state["charge_slot"])
                     if sc.get("code") in _SUCCESS_CODES and isinstance(sc.get("data"), dict):
@@ -978,6 +979,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 except Exception as e:  # noqa: BLE001
                     _LOGGER.debug("scheduled-charging fetch non-fatal failure: %s",
                                   api.without_secrets(e))
+                if schedule_read is None:
+                    schedule_read_missed(coordinator, schedule_read_started, secondary_due)
             # Slot 4, the app's Scheduled trip. Battery Temperature
             # Maintenance lives here as `bw` and nowhere in the status block:
             # an owner switched it off with the weekday schedule armed, and

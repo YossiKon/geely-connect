@@ -440,11 +440,38 @@ def note_schedule_write(coordinator) -> None:
 
 
 def schedule_read_due(coordinator, now: float) -> bool:
-    """Whether a discarded schedule read owes a catch-up read on this poll."""
+    """Whether a discarded schedule read owes a catch-up read on this poll.
+
+    Owed from the guard's end until a read past it brings the schedule
+    (schedule_read_result) or a read the poll makes anyway, started past
+    it, fails (schedule_read_missed).
+    """
     if not getattr(coordinator, "geely_schedule_refetch", False):
         return False
     written_at = getattr(coordinator, "geely_schedule_written_at", None)
     return written_at is not None and now >= written_at + _SCHEDULE_READ_GUARD_S
+
+
+def schedule_read_missed(coordinator, read_started: float, read_anyway: bool) -> None:
+    """End an owed catch-up read once a read the poll makes anyway, started
+    past the guard, has failed.
+
+    A catch-up read that fails is tried again on the next poll, but only up
+    to a read the poll makes anyway - the secondary cycle's, a Refresh
+    press's, a charging or just-stopped car's, one during a switch's hold:
+    once one of those has started past the guard and brought no schedule,
+    the slot is read on those polls only, as it is when nothing was written.
+    When the first read past the guard is such a read and fails, nothing is
+    retried before the next one. Before, a failing read went out on every
+    poll until one worked, the client stopped the reads or the entry
+    reloaded - on a parked car up to six times the cycle's reads, each with
+    up to three tries on a network error. A read that started inside the
+    guard ends nothing: the read past it is still owed.
+    """
+    written_at = getattr(coordinator, "geely_schedule_written_at", None)
+    if (read_anyway and written_at is not None
+            and read_started >= written_at + _SCHEDULE_READ_GUARD_S):
+        coordinator.geely_schedule_refetch = False
 
 
 def schedule_read_result(coordinator, result: dict, read_started: float) -> dict:
@@ -456,7 +483,9 @@ def schedule_read_result(coordinator, result: dict, read_started: float) -> dict
         # Read the current copy here: a command may have patched it while
         # this poll awaited the charging GET or a later secondary read.
         # Ask the next poll past the guard to re-read the schedule so a
-        # discarded read does not leave the local copy for a whole cycle.
+        # discarded read does not leave the local copy for a whole cycle -
+        # and, while that read fails, the polls after it up to a read the
+        # poll makes anyway (schedule_read_missed).
         coordinator.geely_schedule_refetch = True
         return current
     coordinator.geely_schedule_refetch = False

@@ -3,7 +3,8 @@
 Exercise the real coordinator update closure and command entities with separate
 wall and monotonic clocks. The fake charge-server GET returns whatever snapshot
 `server` currently holds (unchanged for a lagging/unstored write, or mutated
-explicitly to model an external edit) and records every call.
+explicitly to model an external edit), or raises `server["raise"]` when that is
+set, and records every call.
 """
 import asyncio
 import copy
@@ -50,6 +51,8 @@ def _fixture(slot, mode="normal"):
     def fake_get(s):
         gets.append(str(s))
         if str(s) == slot_key:
+            if server.get("raise") is not None:
+                raise server["raise"]
             return {"code": server["code"], "data": copy.deepcopy(server["data"])}
         return orig_get(s)
 
@@ -240,6 +243,203 @@ def test_failed_catchup_get_retries_on_the_next_normal_refresh():
         advance(20)
         asyncio.run(coord.refresh())
         assert gets.count("6") == 3
+
+
+def _reads_per_poll(coord, gets, slot, advance, polls, step=20):
+    """How many times each of `polls` refreshes, `step` s apart, read the slot."""
+    out = []
+    for _ in range(polls):
+        advance(step)
+        before = gets.count(str(slot))
+        asyncio.run(coord.refresh())
+        out.append(gets.count(str(slot)) - before)
+    return out
+
+
+def test_a_failing_catch_up_read_stops_at_the_cycle_s_own_read():
+    """A catch-up read that keeps failing is tried on each poll only up to a
+    read the poll makes anyway, here the secondary cycle's; once that one has
+    failed past the guard too, the slot is back on its cycle. It used to be
+    read on every poll until a read worked or the entry reloaded. Each way a
+    read fails: an answer that is not a success, a raised error, a failed pin
+    check."""
+    m = _mod()
+    failures = ({"code": 5000}, {"raise": RuntimeError("charge server down")},
+                {"raise": m.GeelyTLSPinError("pin mismatch")})
+    for slot in (2, 6):
+        for mode, every in (("normal", 4), ("eco", 6), ("live", 3), ("super_eco", 2)):
+            for failure in failures:
+                (stack, _, _, advance, align_secondary, _, _, coord,
+                 start, _, _, _, server, gets) = _fixture(slot, mode)
+                with stack:
+                    asyncio.run(start.async_set_value(dtime(22)))
+                    advance(3)
+                    align_secondary()
+                    asyncio.run(coord.refresh())
+                    assert gets.count(str(slot)) == 1
+                    assert _window(coord, slot) == ("22:00", "07:00")
+                    server.update(failure)
+                    # Polls 2..every: the catch-up, failing; poll every+1: the
+                    # cycle's own read, failing past the guard; then nothing
+                    # off the cycle until its next read, at 2*every+1.
+                    got = _reads_per_poll(coord, gets, slot, advance, 2 * every)
+                    assert got == [1] * every + [0] * (every - 1) + [1], (
+                        slot, mode, failure, got)
+                    assert _window(coord, slot) == ("22:00", "07:00")
+                    # The server answers again: the cycle's next read installs it.
+                    server.pop("raise", None)
+                    server["code"] = 1000
+                    got = _reads_per_poll(coord, gets, slot, advance, every)
+                    assert got == [0] * (every - 1) + [1], (slot, mode, failure, got)
+                    assert _window(coord, slot) == ("23:00", "07:00")
+
+
+def test_a_read_failing_inside_the_guard_leaves_the_catch_up_owed():
+    """A Refresh press inside the guard whose read fails ends nothing: the
+    read past the guard is still owed, and it installs what the server holds."""
+    for slot in (2, 6):
+        (stack, _, _, advance, align_secondary, poll, _, coord,
+         start, _, _, _, server, gets) = _fixture(slot)
+        with stack:
+            asyncio.run(start.async_set_value(dtime(22)))
+            advance(3)
+            align_secondary()
+            asyncio.run(coord.refresh())
+            server["code"] = 5000
+            advance(7)
+            poll["force_secondary"] = True
+            asyncio.run(coord.refresh())
+            assert "force_secondary" not in poll
+            assert gets.count(str(slot)) == 2
+            assert _window(coord, slot) == ("22:00", "07:00")
+            server["code"] = 1000
+            advance(5)
+            asyncio.run(coord.refresh())
+            assert gets.count(str(slot)) == 3
+            assert _window(coord, slot) == ("23:00", "07:00")
+
+
+def test_a_press_s_read_that_starts_as_the_guard_ends_is_past_it():
+    """The guard ends at 15 s for this as for the discard: a Refresh press,
+    a read the poll makes anyway, whose read starts then and fails ends the
+    catch-up."""
+    for slot in (2, 6):
+        (stack, _, _, advance, align_secondary, poll, _, coord,
+         start, _, _, _, server, gets) = _fixture(slot)
+        with stack:
+            asyncio.run(start.async_set_value(dtime(22)))
+            advance(3)
+            align_secondary()
+            asyncio.run(coord.refresh())
+            server["code"] = 5000
+            advance(12)
+            poll["force_secondary"] = True
+            asyncio.run(coord.refresh())
+            assert "force_secondary" not in poll
+            assert gets.count(str(slot)) == 2
+            assert _reads_per_poll(coord, gets, slot, advance, 1) == [0]
+
+
+def test_a_read_that_starts_inside_the_guard_and_fails_after_it_ends_nothing():
+    """The cycle's read starts at +14 s and fails at +17 s: it started inside
+    the guard, so the catch-up is still owed on the next poll. What counts is
+    when the read started, not when it ended."""
+    for slot in (2, 6):
+        (stack, _, _, advance, _, poll, api, coord,
+         start, _, _, _, server, gets) = _fixture(slot)
+        with stack:
+            asyncio.run(start.async_set_value(dtime(22)))
+            advance(3)
+            # A Refresh press on cycle 3 reads the slot and sets it aside.
+            poll["cycle"] = 2
+            poll["force_secondary"] = True
+            asyncio.run(coord.refresh())
+            assert gets.count(str(slot)) == 1
+            server["code"] = 5000
+            old = start._hass.async_add_executor_job
+
+            async def executor(fn, *args):
+                if fn == api.charge_server_get and args == (str(slot),):
+                    advance(3)  # a slow answer that fails
+                return await old(fn, *args)
+
+            start._hass.async_add_executor_job = executor
+            advance(11)
+            poll["cycle"] = 4  # +14 s: cycle 5, the cycle's own read
+            asyncio.run(coord.refresh())
+            start._hass.async_add_executor_job = old
+            assert gets.count(str(slot)) == 2
+            assert _reads_per_poll(coord, gets, slot, advance, 1) == [1]
+
+
+def _status(charging):
+    return {"code": 1000, "data": {"vehicleStatus": {
+        "basicVehicleStatus": {"speed": "0"},
+        "additionalVehicleStatus": {"electricVehicleStatus": {
+            "statusOfChargerConnection": "3" if charging else "0",
+            "chargeLevel": "80"}}}}}
+
+
+def test_a_charging_poll_s_failed_read_ends_the_catch_up():
+    """Every poll of a charging car, and the first after it stops, reads the
+    slot anyway: a failed read there past the guard ends the catch-up, and
+    once the car is parked the slot is back on its cycle."""
+    (stack, _, _, advance, align_secondary, _, api, coord,
+     start, _, _, _, server, gets) = _fixture(6)
+    with stack:
+        asyncio.run(start.async_set_value(dtime(22)))
+        advance(3)
+        align_secondary()
+        api.status_results.append(_status(True))
+        asyncio.run(coord.refresh())
+        assert gets.count("6") == 1
+        server["code"] = 5000
+        api.status_results.append(_status(True))   # +15 s, cycle 2: charging
+        api.status_results.append(_status(False))  # +35 s, cycle 3: just stopped
+        assert _reads_per_poll(coord, gets, 6, advance, 1, step=12) == [1]
+        assert _reads_per_poll(coord, gets, 6, advance, 1, step=20) == [1]
+        # +55 s, cycle 4: parked, off the cycle - nothing is owed any more.
+        assert _reads_per_poll(coord, gets, 6, advance, 1, step=20) == [0]
+
+
+def test_a_write_after_failures_ended_the_catch_up_owes_none_by_itself():
+    """Ending the catch-up clears what owes it: a new write whose guard sets
+    no read aside owes no catch-up."""
+    for slot in (2, 6):
+        (stack, _, _, advance, align_secondary, _, _, coord,
+         start, end, _, _, server, gets) = _fixture(slot)
+        with stack:
+            asyncio.run(start.async_set_value(dtime(22)))
+            advance(3)
+            align_secondary()
+            asyncio.run(coord.refresh())
+            server["code"] = 5000
+            assert _reads_per_poll(coord, gets, slot, advance, 4) == [1, 1, 1, 1]
+            server["code"] = 1000
+            asyncio.run(end.async_set_value(dtime(8)))  # cycles 6 and 7 next: off
+            assert _reads_per_poll(coord, gets, slot, advance, 2, step=15) == [0, 0]
+            assert _window(coord, slot) == ("22:00", "08:00")
+
+
+def test_a_catch_up_ended_by_failures_is_owed_again_after_the_next_write():
+    for slot in (2, 6):
+        (stack, _, _, advance, align_secondary, _, _, coord,
+         start, end, _, _, server, gets) = _fixture(slot)
+        with stack:
+            asyncio.run(start.async_set_value(dtime(22)))
+            advance(3)
+            align_secondary()
+            asyncio.run(coord.refresh())
+            server["code"] = 5000
+            assert _reads_per_poll(coord, gets, slot, advance, 4) == [1, 1, 1, 1]
+            server["code"] = 1000
+            asyncio.run(end.async_set_value(dtime(8)))
+            advance(3)
+            align_secondary()
+            asyncio.run(coord.refresh())
+            assert _window(coord, slot) == ("22:00", "08:00")
+            assert _reads_per_poll(coord, gets, slot, advance, 1, step=12) == [1]
+            assert _window(coord, slot) == ("23:00", "07:00")
 
 
 def test_guard_uses_monotonic_clock_and_exact_15s_boundary():
