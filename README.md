@@ -211,13 +211,13 @@ resources only when it loads
 ### How the cards behave
 
 - **One command at a time.** The car drops a command that arrives while it is
-  still executing the last one, so the cards hold every control for three
-  seconds after each command and grey them out meanwhile (`cooldown:` changes
-  the wait). The temperature stepper shows your number at once and tells the car
-  when you stop tapping. A command refused because the car was busy is retried
-  once, quietly. Nothing reports when the car has actually *finished* - the
-  gateway acknowledges receipt, not execution - so this is a spacing, not a
-  status.
+  still executing the last one, so the cards hold every control while each
+  command is in flight and for three seconds after it answers, greying them out
+  meanwhile (`cooldown:` changes the post-answer wait, and `0` disables both).
+  The temperature stepper shows your number at once and tells the car when you
+  stop tapping. A command refused because the car was busy is retried once,
+  quietly. Nothing reports when the car has actually *finished* - the gateway
+  acknowledges receipt, not execution - so this is a spacing, not a status.
 - **Locked while driving.** While the car is being driven, the larger cards show
   a banner instead of buttons the car would refuse, and the one-row cards say so
   on their status line. **Refresh Data stays live**, because it reads the car
