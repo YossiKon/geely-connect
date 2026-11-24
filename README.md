@@ -671,10 +671,22 @@ entry at a time through the automation editor's ⋮ → **Edit in YAML**. Replac
 The same ideas as importable blueprints: charging complete, a live lock-screen
 charging countdown, low battery, door or trunk left open, tire pressure out of
 range, left unlocked away from home, and pre-conditioning before departure -
-weekly, or for a single trip you set the night before. One is only available
-here: **`blueprints/script/geely_connect/rapid_climate_with_seats.yaml`** builds
-a button that fires Rapid Cooling (or Warming) and then the seat vents or
-heaters, spaced out so the car accepts every command.
+weekly, or for a single trip you set the night before. Two script blueprints
+sit beside them:
+
+- **`blueprints/script/geely_connect/rapid_climate_with_seats.yaml`** builds
+  a button that fires Rapid Cooling (or Warming) and then the seat vents or
+  heaters, spaced out so the car accepts every command.
+- **`blueprints/script/geely_connect/native_departure.yaml`** arms a one-off
+  departure stored in the car on the original platform, or switches the
+  scheduled trip off. On the one car tested, Stop also switched off a weekday
+  schedule set in the app (see
+  [the control guide](docs/CONTROL_SUPPORT.md#native-departure-setup)). It
+  needs Geely Connect v1.62.0 or later, and an administrator to run it.
+
+HACS installs only the integration, not the blueprints. To import one, open
+**Settings → Automations & scenes → Blueprints → Import blueprint** in Home
+Assistant and paste the link to the blueprint's file in this repository.
 
 ### 🖥️ Full dashboards - [`dashboards/`](dashboards/)
 
@@ -1120,10 +1132,10 @@ custom_components/geely_connect/   the integration itself (what HACS installs)
 └── *.py                           platforms, API client, config flow, …
 automations/                       ready-to-paste automations
 blueprints/automation/             the same ideas as importable blueprints
-blueprints/script/                 rapid warm / cool including the seats, spaced
+blueprints/script/                 rapid warm / cool including the seats, a one-off departure
 dashboards/                        full dashboards (paste in the Raw configuration editor)
 android-widgets/                   home-screen widget templates for the companion app
-docs/                              regional setup notes and the card screenshots
+docs/                              regional setup notes, the control guide and the card screenshots
 hacs.json                          HACS metadata
 ```
 

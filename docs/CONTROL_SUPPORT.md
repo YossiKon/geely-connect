@@ -63,7 +63,9 @@ vehicle-token route; its older fallback route has different capabilities.
 ## Native departure setup
 
 Import `blueprints/script/geely_connect/native_departure.yaml` as a script
-blueprint. Select any entity belonging to the intended Geely and an
+blueprint; HACS does not install it. It needs Geely Connect v1.62.0 or later,
+the first release whose `set_scheduled_trip` accepts `entity_id`. Select any
+entity belonging to the intended Geely and an
 `input_datetime` helper with **both date and time** enabled. Set a future date
 and time, then run the script as an administrator. Start is the default and
 arms a one-off trip (it cannot re-arm a weekday schedule set in the app, and
