@@ -702,6 +702,30 @@ def test_a_charge_limit_read_that_fails_is_a_row_with_its_error_masked():
     assert soc["discharging"]["data"]["soc"] == "200", soc
 
 
+def test_a_car_on_another_gateway_is_not_asked_for_the_charge_limit():
+    """The read has answered on the EU gateway only. Elsewhere the path is
+    unseen, and a 1402 from a gateway that does not know it would renew the
+    session on every report - so it is not sent there, and the slots are
+    read as before."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    for host in ("apis.ecloudkr.com", "apis.ecloudus.com",
+                 "tsp-geely-apis-uae.xcloudsvc.com"):
+        a = _legacy_client()
+        a.control_host = host
+        paths = []
+
+        def send(host_, method, path, body, extra_headers=None):
+            paths.append(path)
+            return 200, json.dumps({"code": "1000", "data": {}}).encode()
+
+        a._mtls_send = send
+        report = _swept(a, {"email": EMAIL, "user_id": USER_ID})
+        assert report["charge_soc"] == {}, (host, report["charge_soc"])
+        assert not [p for p in paths if "/status/soc/" in p], (host, paths)
+        assert len([p for p in paths if "/charge-server/" in p]) == 7, (host, paths)
+
+
 def test_a_geely_em_entry_is_not_asked_for_the_charge_limit():
     """The read is the original platform's; the new one's adapter has no
     such method, and its report has no such rows."""
@@ -729,6 +753,7 @@ def test_the_charge_limit_reads_come_out_of_the_sweep_s_time():
 
     class Api:
         command_trail: list = []
+        control_host = "apis.ecloudeu.com"
 
         def charge_server_get(self, slot):
             time.sleep(0.5)

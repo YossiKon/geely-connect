@@ -92,6 +92,13 @@ _CHARGE_SERVER_SLOTS = ("1", "2", "3", "4", "5", "6", "8")
 # captured in #72, and the report asks whether such a car answers (#131).
 _CHARGE_SOC_SETTINGS = ("charging", "discharging")
 
+# The control hosts the read has answered on, and the only ones it is sent
+# to: the EU gateway, which #107's EX5 and #72's South African E2 both use.
+# Elsewhere the path is unseen, and a 1402 from a gateway that does not know
+# it would renew the session - and could sign the phone app out - on every
+# report.
+_CHARGE_SOC_HOSTS = ("apis.ecloudeu.com",)
+
 # A sweep is worth ~a second per slot on a healthy connection and must not be
 # what makes a report impossible to produce on a sick one. Whatever has
 # arrived by then is kept. The charge-limit reads come out of the same time.
@@ -265,9 +272,11 @@ async def _charge_soc(hass: HomeAssistant, entry: ConfigEntry, api: Any,
     """The charge limit and the discharge floor as the app reads them
     (_CHARGE_SOC_SETTINGS), each read once the way a charge-server slot is,
     in what is left of the sweep's time. Only the original platform's client
-    has the read; a Geely EM entry gets nothing."""
+    has the read, and it is sent only to the hosts it has answered on
+    (_CHARGE_SOC_HOSTS); a Geely EM entry, or a car on another gateway, gets
+    nothing."""
     get = getattr(api, "charge_soc_get", None)
-    if get is None:
+    if get is None or getattr(api, "control_host", None) not in _CHARGE_SOC_HOSTS:
         return {}
     return await _reads(hass, entry, api, seen, get, _CHARGE_SOC_SETTINGS,
                         deadline, "the settings above")
