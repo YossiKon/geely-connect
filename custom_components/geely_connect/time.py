@@ -41,8 +41,9 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .api import GeelyControlError, redact, window_length
 from .const import DOMAIN
-from .helpers import (api_serves, quote_failure, schedule_intent, slot_2_is_on,
-                      slot_2_window, truthy as _truthy, schedule_refresh)
+from .helpers import (api_serves, note_schedule_write, quote_failure,
+                      schedule_intent, slot_2_is_on, slot_2_window,
+                      truthy as _truthy, schedule_refresh)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -199,6 +200,7 @@ class GeelyScheduledChargingTime(CoordinatorEntity, TimeEntity):
         data = self.coordinator.data
         if isinstance(data, dict):
             data.setdefault("_scheduled_charging", {})[self._field] = _fmt_hhmm(value)
+        note_schedule_write(self.coordinator)
         self.async_write_ha_state()
 
         # Server takes about 30s to propagate, so refresh at 15, 35 and 55s.
@@ -239,6 +241,9 @@ class GeelyScheduledChargingTime(CoordinatorEntity, TimeEntity):
                       self._api.without_secrets(redact(resp)))
         self._optimistic_value = value
         self._optimistic_until = time_mod.time() + 60
-        window.update(startTime=start, endtime=end, duration=window_length(start, end))
+        current = slot_2_window(self._sched())
+        if current is not None:
+            current.update(startTime=start, endtime=end, duration=window_length(start, end))
+        note_schedule_write(self.coordinator)
         self.async_write_ha_state()
         schedule_refresh(self._hass, self.coordinator, 15, 20, 20)

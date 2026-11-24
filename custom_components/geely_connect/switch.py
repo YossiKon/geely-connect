@@ -67,6 +67,7 @@ from .helpers import (
     api_can_send,
     api_serves,
     note_schedule_intent,
+    note_schedule_write,
     note_slot_2_state,
     quote_failure,
     slot_2_is_on,
@@ -650,6 +651,7 @@ class GeelyScheduledChargingSwitch(CoordinatorEntity, SwitchEntity):
             sched = data.setdefault("_scheduled_charging", {})
             sched["bcCycleActive"] = "true" if command == "start" else "false"
         note_schedule_intent(self.coordinator, command == "start", self._optimistic_until)
+        note_schedule_write(self.coordinator)
         self.async_write_ha_state()
 
         # First peek at 15s. Real confirmation usually lands at 30-35s, so
@@ -683,6 +685,7 @@ class GeelyScheduledChargingSwitch(CoordinatorEntity, SwitchEntity):
         self._optimistic_until = time.time() + 60
         note_slot_2_state(self.coordinator.data, command == "start")
         note_schedule_intent(self.coordinator, command == "start", self._optimistic_until)
+        note_schedule_write(self.coordinator)
         self.async_write_ha_state()
         schedule_refresh(self._hass, self.coordinator, 15, 20, 20)
 
