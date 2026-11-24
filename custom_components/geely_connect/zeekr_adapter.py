@@ -534,12 +534,19 @@ class ZeekrAdapter(CommandTrail):
         False, since a car that has since moved to the new gateway must keep
         the one hint that says where its token goes, and gives the advice to
         paste a token only on a True.
+
+        The garage's VIN is this car's in any letter case: a
+        re-authentication takes one that differs only in case for the same
+        car and keeps the entry's spelling (#126), so the garage can list it
+        in another case than this entry holds, and matched as it stood it
+        read as a car the garage does not hold.
         """
         records = self._authed(self._client.vehicle_list_bff)
         if records is None:
             return None
         vins = [vehicle_vin(r) for r in records]
-        if self.vin in vins:
+        own = (self.vin or "").upper()
+        if own and any(vin.upper() == own for vin in vins if vin):
             return True
         if records and not any(vins):
             return None

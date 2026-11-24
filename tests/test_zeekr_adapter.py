@@ -780,17 +780,25 @@ def test_new_gateway_lists_vehicle_reads_the_garage_for_this_vin():
     on the new gateway; records with no recognisable VIN cannot rule it out,
     and neither can an answer the client could not read (None), which is not
     an empty garage. Both say so with None, not True: a False takes the x-vin
-    Repairs issue down, and only a True earns the advice to paste a token."""
+    Repairs issue down, and only a True earns the advice to paste a token.
+    The garage may list this car in another letter case than the entry
+    keeps (#126): it is still this car."""
     a, c = _make_adapter()
     for records, expected in (
             ([], False),
             ([{"vin": "L6T11111111111111"}], False),
             ([{"vin": FAKE_VIN}], True),
             ([{"vehicleInfo": {"vin": FAKE_VIN}}], True),
+            ([{"vin": FAKE_VIN.lower()}], True),
+            ([{"vin": "L6T11111111111111".lower()}, {"vin": FAKE_VIN.lower()}], True),
             ([{"nickname": "no vin here"}], None),
             (None, None)):
         c.vehicle_list_bff = lambda r=records: r
         assert a.new_gateway_lists_vehicle() is expected, records
+    # And the other way round: the entry holds the VIN in lower case.
+    a.vin = FAKE_VIN.lower()
+    c.vehicle_list_bff = lambda: [{"vin": FAKE_VIN}]
+    assert a.new_gateway_lists_vehicle() is True
 
 
 # ------------------------------------------------------ the command trail ---

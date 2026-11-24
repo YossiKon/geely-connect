@@ -509,7 +509,8 @@ def test_the_probe_and_setup_agree_on_a_car_the_new_gateway_does_not_hold():
 
     m = _mod()
     zc = load("zeekr_client")
-    for garage, held in (([], False), ([{"vin": FAKE_VIN}], True), (None, None)):
+    for garage, held in (([], False), ([{"vin": FAKE_VIN}], True),
+                         ([{"vin": FAKE_VIN.lower()}], True), (None, None)):
         def _real(**kw):
             a, c = _make_adapter(password="hunter2")
 

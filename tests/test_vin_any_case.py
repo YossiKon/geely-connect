@@ -212,3 +212,70 @@ def test_an_action_names_a_vin_no_loaded_car_has_by_its_last_four_only():
             assert str(e) == f"No configured Geely vehicle with VIN {named}", str(e)
         else:
             raise AssertionError(f"an unknown VIN {given!r} did not fail")
+
+
+def _reached(m, bundles, data, name="fire_control", entity=None):
+    """The keys of the bundles whose client a call reached, or the
+    ServiceValidationError it raised."""
+    import types
+    from homeassistant.exceptions import ServiceValidationError
+    from test_init_lifecycle import _Patched, _service
+    _, run = _service(m, bundles, data, name=name)
+    registry = types.SimpleNamespace(async_get=lambda h: types.SimpleNamespace(
+        async_get=lambda eid: entity))
+    try:
+        with _Patched(m, er=registry):
+            run()
+    except ServiceValidationError as e:
+        return e
+    return [key for key, bundle in bundles.items() if bundle["api"].calls]
+
+
+def test_an_action_takes_the_car_s_vin_in_another_case():
+    """The app or a garage can write the car's VIN in another case than the
+    entry holds (#126). On its own, a VIN written as an entry holds it picks
+    that entry, and one held only in another case picks the entry that holds
+    it so - unless two do, as entries made before v1.62.0 can for one car:
+    taking the first would be a pick by load order. Beside an entity, it has
+    to name that entity's car, in any case."""
+    import types
+    from test_platform_commands import _need_ha
+    _need_ha()
+    from test_init_lifecycle import _FakeApi, _mod
+    m = _mod()
+    mixed = "l6T" + FAKE_VIN[3:]
+    assert len({FAKE_VIN, LOWER, mixed}) == 3
+
+    def one(vin):
+        return {"e1": {"vin": vin, "api": _FakeApi()}}
+
+    def twins():
+        return {"a": {"vin": FAKE_VIN, "api": _FakeApi()},
+                "b": {"vin": LOWER, "api": _FakeApi()}}
+
+    for bundles, given, expected in (
+            (one(FAKE_VIN), LOWER, ["e1"]),
+            (one(LOWER), FAKE_VIN, ["e1"]),
+            ({"x": {"api": _FakeApi()}, **one(FAKE_VIN)}, LOWER, ["e1"]),
+            (twins(), LOWER, ["b"]),
+            (twins(), FAKE_VIN, ["a"])):
+        got = _reached(m, bundles, {"service_id": "RCT", "vin": given})
+        assert got == expected, (given, got)
+    got = _reached(m, twins(), {"service_id": "RCT", "vin": mixed})
+    assert "more than one" in str(got), got
+
+    def on(key):
+        return types.SimpleNamespace(platform="geely_connect", config_entry_id=key)
+
+    trip = {"command": "stop", "entity_id": "sensor.car_b"}
+    for bundles, given, expected in (
+            ({"a": {"vin": "L6T00000000000011", "api": _FakeApi()},
+              "b": {"vin": FAKE_VIN, "api": _FakeApi()}}, LOWER, ["b"]),
+            ({"a": {"vin": "L6T00000000000011", "api": _FakeApi()},
+              "b": {"vin": LOWER, "api": _FakeApi()}}, FAKE_VIN, ["b"])):
+        got = _reached(m, bundles, {**trip, "vin": given},
+                       name="set_scheduled_trip", entity=on("b"))
+        assert got == expected, (given, got)
+    got = _reached(m, {"b": {"api": _FakeApi()}, **one(FAKE_VIN)},
+                   {**trip, "vin": LOWER}, name="set_scheduled_trip", entity=on("b"))
+    assert getattr(got, "translation_key", None) == "conflicting_vehicle_target", got

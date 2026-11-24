@@ -1175,6 +1175,15 @@ async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> Non
     await hass.config_entries.async_reload(entry.entry_id)
 
 
+def _same_vin(held: Any, given: Any) -> bool:
+    """Whether two VINs name one car: equal in any letter case. Setup takes
+    a VIN that differs only in case for the same car and keeps the entry's
+    spelling (#126), so the car's VIN as the app or a garage writes it can
+    differ in case from the one the entry holds."""
+    return (isinstance(held, str) and isinstance(given, str)
+            and held.upper() == given.upper())
+
+
 def _register_debug_service(hass: HomeAssistant) -> None:
     """Register `geely_connect.fire_control` and `.fire_rapid` once. Idempotent.
 
@@ -1224,7 +1233,12 @@ def _register_debug_service(hass: HomeAssistant) -> None:
         that can change across restarts.
 
         A VIN no loaded car has is named by its last four characters only,
-        in an error Home Assistant logs.
+        in an error Home Assistant logs. A VIN names a car in any letter case
+        (_same_vin). Beside an entity, it has to name that entity's car. On
+        its own, one written as an entry holds it picks that entry; one held
+        only in another case has to be held so by a single entry. Two entries
+        made before v1.62.0 can hold one car in two spellings, and taking
+        the first of them would be a pick by load order.
         """
         loaded = list((hass.data.get(DOMAIN) or {}).items())
         if not loaded:
@@ -1236,12 +1250,20 @@ def _register_debug_service(hass: HomeAssistant) -> None:
             if chosen is None:
                 raise ServiceValidationError(
                     translation_domain=DOMAIN, translation_key="invalid_vehicle_entity")
-            if target_vin and chosen[1].get("vin") != target_vin:
+            if target_vin and not _same_vin(chosen[1].get("vin"), target_vin):
                 raise ServiceValidationError(
                     translation_domain=DOMAIN, translation_key="conflicting_vehicle_target")
             return chosen
         if target_vin:
             chosen = next((kv for kv in loaded if kv[1].get("vin") == target_vin), None)
+            if chosen is None:
+                alike = [kv for kv in loaded if _same_vin(kv[1].get("vin"), target_vin)]
+                if len(alike) > 1:
+                    raise ServiceValidationError(
+                        "vin matches more than one configured vehicle in another "
+                        "letter case; give it exactly as one of them holds it"
+                    )
+                chosen = alike[0] if alike else None
             if chosen is None:
                 raise ServiceValidationError(
                     "No configured Geely vehicle with VIN "
