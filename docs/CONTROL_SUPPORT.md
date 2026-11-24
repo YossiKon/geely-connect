@@ -32,8 +32,8 @@ vehicle-token route; its older fallback route has different capabilities.
 | Seat heat | Per-seat select, full card climate panel | Front seats mapped on both routes; rear seats require catalogue and hardware support. |
 | Seat ventilation | Per-seat select, full card climate panel | Front seats mapped on original route; rear seats require catalogue and hardware support. EM standalone translation is inferred; physical support remains unverified ([#63](https://github.com/YossiKon/geely-connect/issues/63)). |
 | Steering-wheel heat | Switch, full card climate panel | Confirmed on a real car on the original route ([#4](https://github.com/YossiKon/geely-connect/issues/4)). EM mapping exists. |
-| Windscreen defrost | Switch, cards | Both routes mapped; not actuated in this audit. |
-| Cabin purge / G-Clean | Switch, full card | Both routes mapped, different request shapes; not actuated in this audit. |
+| Windscreen defrost | Switch, cards | Both routes mapped; no run on a car is recorded here. |
+| Cabin purge / G-Clean | Switch, full card | Both routes mapped, different request shapes; no run on a car is recorded here. |
 | All windows | Cover, full card | Group open/close; mapped on both routes. E2 has a separate captured request. |
 | Window ventilation | Switch, cards | Mapped on both routes; E2 motion owner-confirmed, read-back still a separate issue. |
 | Sunroof | Cover, full card | Fitted hardware required; EM catalogue gating remains unresolved (#63). |
@@ -49,7 +49,7 @@ vehicle-token route; its older fallback route has different capabilities.
 | Independent battery conditioning | No standalone setter | Native departure preserves the existing battery setting. It does not expose a new independent toggle. |
 | HA-timed preconditioning | Existing automation blueprints | HA calls the climate entity at the chosen time. Distinct from a departure stored in the car. |
 | Camping / Parking Comfort | Switch where available | State reading demonstrated; accepted remote writes have not demonstrated a vehicle effect ([#45](https://github.com/YossiKon/geely-connect/issues/45)). EM token route suppresses the unmapped switch. |
-| Find Car | Button, cards | Horn and flashing lights; not actuated in this audit. |
+| Find Car | Button, cards | Horn and flashing lights; no run on a car is recorded here. |
 | Flash Lights | No exposed control | Captured lights-only mapping remains pending owner confirmation; Find Car also sounds the horn. |
 | Horn only | No dedicated control | Catalogue lead; exact supported request not established here. |
 | Cabin fan speed | No setter | Rapid climate uses the car's own programme; no captured remote fan-speed parameter. |
@@ -95,7 +95,7 @@ from 23:00 to 23:05 was visible in the first raw schedule read, completed
 sample at 102.94 seconds. That is an observed upper bound for this run,
 **not a maximum propagation latency**. The disabled 23:00–07:00 schedule was
 restored. No candidate code was deployed for this check, so this evidence does
-not validate candidate schedule changes. EM and slower propagation still need
-measurements; wake battery cost remains unmeasured. The public schedule
+not validate candidate schedule changes. The public schedule
 [evidence report](https://github.com/YossiKon/geely-connect/pull/121#issuecomment-6944715025)
-records the measurement limits.
+records this run and its limits. Not measured yet: propagation on Geely EM
+or on a slower car, and what a wake costs the 12 V battery.
