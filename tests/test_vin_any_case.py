@@ -182,3 +182,33 @@ def test_the_report_masks_the_entry_s_vin_in_another_case():
     text = json.dumps(report)
     assert "status fetch failed for" in text and "reset for" in text, text
     assert LOWER not in text.lower(), text
+
+
+def test_the_geely_em_transport_leaves_out_the_vin_it_was_handed_in_another_case():
+    """The module transport on its own, with no client to hand it the VIN
+    marked: the VIN it was called with is marked there too."""
+    import test_em_error_text as tem
+    zc = load("zeekr_client")
+    for said in _spellings(FAKE_VIN):
+        e = tem._raises(tem._through, tem._says(403, {"message": f"vehicle {said} unknown"}),
+                        lambda: zc._hf_request("GET", "/x", token=tem.HF, vin=FAKE_VIN))
+        assert said not in str(e) and "unknown" in str(e), e
+
+
+def test_an_action_names_a_vin_no_loaded_car_has_by_its_last_four_only():
+    """Home Assistant logs a failed action's error, and the VIN was the
+    owner's own or one typed close to it."""
+    from test_platform_commands import _need_ha
+    _need_ha()
+    from homeassistant.exceptions import ServiceValidationError
+    from test_init_lifecycle import _FakeApi, _mod, _service
+    m = _mod()
+    for given, named in (("L6T00000000000099", "...0099"), ("ABCD", "***")):
+        _, run = _service(m, {"e1": {"vin": FAKE_VIN, "api": _FakeApi()}},
+                          {"service_id": "RCT", "vin": given})
+        try:
+            run()
+        except ServiceValidationError as e:
+            assert str(e) == f"No configured Geely vehicle with VIN {named}", str(e)
+        else:
+            raise AssertionError(f"an unknown VIN {given!r} did not fail")

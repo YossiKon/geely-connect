@@ -238,9 +238,10 @@ def _hf_request(method: str, path: str, *, query: str = "", body: bytes = b"",
     new app's own HF client (HFOkHttpClientUtil.RequestInterceptor + SignUtil).
 
     An error built from the answer leaves out the JWT and the VIN this call
-    sent, and each of `hide` (see hide_values).
+    sent, the VIN in any case (AnyCase), and each of `hide` (see
+    hide_values).
     """
-    hide = (*hide, token, vin)
+    hide = (*hide, token, AnyCase(vin or ""))
     nonce = _make_nonce()
     ts_ms = str(int(time.time() * 1000))
     headers = {

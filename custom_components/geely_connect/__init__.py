@@ -1222,6 +1222,9 @@ def _register_debug_service(hass: HomeAssistant) -> None:
         hass.data order is entry-setup order, so picking the first would send a
         lock or window command to whichever car happened to load first, and
         that can change across restarts.
+
+        A VIN no loaded car has is named by its last four characters only,
+        in an error Home Assistant logs.
         """
         loaded = list((hass.data.get(DOMAIN) or {}).items())
         if not loaded:
@@ -1241,7 +1244,8 @@ def _register_debug_service(hass: HomeAssistant) -> None:
             chosen = next((kv for kv in loaded if kv[1].get("vin") == target_vin), None)
             if chosen is None:
                 raise ServiceValidationError(
-                    f"No configured Geely vehicle with VIN {target_vin}"
+                    "No configured Geely vehicle with VIN "
+                    f"{geely_api._mask_tail(target_vin)}"
                 )
             return chosen
         if len(loaded) > 1:
