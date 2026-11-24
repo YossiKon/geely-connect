@@ -700,14 +700,25 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                                if self._reauth_entry is not None else None)
                     if not raw or (own_vin is not None and not any(
                             _normalized_vin(vehicle_vin(v)) == own_vin for v in raw)):
-                        try:
+                        if not raw:
+                            # The new garage is the only one: its failure is
+                            # this step's, worded by the handlers below as it
+                            # always was - a refusal or a server out of reach,
+                            # not "no vehicles".
                             bff = await self.hass.async_add_executor_job(
                                 client.list_vehicles_bff)
-                        except Exception as e:  # noqa: BLE001 - best-effort extra garage
-                            _LOGGER.debug(
-                                "new-platform garage read failed (%s: %s)",
-                                type(e).__name__, self.without_secrets(e))
-                            bff = []
+                        else:
+                            try:
+                                bff = await self.hass.async_add_executor_job(
+                                    client.list_vehicles_bff)
+                            except Exception as e:  # noqa: BLE001 - an extra garage
+                                # A warning, which a default install shows: the
+                                # choice is made from the other garage alone.
+                                _LOGGER.warning(
+                                    "new-platform garage read failed (%s: %s); "
+                                    "choosing from the old-platform garage",
+                                    type(e).__name__, self.without_secrets(e))
+                                bff = []
                         if bff:
                             raw = [*raw, *bff]
                             _LOGGER.info(

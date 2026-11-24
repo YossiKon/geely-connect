@@ -247,10 +247,11 @@ def test_reauth_keeps_legacy_candidates_when_new_garage_is_also_populated():
     assert client.probes == []
 
 
-def test_failing_new_garage_read_is_treated_as_no_extra_records():
-    """A failing ms-app-bff read must not abort re-auth with invalid_credentials
-    or network_unreachable; legacy records remain available and errors stay
-    scrubbed at debug without a traceback."""
+def test_a_failing_new_garage_read_is_set_aside_only_beside_an_old_garage():
+    """Beside a non-empty old-platform garage, a failing ms-app-bff read does
+    not stop the re-auth: the old garage's cars stay on offer, and the
+    failure is a scrubbed warning with no traceback. With no old garage the
+    new one is the only one, and its failure stops the step as on main."""
     from test_config_flow_error_text import _captured
 
     for err_factory in (
@@ -265,18 +266,32 @@ def test_failing_new_garage_read_is_treated_as_no_extra_records():
         assert picker["step_id"] == "zeekr_pick", picker
         assert client.bff_calls == 1
         assert all(r.exc_info is None for r in log.records), log.lines
-        debug_lines = [line for r, line in zip(log.records, log.lines)
-                       if r.levelno == logging.DEBUG
-                       and line.startswith("new-platform garage read failed (")]
-        assert len(debug_lines) == 1, log.lines
-        assert FAKE_VIN not in debug_lines[0], debug_lines[0]
-        assert "mock-at" not in debug_lines[0], debug_lines[0]
+        # A warning, which a default install shows: the choice is made
+        # from the old-platform garage alone.
+        warned = [line for r, line in zip(log.records, log.lines)
+                  if r.levelno == logging.WARNING
+                  and line.startswith("new-platform garage read failed (")]
+        assert len(warned) == 1, log.lines
+        assert FAKE_VIN not in warned[0], warned[0]
+        assert "mock-at" not in warned[0], warned[0]
         res = asyncio.run(flow.async_step_zeekr_pick({"vin": FAKE_VIN}))
         assert res["reason"] == "reauth_successful", res
 
-    # When both garages are empty / failing, show no_vehicles (not bad password).
-    cf, flow, entry, client = _setup(vins=[])
-    client.bff = cf.ZeekrApiError("bff unavailable")
+    # With no old-platform garage the new one is the only one, and its
+    # failure is the step's, as on main: a refusal reads as one, a server
+    # out of reach as that - never as "no vehicles", which sends the owner
+    # to link a car that is linked.
+    for err_factory, key in (
+            (lambda cf: cf.ZeekrApiError("bff unavailable"), "invalid_credentials"),
+            (lambda cf: TimeoutError("timed out"), "network_unreachable")):
+        cf, flow, entry, client = _setup(vins=[])
+        client.bff = err_factory(cf)
+        with _captured(cf._LOGGER) as log:
+            res = _login(cf, flow, client)
+        assert res["type"] == "form" and res["errors"] == {"base": key}, res
+        assert any(r.levelno >= logging.WARNING for r in log.records), log.lines
+    # Both garages empty: no vehicles.
+    cf, flow, entry, client = _setup(vins=[], bff=[])
     res = _login(cf, flow, client)
     assert res["type"] == "form" and res["errors"] == {"base": "no_vehicles"}, res
 
