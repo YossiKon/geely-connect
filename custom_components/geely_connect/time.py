@@ -241,7 +241,9 @@ class GeelyScheduledChargingTime(CoordinatorEntity, TimeEntity):
                       self._api.without_secrets(redact(resp)))
         self._optimistic_value = value
         self._optimistic_until = time_mod.time() + 60
-        window.update(startTime=start, endtime=end, duration=window_length(start, end))
+        current = slot_2_window(self._sched())
+        if current is not None:
+            current.update(startTime=start, endtime=end, duration=window_length(start, end))
         note_schedule_write(self.coordinator)
         self.async_write_ha_state()
         schedule_refresh(self._hass, self.coordinator, 15, 20, 20)

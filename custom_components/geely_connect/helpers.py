@@ -425,6 +425,9 @@ def note_schedule_intent(coordinator, on: bool, until: float) -> None:
     coordinator.geely_schedule_intent = (bool(on), float(until))
 
 
+_SCHEDULE_READ_GUARD_S = 15
+
+
 def note_schedule_write(coordinator) -> None:
     """Protect the locally written window from an early charge-server read.
 
@@ -436,15 +439,27 @@ def note_schedule_write(coordinator) -> None:
     coordinator.geely_schedule_written_at = time.monotonic()
 
 
+def schedule_read_due(coordinator, now: float) -> bool:
+    """Whether a discarded schedule read owes a catch-up read on this poll."""
+    if not getattr(coordinator, "geely_schedule_refetch", False):
+        return False
+    written_at = getattr(coordinator, "geely_schedule_written_at", None)
+    return written_at is not None and now >= written_at + _SCHEDULE_READ_GUARD_S
+
+
 def schedule_read_result(coordinator, result: dict, read_started: float) -> dict:
     """Choose server truth, except for a read that could predate our write."""
     written_at = getattr(coordinator, "geely_schedule_written_at", None)
     current = (coordinator.data or {}).get("_scheduled_charging")
     if (written_at is not None and isinstance(current, dict)
-            and read_started < written_at + 15):
+            and read_started < written_at + _SCHEDULE_READ_GUARD_S):
         # Read the current copy here: a command may have patched it while
         # this poll awaited the charging GET or a later secondary read.
+        # Ask the next poll past the guard to re-read the schedule so a
+        # discarded read does not leave the local copy for a whole cycle.
+        coordinator.geely_schedule_refetch = True
         return current
+    coordinator.geely_schedule_refetch = False
     return result
 
 

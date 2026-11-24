@@ -86,7 +86,7 @@ from .const import (
 )
 from .helpers import (api_can_send, api_reads_charge_server, api_serves,
                       password_decrypt, vehicle_metadata, schedule_refresh,
-                      speed_is_stale, schedule_read_result)
+                      speed_is_stale, schedule_read_due, schedule_read_result)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -943,9 +943,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # only every few polls otherwise, the block would hand the switch back
         # the reading from before the press. A read, never a wake.
         state_wanted = monotonic() < poll_state.get("state_until", 0.0)
-        if (forced or charging or was_charging or state_wanted
-                or (cyc - 1) % _SECONDARY_EVERY == 0):
-            if serves_state:
+        secondary_due = (forced or charging or was_charging or state_wanted
+                         or (cyc - 1) % _SECONDARY_EVERY == 0)
+        if secondary_due or (api_reads_charge_server(api)
+                             and schedule_read_due(coordinator, monotonic())):
+            if secondary_due and serves_state:
                 try:
                     state_resp = await _call_with_retry(api.vehicle_status_state)
                     if state_resp.get("code") in _SUCCESS_CODES and isinstance(state_resp.get("data"), dict):
