@@ -48,7 +48,7 @@
       },
       "zeekr_pick": {
         "title": "Choisir un véhicule",
-        "description": "Votre compte comporte plusieurs véhicules. Choisissez celui à ajouter.",
+        "description": "Choisissez le véhicule que cette entrée doit utiliser. Lors d'une réauthentification ou d'une reconfiguration, confirmez le véhicule avant de passer à un autre VIN.",
         "data": {
           "vin": "Véhicule"
         }

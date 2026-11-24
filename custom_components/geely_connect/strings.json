@@ -48,7 +48,7 @@
       },
       "zeekr_pick": {
         "title": "Pick a vehicle",
-        "description": "Your account has multiple vehicles. Pick the one to add.",
+        "description": "Pick the vehicle this entry should use. During re-authentication or reconfiguration, confirm the vehicle before switching to a different VIN.",
         "data": {
           "vin": "Vehicle"
         }

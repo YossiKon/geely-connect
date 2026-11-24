@@ -48,7 +48,7 @@
       },
       "zeekr_pick": {
         "title": "Escolha um veículo",
-        "description": "Sua conta possui vários veículos. Escolha qual deseja adicionar.",
+        "description": "Escolha o veículo que esta entrada deve usar. Durante a reautenticação ou reconfiguração, confirme o veículo antes de mudar para um VIN diferente.",
         "data": {
           "vin": "Chassis"
         }
