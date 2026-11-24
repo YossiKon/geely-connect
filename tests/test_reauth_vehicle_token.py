@@ -296,6 +296,22 @@ def test_a_failing_new_garage_read_is_set_aside_only_beside_an_old_garage():
     assert res["type"] == "form" and res["errors"] == {"base": "no_vehicles"}, res
 
 
+def test_the_warning_leaves_out_the_vin_of_the_entry_being_reauthenticated():
+    """The new garage is read because the entry's own car is not in the old
+    one, so the VINs that garage listed do not cover it, and the warning is
+    shown on a default install."""
+    from test_config_flow_error_text import _captured
+
+    cf, flow, entry, client = _setup(vins=[FAKE_VIN])
+    own = entry.data["vin"]
+    assert own != FAKE_VIN
+    client.bff = TimeoutError(f"timed out reading {own}")
+    with _captured(cf._LOGGER) as log:
+        _login(cf, flow, client)
+    assert any("new-platform garage read failed" in line for line in log.lines), log.lines
+    assert all(own not in line for line in log.lines), log.lines
+
+
 def test_normalized_identity_does_not_make_malformed_vins_valid():
     for vin in (FAKE_VIN + "\n", " " + FAKE_VIN, FAKE_VIN + "\r\nInjected: value"):
         cf, flow, entry, client = _setup(vins=[{"vehicleInfo": {"vin": vin}}])
