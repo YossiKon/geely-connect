@@ -286,12 +286,13 @@ def test_each_quoter_writes_its_own_form_and_each_is_hidden():
         assert "fake-o" not in masked and "en-0001" not in masked, masked
 
 
-def test_an_address_is_hidden_in_any_case_and_nothing_else_is():
+def test_an_address_is_hidden_in_any_case_and_a_token_is_not():
     """The original platform keeps the address as it was typed and the new
     one lower-cases it, and a gateway may name it lower-cased or as the
     account was registered. An address - a value with an @ in it - is
     matched in any case and masked as it stands in the text. A token in
-    another case is another value, and is left."""
+    another case is another value, and is left; of the rest, only a VIN its
+    holder marks is matched in any case (test_vin_any_case)."""
     api = load("api")
     typed = "Owner.Name+cars@Example.COM"
     for held, said in ((typed, typed.lower()), (typed.lower(), typed),

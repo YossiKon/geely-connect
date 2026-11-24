@@ -66,7 +66,7 @@ from urllib.parse import urlparse, parse_qsl, quote
 
 # The value scrub lives in api.py, which the original platform's client
 # shares; it is imported here under its own names.
-from .api import _HIDE_MIN_LEN, _mask, hide_values, redact  # noqa: F401
+from .api import _HIDE_MIN_LEN, AnyCase, _mask, hide_values, redact  # noqa: F401
 from .zeekr_regions import ZeekrRegion
 
 _LOGGER = logging.getLogger(__name__)
@@ -817,12 +817,12 @@ class ZeekrClient:
     def hidden(self) -> tuple:
         """What error text built here leaves out (hide_values): the vehicle
         token in use - a probe's candidate too, since the probe sets each one
-        here - the VIN, the session tokens, the account's email address and
-        its user id, which the old route's reads and commands send. A
-        transport reads it as its call goes out, so the values are the ones
-        the call sent even if another sign-in replaces the session meanwhile;
-        the sign-in that replaces one keeps what it sent as well
-        (_ms_user_auth_login).
+        here - the VIN, marked to be matched in any case (AnyCase), the
+        session tokens, the account's email address and its user id, which
+        the old route's reads and commands send. A transport reads it as its
+        call goes out, so the values are the ones the call sent even if
+        another sign-in replaces the session meanwhile; the sign-in that
+        replaces one keeps what it sent as well (_ms_user_auth_login).
 
         The user id was left out at first as short enough to stand inside
         other text. hide_values leaves anything under six characters, and the
@@ -835,8 +835,8 @@ class ZeekrClient:
         between them, or an id that is a code, taken away, leaves a dead
         session where there was none. No gateway answer seen words a code
         that way."""
-        return (self.enc_vin, self.vin, self.access_token, self.refresh_token,
-                self.hf_token, self.email, self.user_id)
+        return (self.enc_vin, AnyCase(self.vin or ""), self.access_token,
+                self.refresh_token, self.hf_token, self.email, self.user_id)
 
     def without_secrets(self, text: Any) -> str:
         """`text` with what hidden() names taken out, for a caller that words

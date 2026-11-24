@@ -208,16 +208,18 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         VINs the garage listed and the VIN of the entry being
         re-authenticated - its car may be in neither garage the flow read -
         and the new platform's session tokens with what its logged-in
-        client hides itself. Not that platform's
-        password: it goes out RSA-encrypted, so no answer can repeat it, and
-        masking it wherever it stood in other words would point at a
-        password that is a common word."""
+        client hides itself. The VINs in any case (AnyCase): the flow takes
+        one that differs only in letter case for the same car. Not that
+        platform's password: it goes out RSA-encrypted, so no answer can
+        repeat it, and masking it wherever it stood in other words would
+        point at a password that is a common word."""
         held = getattr(self._zeekr_client, "hidden", None)
         entry_vin = (self._reauth_entry.data.get(CONF_VIN)
                      if self._reauth_entry is not None else None)
+        vins = [geely_api.AnyCase(vin) for vin in (*self._vins, entry_vin) if vin]
         return geely_api.hide_values(str(text), (
             self._email, self._otp, self._cidpsso_token, self._user_id,
-            self._idfa, self._idfv, *self._vins, entry_vin,
+            self._idfa, self._idfv, *vins,
             *(self._zeekr_tokens or ()), self._zeekr_hf_token,
             *(held() if callable(held) else ()),
         ))

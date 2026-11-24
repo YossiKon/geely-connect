@@ -472,10 +472,11 @@ class ZeekrAdapter(CommandTrail):
     def without_secrets(self, text: Any) -> str:
         """`text` with what the client's error text leaves out
         (ZeekrClient.hidden) masked and the VIN shortened to its last four
-        characters, for the trail and for a caller that words an error of its
-        own around one from here - the coordinator's warning, UpdateFailed, an
-        action's error. An error raised outside the client (a socket's, a
-        parser's) was never scrubbed where it was raised."""
+        characters, in any case (_shorten_vin), for the trail and for a
+        caller that words an error of its own around one from here - the
+        coordinator's warning, UpdateFailed, an action's error. An error
+        raised outside the client (a socket's, a parser's) was never scrubbed
+        where it was raised."""
         vin = self._client.vin
         out = hide_values(str(text), [v for v in self._client.hidden() if v != vin])
         return _shorten_vin(out, vin)

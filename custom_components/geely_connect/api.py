@@ -298,6 +298,18 @@ def _is_auth_failure(resp: dict) -> bool:
 _HIDE_MIN_LEN = 6
 
 
+class AnyCase(str):
+    """A value hide_values matches in any case, as it does an address: a
+    VIN, marked by whoever holds one. A garage may write a VIN in either
+    case, and setup takes one that differs only in letter case for the same
+    car, keeping the spelling the entry stored (#126), so a gateway can name
+    the car in a spelling no copy held here has. No value is taken for a
+    VIN by its shape: what setup accepts as one, 8 to 20 letters and
+    digits, could as well be a user id, an app id or a short token."""
+
+    __slots__ = ()
+
+
 def _mask(value: str) -> str:
     """`value` masked character for character: a letter, digit or underscore
     becomes an X, anything else an asterisk."""
@@ -364,11 +376,14 @@ def hide_values(text: str, values: Iterable[Any]) -> str:
     writes as SS is not matched - and is masked as it stands in the text,
     so the mask keeps its shape. A letter a bytes form writes as an escape
     is matched in its own case only: an address goes in no header, and a
-    transport that refuses one quotes it as it was sent. No other value is
-    matched in another case: a token, a VIN or an id in another case is
-    another value, and one matched in any case could be a word. A password
-    is never among the values: masked by value, one that is a word would be
-    pointed at wherever the word stood."""
+    transport that refuses one quotes it as it was sent. A VIN marked
+    AnyCase is matched in any case the same way, in every text, and so is a
+    plain copy of it among the values: a gateway may name the car in
+    another case than the one its holder keeps. No other value is matched
+    in another case: a token or an id in another case is another value, and
+    one matched in any case could be a word. A password is never among the
+    values: masked by value, one that is a word would be pointed at
+    wherever the word stood."""
     return value_mask(values)(text)
 
 
@@ -376,14 +391,18 @@ def value_mask(values: Iterable[Any]) -> Callable[[str], str]:
     """hide_values for many texts: what the returned function is given comes
     back with each of `values` masked as hide_values masks it, the forms and
     their masks worked out once rather than for every text - the diagnostics
-    report masks each of its thousands of strings. An address's forms are
-    matched by a case-blind pattern, in their place in the order, and only
-    in a text with an @ in it: most of a report's strings have none."""
-    forms = {form for v in values if v and len(str(v)) >= _HIDE_MIN_LEN
+    report masks each of its thousands of strings. The forms of an address
+    and of a marked VIN (AnyCase) are matched by a case-blind pattern, in
+    their place in the order; an address's only in a text with an @ in it,
+    since most of a report's strings have none, and nothing can match one
+    in a text without one."""
+    values = [v for v in values if v and len(str(v)) >= _HIDE_MIN_LEN]
+    forms = {form for v in values for form in _quoted_forms(str(v))}
+    blind = {form for v in values if isinstance(v, AnyCase)
              for form in _quoted_forms(str(v))}
     steps: list[tuple[str, str | None, re.Pattern | None]] = []
     for form in sorted(forms, key=lambda f: (-len(f), f)):
-        if "@" in form:
+        if "@" in form or form in blind:
             steps.append((form, None, re.compile(re.escape(form), re.IGNORECASE)))
         else:
             steps.append((form, _mask(form), None))
@@ -393,23 +412,30 @@ def value_mask(values: Iterable[Any]) -> Callable[[str], str]:
         for form, mask, any_case in steps:
             if any_case is None:
                 text = text.replace(form, mask)
-            elif has_address:
+            elif has_address or "@" not in form:
                 text = any_case.sub(_mask_match, text)
         return text
     return hide
 
 
 def _mask_match(match: re.Match) -> str:
-    """A case-blind match of an address, masked as it stands in the text."""
+    """A case-blind match, masked as it stands in the text."""
     return _mask(match.group())
 
 
 def _shorten_vin(text: Any, vin: str) -> Any:
     """`text` with `vin` shortened to its last four characters, as the
-    command trail shows it; anything that is not text comes back as it was."""
-    if vin and isinstance(text, str) and vin in text:
-        return text.replace(vin, f"...{vin[-4:]}")
+    command trail shows it, wherever it stands in any case - as hide_values
+    matches a VIN marked AnyCase - and kept as it stands there; anything
+    that is not text comes back as it was."""
+    if vin and isinstance(text, str):
+        return re.sub(re.escape(vin), _shortened, text, flags=re.IGNORECASE)
     return text
+
+
+def _shortened(match: re.Match) -> str:
+    """A VIN in the text, shortened as _shorten_vin shortens it."""
+    return f"...{match.group()[-4:]}"
 
 
 def _check_control_resp(resp: dict, vin: str = "",
@@ -925,12 +951,9 @@ class CommandTrail:
     COMMAND_TRAIL_SIZE = 25
 
     def _note_text(self, text: Any) -> str:
-        """One line of error text, with this car's VIN taken out of it."""
-        out = str(text)
-        vin = getattr(self, "vin", "") or ""
-        if vin and vin in out:
-            out = out.replace(vin, f"...{vin[-4:]}")
-        return out[:160]
+        """One line of error text, with this car's VIN shortened in it, in
+        any case (_shorten_vin)."""
+        return _shorten_vin(str(text), getattr(self, "vin", "") or "")[:160]
 
     def _recorded(self, label: str, detail: Any, send):
         """Run one remote command and keep a note of how it went.

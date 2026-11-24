@@ -14,9 +14,10 @@ from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .api import _IDENTIFYING_KEYS, _SECRET_KEYS, _norm_key, hide_values, redact, value_mask
+from .api import _IDENTIFYING_KEYS, _SECRET_KEYS, AnyCase, _norm_key, hide_values, redact, value_mask
 from .const import (
     CONF_PLATFORM,
+    CONF_VIN,
     CONF_ZEEKR_ENC_VIN,
     DEFAULT_PLATFORM,
     DOMAIN,
@@ -138,8 +139,16 @@ def _held(entry: ConfigEntry, api: Any) -> tuple:
     can renew the session (the Geely EM adapter's _authed_charge), and so
     can a poll meanwhile, so a token one reading names may be gone by the
     next. Not a password: masked by value, a password that is a word would
-    be pointed at wherever that word stands in the report."""
+    be pointed at wherever that word stands in the report.
+
+    The entry's VIN is masked in any case (AnyCase): a gateway may name the
+    car in another case than the entry keeps, which setup takes for the
+    same car. The original platform's client shortens its VIN rather than
+    hiding it, so the entry's copy is the only one the report has there."""
     held = [*_under_masked_names(entry.data), *_under_masked_names(entry.options)]
+    vin = entry.data.get(CONF_VIN)
+    if isinstance(vin, str) and vin:
+        held.append(AnyCase(vin))
     hidden = getattr(api, "hidden", None)
     if callable(hidden):
         try:
