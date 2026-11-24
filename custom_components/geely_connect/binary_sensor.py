@@ -266,7 +266,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
 
 
 class GeelyConnectivity(CoordinatorEntity, BinarySensorEntity):
-    """On when the last poll succeeded - a live 'can we reach the car' signal."""
+    """On when the last status GET succeeded - off during data grace too."""
 
     _attr_has_entity_name = True
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
@@ -283,7 +283,8 @@ class GeelyConnectivity(CoordinatorEntity, BinarySensorEntity):
 
     @property
     def is_on(self) -> bool:
-        return bool(self.coordinator.last_update_success)
+        return bool(self.coordinator.last_update_success and getattr(
+            self.coordinator, "geely_status_success", True))
 
     @property
     def available(self) -> bool:
