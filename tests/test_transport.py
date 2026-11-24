@@ -81,18 +81,80 @@ def test_pin_store_round_trips_and_migrates_the_old_list_format():
 def test_an_unreadable_pin_store_names_no_vin_in_its_error():
     """open() puts the file name into the OSError, and the store sits in a
     directory named after the VIN. The error text reaches the log at ERROR and
-    the re-authentication card, so the OS error is masked like the path."""
-    import os, tempfile
+    the re-authentication card, so the OS error is masked like the path and its
+    cause is dropped so a formatted traceback does not print it raw."""
+    import os, tempfile, traceback
     from conftest import FAKE_VIN
     p = os.path.join(tempfile.mkdtemp(), FAKE_VIN, "server_pins.json")
     os.makedirs(p)                       # a directory where the file should be
     try:
         api._load_pin_store(p)
     except api.GeelyTLSPinError as e:
+        rendered = traceback.format_exc()
         assert FAKE_VIN not in str(e), str(e)
+        assert FAKE_VIN not in rendered, rendered
+        assert e.__cause__ is None and e.__suppress_context__
         assert "could not be read" in str(e)
     else:
         raise AssertionError("a directory was accepted as a pin store")
+
+
+def test_an_unpersistable_first_use_pin_names_no_vin_in_its_traceback():
+    """First-use pin persistence fails closed and drops the raw OSError cause
+    so formatted tracebacks do not print the unmasked VIN path either."""
+    import os, ssl, tempfile, traceback
+    from unittest.mock import patch
+    from conftest import FAKE_VIN
+
+    class _RawSock:
+        def close(self):
+            pass
+
+    class _PinSock:
+        def __init__(self):
+            self.closed = False
+
+        def getpeercert(self, binary_form=False):
+            return b"NEWKEY"
+
+        def close(self):
+            self.closed = True
+
+    class _Ctx:
+        def __init__(self, outcome):
+            self._outcome = outcome
+
+        def wrap_socket(self, raw, server_hostname=None):
+            if isinstance(self._outcome, Exception):
+                raise self._outcome
+            return self._outcome
+
+    verify_err = ssl.SSLCertVerificationError(20, "unable to get local issuer certificate")
+    verify_err.verify_code = 20
+    verify_err.verify_message = "unable to get local issuer certificate"
+    pin_sock = _PinSock()
+    p = os.path.join(tempfile.mkdtemp(), FAKE_VIN, "server_pins.json")
+
+    def _cannot_save(path, store):
+        raise PermissionError(13, "Permission denied", path)
+
+    with patch.object(api.socket, "create_connection", return_value=_RawSock()), \
+            patch.object(api, "_strict_ctx", return_value=_Ctx(verify_err)), \
+            patch.object(api, "_pinning_ctx", return_value=_Ctx(pin_sock)), \
+            patch.object(api, "_spki_sha256_b64", side_effect=lambda d: d.decode()), \
+            patch.object(api, "_BUNDLED_TLS_PINS", {}), \
+            patch.object(api, "_save_pin_store", side_effect=_cannot_save):
+        try:
+            api._secure_tls_connect("apis.ecloudeu.com", 443, pin_path=p)
+        except api.GeelyTLSPinError as e:
+            rendered = traceback.format_exc()
+            assert FAKE_VIN not in str(e), str(e)
+            assert FAKE_VIN not in rendered, rendered
+            assert e.__cause__ is None and e.__suppress_context__
+            assert "persist" in str(e)
+        else:
+            raise AssertionError("continued with a pin that was never saved")
+    assert pin_sock.closed
 
 
 # ------------------------------------------------------------- injection ---

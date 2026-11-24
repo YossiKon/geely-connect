@@ -1784,7 +1784,7 @@ def test_removal_shreds_the_key_directory_but_only_inside_our_storage():
         hass = _Hass()
         hass.config = types.SimpleNamespace(
             path=lambda *p: os.path.join(root, *p))
-        vin_dir = os.path.join(root, ".storage", "geely_connect", "vin1")
+        vin_dir = os.path.join(root, ".storage", "geely_connect", FAKE_VIN)
         os.makedirs(vin_dir)
         open(os.path.join(vin_dir, "key.pem"), "w").write("KEY")
         entry = types.SimpleNamespace(
@@ -1812,22 +1812,359 @@ def test_removal_shreds_the_key_directory_but_only_inside_our_storage():
 
 
 def test_a_failed_shred_warns_instead_of_blocking_the_removal():
+    import io
     m = _mod()
     with tempfile.TemporaryDirectory() as root:
         hass = _Hass()
         hass.config = types.SimpleNamespace(
             path=lambda *p: os.path.join(root, *p))
-        vin_dir = os.path.join(root, ".storage", "geely_connect", "vin1")
+        vin_dir = os.path.join(root, ".storage", "geely_connect", FAKE_VIN)
         os.makedirs(vin_dir)
         entry = types.SimpleNamespace(
             entry_id="e1", data={"cert_path": os.path.join(vin_dir, "cert.pem")})
+        tried = []
 
         def _boom(*a, **k):
-            raise OSError("file locked")
+            tried.append(a)
+            raise PermissionError(13, "denied", vin_dir)
 
-        with _Patched(m, shutil=types.SimpleNamespace(rmtree=_boom), ir=_ir_module()):
-            asyncio.run(m.async_remove_entry(hass, entry))
+        stream = io.StringIO()
+        handler = logging.StreamHandler(stream)
+        m._LOGGER.addHandler(handler)
+        old_level = m._LOGGER.level
+        m._LOGGER.setLevel(logging.INFO)
+        try:
+            with _Patched(m, shutil=types.SimpleNamespace(rmtree=_boom), ir=_ir_module()):
+                asyncio.run(m.async_remove_entry(hass, entry))
+        finally:
+            m._LOGGER.removeHandler(handler)
+            m._LOGGER.setLevel(old_level)
+        assert tried, "rmtree was never attempted"
         assert os.path.exists(vin_dir), "the failure path must not half-delete"
+        text = stream.getvalue()
+        assert "Removed stored" not in text, text
+        assert "could not remove" in text, text
+        assert "denied" in text, text
+        assert FAKE_VIN not in text, text
+        # A short 8-char VIN (below mask_path's 11-char threshold) must not
+        # leak through the masked OS reason either.
+        short_vin = "VIN12345"
+        short_dir = os.path.join(root, ".storage", "geely_connect", short_vin)
+        os.makedirs(short_dir)
+        short_entry = types.SimpleNamespace(
+            entry_id="e2", data={"cert_path": os.path.join(short_dir, "cert.pem")})
+        stream2 = io.StringIO()
+        handler2 = logging.StreamHandler(stream2)
+        m._LOGGER.addHandler(handler2)
+        m._LOGGER.setLevel(logging.INFO)
+        try:
+            with _Patched(m, shutil=types.SimpleNamespace(
+                rmtree=lambda *a, **k: (_ for _ in ()).throw(
+                    OSError(30, "Read-only file system", short_dir))),
+                    ir=_ir_module()):
+                asyncio.run(m.async_remove_entry(hass, short_entry))
+        finally:
+            m._LOGGER.removeHandler(handler2)
+            m._LOGGER.setLevel(old_level)
+        text2 = stream2.getvalue()
+        assert "Read-only file system" in text2, text2
+        assert short_vin not in text2, text2
+
+
+def test_silent_partial_deletion_and_missing_child_never_claim_success():
+    from unittest.mock import patch
+    m = _mod()
+    for error in (None, FileNotFoundError("missing child")):
+        with tempfile.TemporaryDirectory() as root:
+            hass = _Hass()
+            hass.config = types.SimpleNamespace(
+                path=lambda *p: os.path.join(root, *p))
+            folder = hass.config.path(".storage", "geely_connect", FAKE_VIN)
+            os.makedirs(folder)
+            entry = types.SimpleNamespace(entry_id="e1", data={"vin": FAKE_VIN})
+
+            def incomplete(*args, **kwargs):
+                if error:
+                    raise error
+
+            with _Patched(m, ir=_ir_module()), \
+                    patch.object(m.shutil, "rmtree", incomplete), \
+                    patch.object(m._LOGGER, "info") as info, \
+                    patch.object(m._LOGGER, "warning") as warning:
+                asyncio.run(m.async_remove_entry(hass, entry))
+            assert not info.called
+            assert warning.called
+            rendered = warning.call_args[0][0] % warning.call_args[0][1:]
+            assert "legacy material remains on disk" in rendered, rendered
+            assert FAKE_VIN not in rendered, rendered
+
+
+def test_removal_of_absent_key_directory_stays_quiet():
+    from unittest.mock import patch
+    m = _mod()
+    with tempfile.TemporaryDirectory() as root:
+        hass = _Hass()
+        hass.config = types.SimpleNamespace(
+            path=lambda *p: os.path.join(root, *p))
+        entry = types.SimpleNamespace(
+            entry_id="e1", data={"vin": FAKE_VIN, "platform": "zeekr"})
+        with _Patched(m, ir=_ir_module()), \
+                patch.object(m._LOGGER, "info") as info, \
+                patch.object(m._LOGGER, "warning") as warning:
+            asyncio.run(m.async_remove_entry(hass, entry))
+        assert not info.called
+        assert not warning.called
+
+
+def test_changed_vin_migration_retains_original_vin_until_verified_removal():
+    from test_zeekr_config_flow import _flow
+    m = _mod()
+    with tempfile.TemporaryDirectory() as root, \
+            tempfile.TemporaryDirectory() as restored_root:
+        old = os.path.join(root, ".storage", "geely_connect", FAKE_VIN)
+        os.makedirs(old)
+        with open(os.path.join(old, "key.pem"), "w") as f:
+            f.write("FAKE KEY")
+        entry = types.SimpleNamespace(entry_id="e1", data={
+            "vin": FAKE_VIN,
+            "cert_path": os.path.join(old, "cert.pem"),
+            "key_path": os.path.join(old, "key.pem"),
+            "email": "test@example.invalid",
+        }, options={})
+        _, flow = _flow([entry])
+        flow.hass.config = types.SimpleNamespace(path=lambda *p: os.path.join(root, *p))
+        flow._reauth_entry = entry
+        flow._email = entry.data["email"]
+        flow._user_id = "fake-user"
+        flow._zeekr_tokens = ("fake-access", "fake-refresh")
+        flow._zeekr_hf_token = "fake-hf"
+        result = asyncio.run(flow._finish_zeekr({"vin": "L6T00000000000001"}))
+        assert result["reason"] == "reauth_successful"
+        assert entry.data["vin"] != FAKE_VIN and "cert_path" not in entry.data
+        assert entry.data["legacy_cert_paths"] == [{"vin": FAKE_VIN}]
+        redacted = load("api").redact(entry.data)
+        assert redacted["legacy_cert_paths"] == "***redacted***"
+        assert FAKE_VIN not in str(redacted)
+        diag = load("diagnostics")
+        diag_redacted = diag.async_redact_data(entry.data, diag._REDACT)
+        assert FAKE_VIN not in str(diag_redacted["legacy_cert_paths"])
+        # Rollback to v1.61.0 (redaction knowing only "vin") still masks it.
+        v161_redacted = diag.async_redact_data(entry.data, {"vin"})
+        assert v161_redacted["legacy_cert_paths"] == [{"vin": "**REDACTED**"}]
+        assert FAKE_VIN not in str(v161_redacted)
+        # Rebuilding the target directory from the current storage root survives
+        # a backup restore that moves the HA config directory.
+        restored_old = os.path.join(restored_root, ".storage", "geely_connect", FAKE_VIN)
+        os.makedirs(restored_old)
+        with open(os.path.join(restored_old, "key.pem"), "w") as f:
+            f.write("FAKE KEY")
+        restored_hass = _Hass()
+        restored_hass.config = types.SimpleNamespace(
+            path=lambda *p: os.path.join(restored_root, *p))
+        with _Patched(m, ir=_ir_module()):
+            asyncio.run(m.async_remove_entry(restored_hass, entry))
+        assert not os.path.exists(restored_old)
+        assert os.path.exists(old), "removal must target the current storage root only"
+
+
+def test_migration_handles_legacy_dir_inspection_failure_and_stale_paths():
+    from unittest.mock import patch
+    from test_zeekr_config_flow import _flow
+    with tempfile.TemporaryDirectory() as root:
+        stale = {"vin": FAKE_VIN}
+        entry = types.SimpleNamespace(entry_id="e1", data={
+            "vin": FAKE_VIN,
+            "legacy_cert_paths": [stale],
+            "email": "test@example.invalid",
+        }, options={})
+        cf, flow = _flow([entry])
+        flow.hass.config = types.SimpleNamespace(path=lambda *p: os.path.join(root, *p))
+        flow._reauth_entry = entry
+        flow._email = entry.data["email"]
+        flow._user_id = "fake-user"
+        flow._zeekr_tokens = ("fake-access", "fake-refresh")
+        flow._zeekr_hf_token = "fake-hf"
+        # An unexpected error inspecting legacy storage warns without aborting
+        # and keeps any already-recorded legacy_cert_paths intact.
+        with patch.object(cf, "legacy_material_dirs", side_effect=OSError(f"boom {FAKE_VIN}")), \
+                patch.object(cf._LOGGER, "warning") as warning:
+            result = asyncio.run(flow._finish_zeekr({"vin": "L6T00000000000001"}))
+        assert result["reason"] == "reauth_successful"
+        assert entry.data["legacy_cert_paths"] == [stale]
+        assert warning.called
+        assert FAKE_VIN not in str(warning.call_args)
+        # Once the legacy directory is gone on disk, a subsequent reauth drops
+        # the stale reference instead of carrying a dead entry forward.
+        result = asyncio.run(flow._finish_zeekr({"vin": "L6T00000000000001"}))
+        assert result["reason"] == "reauth_successful"
+        assert "legacy_cert_paths" not in entry.data
+
+
+def test_unsafe_storage_references_are_never_retained_or_deleted():
+    from unittest.mock import patch
+    helpers = load("helpers")
+    with tempfile.TemporaryDirectory() as root:
+        hass = _Hass()
+        hass.config = types.SimpleNamespace(
+            path=lambda *p: os.path.join(root, *p))
+        base = hass.config.path(".storage", "geely_connect")
+        os.makedirs(base)
+        outside = os.path.join(root, "outside")
+        os.makedirs(outside)
+        for bad_item in (
+            3,
+            "relative/cert.pem",
+            os.path.join(base, FAKE_VIN, "cert.pem"),
+            {"vin": "../outside"},
+            {"vin": "short"},
+            {"other": FAKE_VIN},
+            {"vin": f"{FAKE_VIN}\x00"},
+        ):
+            with patch.object(helpers._LOGGER, "warning") as warning:
+                assert helpers.legacy_material_dirs(
+                    hass, {"legacy_cert_paths": [bad_item]}) == [], bad_item
+            assert warning.called, bad_item
+            msg = warning.call_args[0][0] % warning.call_args[0][1:]
+            assert "legacy_cert_paths" in msg and FAKE_VIN not in msg, msg
+        with patch.object(helpers._LOGGER, "warning") as warning:
+            assert helpers.legacy_material_dirs(
+                hass, {"legacy_cert_paths": "not-a-list"}) == []
+        assert warning.called
+        msg = warning.call_args[0][0] % warning.call_args[0][1:]
+        assert "legacy_cert_paths" in msg, msg
+        for bad_path in (
+            os.path.join(outside, "cert.pem"),
+            os.path.join(base, "cert.pem"),
+            3,
+            "relative/cert.pem",
+            os.path.join(base, FAKE_VIN, "unexpected.pem"),
+            os.path.join(base, "short", "cert.pem"),
+            os.path.join(root, "bad\x00dir", FAKE_VIN, "cert.pem"),
+        ):
+            with patch.object(helpers._LOGGER, "warning") as warning:
+                assert helpers.legacy_material_dirs(
+                    hass, {"cert_path": bad_path}) == [], bad_path
+            assert warning.called, bad_path
+            msg = warning.call_args[0][0] % warning.call_args[0][1:]
+            assert "cert_path" in msg and FAKE_VIN not in msg, msg
+        assert helpers.legacy_material_dirs(hass, {"vin": "../outside"}) == []
+
+
+def test_symlinked_storage_directory_is_refused_with_real_symlink():
+    from run import skip
+    helpers = load("helpers")
+    m = _mod()
+    with tempfile.TemporaryDirectory() as root:
+        hass = _Hass()
+        hass.config = types.SimpleNamespace(
+            path=lambda *p: os.path.join(root, *p))
+        base = hass.config.path(".storage", "geely_connect")
+        os.makedirs(base)
+        outside = os.path.join(root, "outside")
+        os.makedirs(outside)
+        open(os.path.join(outside, "keep.txt"), "w").write("KEEP")
+        link = os.path.join(base, FAKE_VIN)
+        try:
+            os.symlink(outside, link)
+        except OSError as exc:
+            skip(f"os.symlink unavailable: {exc}")
+        for data in (
+            {"vin": FAKE_VIN},
+            {"cert_path": os.path.join(link, "cert.pem")},
+            {"legacy_cert_paths": [{"vin": FAKE_VIN}]},
+        ):
+            assert helpers.legacy_material_dirs(hass, data) == [], data
+            with _Patched(m, ir=_ir_module()):
+                asyncio.run(m.async_remove_entry(
+                    hass, types.SimpleNamespace(entry_id="e1", data=data)))
+        assert os.path.exists(os.path.join(outside, "keep.txt"))
+
+
+def test_symlink_guard_refuses_linked_directory_without_os_symlink():
+    """Cross-platform coverage of the islink guard even on Windows where
+    os.symlink raises WinError 1314 without elevated privileges."""
+    from unittest.mock import patch
+    helpers = load("helpers")
+    with tempfile.TemporaryDirectory() as root:
+        hass = _Hass()
+        hass.config = types.SimpleNamespace(
+            path=lambda *p: os.path.join(root, *p))
+        vin_dir = hass.config.path(".storage", "geely_connect", FAKE_VIN)
+        os.makedirs(vin_dir)
+        target = os.path.realpath(vin_dir)
+        real_islink = os.path.islink
+        with patch.object(helpers.os.path, "islink",
+                          side_effect=lambda p: p == target or real_islink(p)), \
+                patch.object(helpers._LOGGER, "warning") as warning:
+            assert helpers.legacy_material_dirs(
+                hass, {"legacy_cert_paths": [{"vin": FAKE_VIN}]}) == []
+        assert warning.called
+        msg = warning.call_args[0][0] % warning.call_args[0][1:]
+        assert "legacy_cert_paths" in msg and FAKE_VIN not in msg, msg
+
+
+def test_outside_cert_path_with_matching_vin_never_deletes_storage_dir():
+    """An outside cert_path whose parent folder happens to share a valid VIN
+    with a real directory inside storage must never resolve to or delete the
+    storage directory; both realpath checks are guarded individually too."""
+    from unittest.mock import patch
+    helpers = load("helpers")
+    m = _mod()
+    with tempfile.TemporaryDirectory() as root:
+        hass = _Hass()
+        hass.config = types.SimpleNamespace(
+            path=lambda *p: os.path.join(root, *p))
+        in_storage = hass.config.path(".storage", "geely_connect", FAKE_VIN)
+        os.makedirs(in_storage)
+        open(os.path.join(in_storage, "key.pem"), "w").write("KEEP")
+        outside_vin = os.path.join(root, "outside", FAKE_VIN)
+        os.makedirs(outside_vin)
+        outside_cert = os.path.join(outside_vin, "cert.pem")
+        entry = types.SimpleNamespace(entry_id="e1", data={"cert_path": outside_cert})
+        assert helpers.legacy_material_dirs(hass, entry.data) == []
+        with _Patched(m, ir=_ir_module()):
+            asyncio.run(m.async_remove_entry(hass, entry))
+        assert os.path.exists(os.path.join(in_storage, "key.pem"))
+
+        # Independently guard realpath(dirname(original)) != root (e.g. an
+        # outside junction pointing into storage when islink reports False).
+        storage_root = os.path.realpath(hass.config.path(".storage", "geely_connect"))
+        storage_target = os.path.join(storage_root, FAKE_VIN)
+        real_realpath = os.path.realpath
+        with patch.object(helpers.os.path, "islink", return_value=False), \
+                patch.object(helpers.os.path, "realpath", side_effect=lambda p: (
+                    storage_target if p == os.path.abspath(outside_vin)
+                    else real_realpath(p))):
+            assert helpers.legacy_material_dirs(hass, entry.data) == []
+
+        # Independently guard realpath(original) != directory (e.g. a storage
+        # junction pointing outside when islink reports False).
+        inside_cert = os.path.join(storage_target, "cert.pem")
+        with patch.object(helpers.os.path, "islink", return_value=False), \
+                patch.object(helpers.os.path, "realpath", side_effect=lambda p: (
+                    os.path.abspath(outside_vin) if p == os.path.abspath(storage_target)
+                    else real_realpath(p))):
+            assert helpers.legacy_material_dirs(hass, {"cert_path": inside_cert}) == []
+
+
+def test_multiple_legacy_directories_deduplicate_and_remove_idempotently():
+    m = _mod()
+    with tempfile.TemporaryDirectory() as root:
+        hass = _Hass()
+        hass.config = types.SimpleNamespace(
+            path=lambda *p: os.path.join(root, *p))
+        old = hass.config.path(".storage", "geely_connect", FAKE_VIN)
+        current = hass.config.path(".storage", "geely_connect", "L6T00000000000001")
+        for directory in (old, current):
+            os.makedirs(directory)
+        entry = types.SimpleNamespace(entry_id="e1", data={
+            "vin": "L6T00000000000001",
+            "legacy_cert_paths": [{"vin": FAKE_VIN}, {"vin": FAKE_VIN}],
+        })
+        with _Patched(m, ir=_ir_module()):
+            asyncio.run(m.async_remove_entry(hass, entry))
+            asyncio.run(m.async_remove_entry(hass, entry))
+        assert not os.path.exists(old) and not os.path.exists(current)
 
 
 def test_removal_finds_the_key_directory_of_an_entry_that_moved_platforms():
@@ -1859,9 +2196,9 @@ def test_removal_finds_the_key_directory_of_an_entry_that_moved_platforms():
 
 def test_removal_keeps_a_key_directory_another_entry_still_uses():
     """Two entries on one car - which a re-authentication in an earlier
-    version could leave behind - share the VIN-named directory. Removing the
-    one that moved platforms used to delete it under its sibling, which then
-    could not reach the car until it was set up again."""
+    version could leave behind - share the VIN-named directory. Removing one
+    must protect a surviving entry's active directory, but a surviving entry's
+    retired legacy_cert_paths must not keep an unowned key alive."""
     m = _mod()
     with tempfile.TemporaryDirectory() as root:
         hass = _Hass()
@@ -1872,22 +2209,73 @@ def test_removal_keeps_a_key_directory_another_entry_still_uses():
         open(os.path.join(vin_dir, "key.pem"), "w").write("KEY")
         moved = types.SimpleNamespace(
             entry_id="e1", data={"vin": FAKE_VIN, "platform": "zeekr"})
+        migrated_legacy = types.SimpleNamespace(
+            entry_id="e4", data={
+                "vin": "OTHERVIN03",
+                "platform": "zeekr",
+                "legacy_cert_paths": [{"vin": FAKE_VIN}],
+            })
         unrelated = types.SimpleNamespace(entry_id="e9", data={"vin": "OTHERVIN01"})
-        # The sibling by its VIN, and by its certificate path alone.
+        # Active siblings (by VIN, cert_path, or key_path) protect the key when
+        # either another same-VIN entry or a migrated legacy entry is removed.
         for sibling in (
                 types.SimpleNamespace(entry_id="e2", data={"vin": FAKE_VIN}),
                 types.SimpleNamespace(entry_id="e3", data={
                     "vin": "OTHERVIN02",
-                    "cert_path": os.path.join(vin_dir, "cert.pem")})):
-            hass.config_entries.entries = [moved, unrelated, sibling]
-            with _Patched(m, ir=_ir_module()):
-                asyncio.run(m.async_remove_entry(hass, moved))
-            assert os.path.exists(os.path.join(vin_dir, "key.pem")), sibling.entry_id
-        # With only unrelated entries left, the directory goes as before.
-        hass.config_entries.entries = [moved, unrelated]
+                    "cert_path": os.path.join(vin_dir, "cert.pem")}),
+                types.SimpleNamespace(entry_id="e5", data={
+                    "vin": "OTHERVIN04",
+                    "key_path": os.path.join(vin_dir, "key.pem")})):
+            for removed in (moved, migrated_legacy):
+                hass.config_entries.entries = [removed, unrelated, sibling]
+                with _Patched(m, ir=_ir_module()):
+                    asyncio.run(m.async_remove_entry(hass, removed))
+                assert os.path.exists(os.path.join(vin_dir, "key.pem")), (
+                    removed.entry_id, sibling.entry_id)
+        # Reverse direction: when the original active owner is removed and the
+        # only surviving entry merely lists FAKE_VIN in retired legacy_cert_paths,
+        # the directory is deleted immediately instead of outliving its owner.
+        active_owner = types.SimpleNamespace(
+            entry_id="e2", data={
+                "vin": FAKE_VIN,
+                "cert_path": os.path.join(vin_dir, "cert.pem"),
+            })
+        hass.config_entries.entries = [active_owner, unrelated, migrated_legacy]
         with _Patched(m, ir=_ir_module()):
-            asyncio.run(m.async_remove_entry(hass, moved))
+            asyncio.run(m.async_remove_entry(hass, active_owner))
         assert not os.path.exists(vin_dir)
+
+
+def test_removal_stays_quiet_for_shared_absent_dir_and_bad_sibling_refs():
+    """Two Geely EM entries on one car with no key directory on disk must not
+    log 'keeping ...', and inspecting unrelated siblings with malformed paths
+    must not emit warnings during another entry's removal."""
+    from unittest.mock import patch
+    helpers = load("helpers")
+    m = _mod()
+    with tempfile.TemporaryDirectory() as root:
+        hass = _Hass()
+        hass.config = types.SimpleNamespace(
+            path=lambda *p: os.path.join(root, *p))
+        e1 = types.SimpleNamespace(
+            entry_id="e1", data={"vin": FAKE_VIN, "platform": "zeekr"})
+        e2 = types.SimpleNamespace(
+            entry_id="e2", data={"vin": FAKE_VIN, "platform": "zeekr"})
+        bad_sibling = types.SimpleNamespace(
+            entry_id="e3", data={
+                "vin": "OTHERVIN01",
+                "cert_path": "relative/cert.pem",
+                "key_path": os.path.join(root, "outside", "OTHERVIN01", "key.pem"),
+            })
+        hass.config_entries.entries = [e1, e2, bad_sibling]
+        with _Patched(m, ir=_ir_module()), \
+                patch.object(m._LOGGER, "info") as info, \
+                patch.object(m._LOGGER, "warning") as warning, \
+                patch.object(helpers._LOGGER, "warning") as helper_warning:
+            asyncio.run(m.async_remove_entry(hass, e1))
+        assert not info.called, info.call_args_list
+        assert not warning.called, warning.call_args_list
+        assert not helper_warning.called, helper_warning.call_args_list
 
 
 def test_a_probe_polls_afterwards_so_its_effect_becomes_visible():
