@@ -8,6 +8,10 @@ set, and records every call.
 """
 import asyncio
 import copy
+import http.client
+import json
+import sys
+import types
 from contextlib import ExitStack
 from datetime import time as dtime
 from unittest.mock import patch
@@ -620,3 +624,120 @@ def test_a_write_during_the_later_trip_read_survives_snapshot_publication():
         asyncio.run(coord.refresh())
         assert interleaved[0]
         assert _window(coord, 6) == ("22:00", "07:00")
+
+
+class _NewGateway:
+    """An HTTPS connection to the new gateway, answered by path: the client's
+    own request and its check of the answer run as they do on a car."""
+
+    answer = None   # (method, path) -> the answer's body, set by the test
+    paths = None    # every path asked, query included
+
+    def __init__(self, host, *args, **kwargs):
+        pass
+
+    def request(self, method, path, body=b"", headers=None):
+        type(self).paths.append(path)
+        self._body = json.dumps(type(self).answer(method, path)).encode()
+
+    def getresponse(self):
+        return types.SimpleNamespace(status=200, read=lambda: self._body)
+
+    def close(self):
+        pass
+
+
+def test_a_geely_em_entry_s_failing_catch_up_stops_at_the_cycle_s_own_read():
+    """The same bound on a Geely EM entry, through the real adapter and
+    client, only the HTTPS connection replaced. That platform has no state
+    block to read (serves_state is False) and reads the schedule through
+    _authed_charge. Both ways its read fails - an answer whose code is not
+    a success, which comes back as it came, and one with success false,
+    which the client raises - keep the reads on for the session, sign
+    nothing in, and end the catch-up at the cycle's own read."""
+    from test_zeekr_adapter import _make_adapter, _patch_idaas, _restore_idaas
+    from test_zeekr_init import _mod as _em_mod, _setup_zeekr
+
+    m = _em_mod()
+    helpers = sys.modules[m.schedule_read_missed.__module__]
+    plan = {"code": "000000", "success": True, "data": {
+        "timerId": "1", "target": "2", "startTime": "23:00", "endTime": "07:00",
+        "command": "start", "bcCycleActive": True, "bcTempActive": False}}
+    status = {"code": "000000", "success": True, "data": {
+        "basicVehicleStatus": {"speed": "0"},
+        "additionalVehicleStatus": {"electricVehicleStatus": {
+            "statusOfChargerConnection": "0", "chargeLevel": "80"}}}}
+    for failure in ({"code": "500", "msg": "busy"},
+                    {"code": "500", "success": False, "message": "busy"}):
+        answer = {"plan": plan}
+        paths = []
+        mono = [1000.0]
+
+        def gateway(method, path, answer=answer):
+            route = path.split("?")[0]
+            if route.endswith("/getChargingPlan"):
+                return answer["plan"]
+            if route.endswith("/vehicle/status/latest"):
+                return status
+            if route.endswith("/function/model/info"):
+                return {"code": "000000", "success": True, "data": []}
+            return {"code": "000000", "success": True, "data": {}}
+
+        def real(**kw):
+            a, c = _make_adapter(password="fake-password-0")
+            c.enc_vin = "fake-x-vin-0123456789"
+            return a
+
+        def plans(paths=paths):
+            return sum(p.split("?")[0].endswith("/getChargingPlan") for p in paths)
+
+        def reads(polls, mono=mono, plans=plans):
+            out = []
+            for _ in range(polls):
+                mono[0] += 20
+                before = plans()
+                asyncio.run(coord.refresh())
+                out.append(plans() - before)
+            return out
+
+        _NewGateway.answer = staticmethod(gateway)
+        _NewGateway.paths = paths
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(http.client, "HTTPSConnection", _NewGateway))
+            stack.enter_context(patch("time.monotonic", lambda mono=mono: mono[0]))
+            stack.enter_context(_Patched(m, monotonic=lambda mono=mono: mono[0]))
+            # A renewal could go through and would be counted: the adapter
+            # holds a password and the IDaaS sign-in is stubbed.
+            _patch_idaas()
+            stack.callback(_restore_idaas)
+            ok, hass, entry, api = _setup_zeekr(m, factory=real)
+            assert ok is True and api.serves_state is False and api.reads_charge_server
+            # The entry's own coordinator: _FakeCoordinator.instance can name
+            # another test's when the suite has loaded test_init_lifecycle twice.
+            bundle = hass.data["geely_connect"]["e1"]
+            coord, poll = bundle["coordinator"], bundle["poll_state"]
+            sched = coord.data["_scheduled_charging"]
+            assert sched["rbcStartTime"] == "23:00", sched
+            # A write: the local copy patched, the guard armed.
+            sched["rbcStartTime"] = "22:00"
+            helpers.note_schedule_write(coord)
+            mono[0] += 3
+            poll["cycle"] = 0
+            before = plans()
+            asyncio.run(coord.refresh())
+            assert plans() == before + 1
+            assert coord.data["_scheduled_charging"]["rbcStartTime"] == "22:00"
+            answer["plan"] = failure
+            # Polls 2-4 the catch-up, failing; 5 the cycle's own read, failing;
+            # then nothing off the cycle until its next read at 9.
+            got = reads(8)
+            assert got == [1, 1, 1, 1, 0, 0, 0, 1], (failure, got)
+            assert api.reads_charge_server, failure
+            assert coord.data["_scheduled_charging"]["rbcStartTime"] == "22:00"
+            answer["plan"] = plan
+            got = reads(4)
+            assert got == [0, 0, 0, 1], (failure, got)
+            assert coord.data["_scheduled_charging"]["rbcStartTime"] == "23:00"
+            # Nothing signed in on the way: no renewal, no sign-in path asked.
+            assert api._renewals == 0, failure
+            assert not [p for p in paths if "/auth/" in p], paths
