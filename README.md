@@ -523,6 +523,18 @@ off removes them again.
 > The window, sunroof and sunshade controls are live. They are ordinary dashboard
 > controls, so put them somewhere you won't hit them by accident.
 
+See the [control support and evidence guide](docs/CONTROL_SUPPORT.md) for the
+full API inventory and model/backend limits. The
+[native departure script blueprint](blueprints/script/geely_connect/native_departure.yaml)
+provides Start/Stop for an original-backend one-off trip, with a vehicle entity
+selector and a date-and-time helper. It preserves the trip's cabin/battery
+settings; EM trip writes remain unavailable. On the one car tested
+([#4](https://github.com/YossiKon/geely-connect/issues/4)), `stop` switched off
+a weekday schedule set in the app (leaving its days as they were, with only the
+app able to turn it back on); `start` cannot re-arm a weekday schedule set in
+the app, and what `start` does to an armed weekly schedule has not been
+measured. Judge it by the app's Scheduled trip screen, never by the response.
+
 ---
 
 ## ⚡ Efficient, adaptive polling

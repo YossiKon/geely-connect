@@ -97,5 +97,25 @@
       "title": "{name}: não foi possível derivar o token do veículo da nova plataforma",
       "description": "Esta entrada utiliza a nova plataforma Geely EM e nenhuma versão (build) do aplicativo conhecida por esta integração produziu um token de veículo (x-vin) aceito pelo gateway para este carro. Até que se tenha um, a leitura de status do novo gateway ficará inativa.\n\nAbra **Configurar** na entrada do Geely Connect e cole o token do seu celular em **Token do veículo para a nova plataforma (x-vin)**. A derivação é tentada a cada inicialização, então uma atualização que adicione a versão do seu aplicativo resolverá isso automaticamente."
     }
+  },
+  "services": {
+    "set_scheduled_trip": {
+      "fields": {
+        "entity_id": {
+          "name": "Entidade do veículo",
+          "description": "Selecione uma entidade do Geely desejado. Se informar também o VIN, ambos devem indicar o mesmo carro."
+        }
+      },
+      "name": "Definir viagem programada",
+      "description": "Ative ou desative uma viagem programada nos carros compatíveis com o servidor original, preservando os ajustes salvos da cabine e da bateria (a gravação de viagens EM não está disponível). start ativa uma viagem única e não consegue reativar uma programação de dias úteis definida no aplicativo; stop desliga uma programação de dias úteis definida no aplicativo (somente o aplicativo pode ligá-la novamente). O efeito de start em uma programação semanal ativa não foi medido. Julgue pela tela do aplicativo, nunca pela resposta."
+    }
+  },
+  "exceptions": {
+    "invalid_vehicle_entity": {
+      "message": "Selecione uma entidade de um veículo Geely configurado no Home Assistant."
+    },
+    "conflicting_vehicle_target": {
+      "message": "A entidade selecionada e o VIN indicam veículos diferentes."
+    }
   }
 }
