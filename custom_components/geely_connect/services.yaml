@@ -98,8 +98,11 @@ set_scheduled_trip:
     set here, so the departure is never invented; if the car has no schedule
     and you give no departure, nothing is sent. Confirmed on a Starray EM-i in
     both directions (#4); start arms a one-off trip and cannot re-arm a
-    weekday schedule set in the app. Judge it by the app's Scheduled trip
-    screen, never by the response.
+    weekday schedule set in the app, stop switches off a weekday schedule set
+    in the app (leaving its days as they were, with only the app able to turn
+    it back on), and what start does to an armed weekly schedule has not been
+    measured. Judge it by the app's Scheduled trip screen, never by the
+    response.
   fields:
     command:
       name: Command
@@ -120,9 +123,16 @@ set_scheduled_trip:
       example: "2026-10-02 07:00:00"
       selector:
         datetime:
+    entity_id:
+      name: Vehicle entity
+      description: Select any entity of the target Geely vehicle. If VIN is also supplied, both must select the same car.
+      required: false
+      selector:
+        entity:
+          integration: geely_connect
     vin:
       name: VIN
-      description: VIN of the target vehicle. Optional if you have only one vehicle configured.
+      description: VIN of the target vehicle. Optional if a vehicle entity is selected or only one vehicle is configured.
       required: false
       example: L6T00000000000000
       selector:

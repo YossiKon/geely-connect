@@ -1215,7 +1215,7 @@ def _register_debug_service(hass: HomeAssistant) -> None:
         vol.Optional("latest", default=False): cv.boolean,
     })
 
-    def _target(target_vin: str | None) -> tuple[str, dict]:
+    def _target(target_vin: str | None, target_entity: str | None = None) -> tuple[str, dict]:
         """Pick the vehicle a raw service call is aimed at.
 
         Omitting `vin` is only unambiguous with a single vehicle configured -
@@ -1226,6 +1226,17 @@ def _register_debug_service(hass: HomeAssistant) -> None:
         loaded = list((hass.data.get(DOMAIN) or {}).items())
         if not loaded:
             raise ServiceValidationError("No Geely Connect vehicle is loaded")
+        if target_entity:
+            entity = er.async_get(hass).async_get(target_entity)
+            chosen = next((kv for kv in loaded if entity and
+                           entity.platform == DOMAIN and entity.config_entry_id == kv[0]), None)
+            if chosen is None:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN, translation_key="invalid_vehicle_entity")
+            if target_vin and chosen[1].get("vin") != target_vin:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN, translation_key="conflicting_vehicle_target")
+            return chosen
         if target_vin:
             chosen = next((kv for kv in loaded if kv[1].get("vin") == target_vin), None)
             if chosen is None:
@@ -1370,10 +1381,11 @@ def _register_debug_service(hass: HomeAssistant) -> None:
         vol.Optional("command", default="start"): vol.In(["start", "stop"]),
         vol.Optional("departure"): cv.datetime,
         vol.Optional("vin"): cv.string,
+        vol.Optional("entity_id"): cv.entity_id,
     })
 
     async def _handle_trip(call: ServiceCall) -> None:
-        entry_id, bundle = _target(call.data.get("vin"))
+        entry_id, bundle = _target(call.data.get("vin"), call.data.get("entity_id"))
         api = bundle["api"]
         command = call.data.get("command", "start")
         departure = call.data.get("departure")
