@@ -49,6 +49,21 @@ def _comfort():
         str(ROOT / "automations" / "comfort-and-maintenance.yaml"))}
 
 
+def _temperature_service():
+    """Home Assistant's own climate.set_temperature handler and schema.
+
+    Up to 2026.9 both are in the climate package; from 2026.10 they are in
+    its services module, where the handler is private."""
+    try:
+        from homeassistant.components.climate import (
+            SET_TEMPERATURE_SCHEMA, async_service_temperature_set)
+    except ImportError:
+        from homeassistant.components.climate.services import (
+            SET_TEMPERATURE_SCHEMA,
+            _async_service_temperature_set as async_service_temperature_set)
+    return async_service_temperature_set, SET_TEMPERATURE_SCHEMA
+
+
 async def _with_hass(unit, check):
     from homeassistant.core import HomeAssistant
     from homeassistant.util.unit_system import METRIC_SYSTEM, US_CUSTOMARY_SYSTEM
@@ -63,15 +78,17 @@ async def _with_hass(unit, check):
 
 
 async def _run_temperature_actions(hass, config, expected):
-    from homeassistant.components.climate import (
-        ClimateEntity, ClimateEntityFeature, async_service_temperature_set)
+    from homeassistant.components.climate import ClimateEntity, ClimateEntityFeature
     from homeassistant.const import UnitOfTemperature
     from homeassistant.core import Context
     from homeassistant.helpers import config_validation as cv
     from homeassistant.helpers.script import Script
     from homeassistant.util.unit_conversion import TemperatureConverter
+    async_service_temperature_set, _ = _temperature_service()
 
     class Recorder(ClimateEntity):
+        # Both names of the unit, as GeelyClimate gives them.
+        _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
         _attr_temperature_unit = UnitOfTemperature.CELSIUS
         _attr_min_temp = 15.5
         _attr_max_temp = 28.5
@@ -277,16 +294,17 @@ async def _run_preheat(hass, unit_setting, target=22, low=15.5, high=28.5):
     climate service handler and a climate state shown the way HA shows it:
     a climate entity whose native range is `low`-`high` C. A setpoint the
     handler refuses ends the run, recorded as REFUSED after what went out."""
-    from homeassistant.components.climate import (
-        SET_TEMPERATURE_SCHEMA, ClimateEntity, ClimateEntityFeature,
-        async_service_temperature_set)
+    from homeassistant.components.climate import ClimateEntity, ClimateEntityFeature
     from homeassistant.const import PRECISION_TENTHS, PRECISION_WHOLE, UnitOfTemperature
     from homeassistant.core import Context
     from homeassistant.helpers import config_validation as cv
     from homeassistant.helpers.script import Script
     from homeassistant.helpers.temperature import display_temp
+    async_service_temperature_set, SET_TEMPERATURE_SCHEMA = _temperature_service()
 
     class Recorder(ClimateEntity):
+        # Both names of the unit, as GeelyClimate gives them.
+        _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
         _attr_temperature_unit = UnitOfTemperature.CELSIUS
         _attr_min_temp = low
         _attr_max_temp = high

@@ -759,3 +759,56 @@ def test_the_rapid_silence_notice_is_created_and_survives_a_failure():
         e._notify_rapid_silence("warming")   # must not raise
     finally:
         persistent_notification.async_create = orig
+
+
+# ------------------------------------------- both names of the climate API ---
+
+def test_the_unit_and_both_temperatures_read_the_same_under_either_name():
+    """Home Assistant from 2026.11 reads the native_ names, earlier versions
+    the old ones: each pair has to give the same value, so neither version
+    reads a stale or a missing one."""
+    _ha()
+    from homeassistant.const import UnitOfTemperature
+    e, _, _ = _entity(_status(interior=21.5))
+    assert e._attr_native_temperature_unit == UnitOfTemperature.CELSIUS
+    assert e._attr_temperature_unit == UnitOfTemperature.CELSIUS
+    assert e.native_current_temperature == e.current_temperature == 21.5
+    assert e.native_target_temperature == e.target_temperature == 22.0
+    e2, _, _ = _entity()
+    assert e2.native_current_temperature is None and e2.current_temperature is None
+
+
+def test_home_assistant_s_native_climate_api_finds_nothing_deprecated():
+    """From Home Assistant 2026.11 a climate class that provides only the old
+    names is served through a shim that logs a warning at every start and
+    stops working in 2027.11. A class built on GeelyClimate is checked the
+    way GeelyClimate was when it was defined: nothing deprecated is reported,
+    and the state Home Assistant builds reads the entity's own values."""
+    _ha()
+    from homeassistant.components.climate import ClimateEntity
+    if not hasattr(ClimateEntity, "native_temperature_unit"):
+        skip("this Home Assistant predates the native climate API (2026.11)")
+    from homeassistant.util.unit_system import METRIC_SYSTEM, US_CUSTOMARY_SYSTEM
+    c = load("climate")
+    lines = []
+
+    class _Lines(logging.Handler):
+        def emit(self, record):
+            lines.append(record.getMessage())
+
+    handler, root = _Lines(logging.WARNING), logging.getLogger()
+    root.addHandler(handler)
+    try:
+        type("Derived", (c.GeelyClimate,), {"__module__": c.__name__})
+    finally:
+        root.removeHandler(handler)
+    assert not [line for line in lines if "deprecated" in line], lines
+
+    e, _, _ = _entity(_status(interior=21.5))
+    assert e.native_temperature_unit == "°C"
+    e.hass.config.units = METRIC_SYSTEM
+    attrs = e.state_attributes
+    assert (attrs["current_temperature"], attrs["temperature"]) == (21.5, 22.0), attrs
+    e.hass.config.units = US_CUSTOMARY_SYSTEM
+    attrs = e.state_attributes
+    assert (attrs["current_temperature"], attrs["temperature"]) == (71, 72), attrs

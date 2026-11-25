@@ -134,6 +134,13 @@ class GeelyClimateExtraData(ExtraStoredData):
 
 class GeelyClimate(CoordinatorEntity, ClimateEntity, RestoreEntity):
     _attr_has_entity_name = True
+    # The unit, and the two temperatures below, under both of Home
+    # Assistant's names. From 2026.11 the climate base reads the native_
+    # ones, and a class that provides only the old ones is served through a
+    # shim that logs a warning at every start and stops working in 2027.11;
+    # a class that provides the native names as well is left alone. Earlier
+    # versions read only the old names.
+    _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_hvac_modes = [HVACMode.OFF, HVACMode.HEAT_COOL]
 
@@ -264,12 +271,22 @@ class GeelyClimate(CoordinatorEntity, ClimateEntity, RestoreEntity):
     # ---- read state ----
 
     @property
-    def current_temperature(self) -> float | None:
+    def native_current_temperature(self) -> float | None:
         return _to_float(_walk(self.coordinator.data or {}, _INTERIOR_TEMP_PATH))
 
     @property
-    def target_temperature(self) -> float | None:
+    def current_temperature(self) -> float | None:
+        # The name Home Assistant reads before 2026.11 (see the unit above).
+        return self.native_current_temperature
+
+    @property
+    def native_target_temperature(self) -> float | None:
         return self._cached_target_temp
+
+    @property
+    def target_temperature(self) -> float | None:
+        # The name Home Assistant reads before 2026.11 (see the unit above).
+        return self.native_target_temperature
 
     @property
     def hvac_mode(self) -> HVACMode:
