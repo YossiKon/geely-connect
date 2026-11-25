@@ -147,6 +147,36 @@ def _already_configured_vins(hass) -> set[str]:
     }
 
 
+def _picker_choices(cars: list[tuple[str, str, dict]]) -> tuple[dict[str, str], dict[str, dict]]:
+    """The vehicle picker's options, and the car each one picks.
+
+    `cars` holds (VIN, name, record) for each car offered. The picker shows
+    only at setup, re-authentication and reconfigure, so it takes the more
+    private form: a car is labelled by its name and the last four characters
+    of its VIN, as the entry title is, and by as much more of the VIN as
+    tells two cars apart where they would otherwise read the same. The
+    values are opaque keys, so no VIN goes to the browser as one; the flow
+    keeps the map, so a submit picks the car the form showed.
+    """
+    tails = [4] * len(cars)
+
+    def labels() -> list[str]:
+        return [f"{name} ({vin[-tails[i]:]})" for i, (vin, name, _) in enumerate(cars)]
+
+    while True:
+        shown, grown = labels(), False
+        for i, (vin, _, _) in enumerate(cars):
+            if tails[i] < len(vin) and any(
+                    j != i and shown[j] == shown[i] and other != vin
+                    for j, (other, _, _) in enumerate(cars)):
+                tails[i] += 1
+                grown = True
+        if not grown:
+            break
+    keys = [str(n) for n in range(1, len(cars) + 1)]
+    return dict(zip(keys, labels())), {key: record for key, (_, _, record) in zip(keys, cars)}
+
+
 def _zeekr_login_password(email: str, password: str, country: str,
                           profile: ZeekrRegion | None = None) -> ZeekrClient:
     """Post-switch login: IDaaS password login -> tspCode leg -> logged-in client.
@@ -182,6 +212,9 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._otp: str | None = None
         self._vins: list[str] = []
         self._vehicles: list[dict] = []
+        # The picker's opaque keys and the car each one stands for, as the
+        # form last showed them (_picker_choices).
+        self._offered: dict[str, dict] = {}
         self._idfa: str | None = None
         self._idfv: str | None = None
         # Zeekr-platform flow state.
@@ -420,17 +453,22 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     # ---- Step 3 (optional): pick vehicle when account has multiple ----
 
+    def _picked(self, user_input: dict[str, Any]) -> dict | None:
+        """The car a picker's answer names, as the form offered it."""
+        key = user_input.get("vin")
+        return self._offered.get(key) if isinstance(key, str) else None
+
     async def async_step_pick_vehicle(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         if user_input is not None:
-            chosen = next((v for v in self._vehicles if v.get("vin") == user_input["vin"]), None)
+            chosen = self._picked(user_input)
             if chosen is None:
                 return self.async_abort(reason="unknown")
             return await self._finish_with_vehicle(chosen)
 
-        options = {
-            v["vin"]: f"{v.get('nickname') or v.get('model') or 'Geely'} ({v['vin']})"
+        options, self._offered = _picker_choices([
+            (v["vin"], v.get("nickname") or v.get("model") or "Geely", v)
             for v in self._vehicles
-        }
+        ])
         return self.async_show_form(
             step_id="pick_vehicle",
             data_schema=vol.Schema({vol.Required("vin"): vol.In(options)}),
@@ -813,10 +851,7 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_zeekr_pick(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         if user_input is not None:
-            chosen = next(
-                (v for v in self._vehicles if vehicle_vin(v) == user_input["vin"]),
-                None,
-            )
+            chosen = self._picked(user_input)
             if chosen is None:
                 return self.async_abort(reason="unknown")
             try:
@@ -825,10 +860,10 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 _LOGGER.error("%s; fix secrets.yaml, or sign in without storing "
                               "the password", e)
                 return self.async_abort(reason="unknown")
-        options = {
-            vehicle_vin(v): f"{vehicle_nickname(v) or 'Geely'} ({vehicle_vin(v)})"
+        options, self._offered = _picker_choices([
+            (vehicle_vin(v), vehicle_nickname(v) or "Geely", v)
             for v in self._vehicles
-        }
+        ])
         return self.async_show_form(
             step_id="zeekr_pick",
             data_schema=vol.Schema({vol.Required("vin"): vol.In(options)}),

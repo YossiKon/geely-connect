@@ -6,7 +6,7 @@ import logging
 import os
 from unittest.mock import AsyncMock, patch
 
-from conftest import FAKE_VIN
+from conftest import FAKE_VIN, picker_key
 from test_zeekr_config_flow import _flow, _legacy_entry, _zeekr_login_input
 
 
@@ -86,7 +86,7 @@ def _pick_changed(cf, flow, entry, client, chosen_vin=FAKE_VIN):
     assert picker["step_id"] == "zeekr_pick", picker
     assert client.probes == [], client.probes
     assert entry.data == before_data and entry.options == before_options
-    return asyncio.run(flow.async_step_zeekr_pick({"vin": chosen_vin}))
+    return asyncio.run(flow.async_step_zeekr_pick({"vin": picker_key(flow, chosen_vin)}))
 
 
 def test_changed_vin_requires_explicit_pick_then_replaces_stored_and_manual_tokens():
@@ -274,7 +274,7 @@ def test_a_failing_new_garage_read_is_set_aside_only_beside_an_old_garage():
         assert len(warned) == 1, log.lines
         assert FAKE_VIN not in warned[0], warned[0]
         assert "mock-at" not in warned[0], warned[0]
-        res = asyncio.run(flow.async_step_zeekr_pick({"vin": FAKE_VIN}))
+        res = asyncio.run(flow.async_step_zeekr_pick({"vin": picker_key(flow, FAKE_VIN)}))
         assert res["reason"] == "reauth_successful", res
 
     # With no old-platform garage the new one is the only one, and its
@@ -376,7 +376,7 @@ def test_account_mismatch_is_rechecked_before_finishing_a_picker():
     picker = _login(cf, flow, client)
     assert picker["step_id"] == "zeekr_pick", picker
     flow._email = "another@example.com"
-    result = asyncio.run(flow.async_step_zeekr_pick({"vin": FAKE_VIN}))
+    result = asyncio.run(flow.async_step_zeekr_pick({"vin": picker_key(flow, FAKE_VIN)}))
     assert result["reason"] == "reauth_account_mismatch", result
     assert client.probes == []
     assert entry.data == before_data and entry.options == before_options

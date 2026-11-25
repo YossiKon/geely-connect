@@ -53,3 +53,13 @@ def have_homeassistant() -> bool:
 
 # A VIN-shaped string that is obviously fake. Never use a real one in tests.
 FAKE_VIN = "L6T00000000000000"
+
+
+def picker_key(flow, vin):
+    """The key a config flow's vehicle picker offered for the car with this
+    VIN, as a user's choice in the form would send it: the picker's values
+    are opaque keys, not VINs."""
+    for key, record in flow._offered.items():
+        if record.get("vin") == vin:
+            return key
+    raise AssertionError(f"the picker offered no car with VIN ...{vin[-4:]}")

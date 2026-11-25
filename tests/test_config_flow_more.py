@@ -8,7 +8,7 @@ import asyncio
 import hashlib
 import types
 
-from conftest import FAKE_VIN, have_homeassistant, load
+from conftest import FAKE_VIN, have_homeassistant, load, picker_key
 from run import skip
 
 EMAIL = "owner@example.com"
@@ -423,27 +423,86 @@ def test_multiple_vehicles_offer_a_picker_then_finish_with_the_choice():
     cf.geely_api.provision_user_cert = lambda **kw: None
     res = asyncio.run(flow.async_step_code({"code": "123456"}))
     assert res["type"] == "form" and res["step_id"] == "pick_vehicle"
-    marker = next(k for k in res["data_schema"].schema if str(k) == "vin")
-    options = res["data_schema"].schema[marker].container
-    assert set(options) == {FAKE_VIN, FAKE_VIN_2}
-    assert options[FAKE_VIN] == f"My EX5 ({FAKE_VIN})"
-    assert options[FAKE_VIN_2] == f"Geely ({FAKE_VIN_2})"
+    options = _options(res)
+    # Opaque keys and the last four characters, as the entry title has
+    # them: the full VIN is in neither a key nor a label.
+    assert options == {"1": f"My EX5 ({FAKE_VIN[-4:]})",
+                       "2": f"Geely ({FAKE_VIN_2[-4:]})"}, options
+    shown = " ".join([*options, *options.values()])
+    assert FAKE_VIN not in shown and FAKE_VIN_2 not in shown, shown
 
-    picked = asyncio.run(flow.async_step_pick_vehicle({"vin": FAKE_VIN_2}))
+    picked = asyncio.run(flow.async_step_pick_vehicle({"vin": picker_key(flow, FAKE_VIN_2)}))
     assert picked["type"] == "create_entry"
     assert picked["data"]["vin"] == FAKE_VIN_2
     assert picked["title"] == f"Geely ({FAKE_VIN_2[-4:]})"
     assert picked["data"]["vehicle_nickname"] == ""
 
 
-def test_picking_a_vin_that_was_never_offered_aborts():
-    """The picker's answer is user input; only VINs from the fetched list may
-    reach provisioning."""
+def _options(form):
+    marker = next(k for k in form["data_schema"].schema if str(k) == "vin")
+    return dict(form["data_schema"].schema[marker].container)
+
+
+def test_a_choice_the_picker_never_offered_aborts():
+    """The picker's answer is user input. Only a key the form offered picks a
+    car: not one it did not offer, and not a VIN, the offered car's included."""
     cf, flow = _flow()
     _prime(flow)
     flow._vehicles = [_vehicle()]
-    res = asyncio.run(flow.async_step_pick_vehicle({"vin": FAKE_VIN_2}))
-    assert res["type"] == "abort" and res["reason"] == "unknown"
+    reached = []
+
+    async def finish(vehicle):
+        reached.append(vehicle)
+        return {"type": "create_entry"}
+
+    flow._finish_with_vehicle = finish
+    assert asyncio.run(flow.async_step_pick_vehicle(
+        {"vin": FAKE_VIN}))["reason"] == "unknown"
+    res = asyncio.run(flow.async_step_pick_vehicle())
+    assert _options(res) == {"1": f"My EX5 ({FAKE_VIN[-4:]})"}, res
+    for answer in ("2", FAKE_VIN_2, FAKE_VIN, None, ["1"]):
+        res = asyncio.run(flow.async_step_pick_vehicle({"vin": answer}))
+        assert res["type"] == "abort" and res["reason"] == "unknown", (answer, res)
+    assert reached == [], reached
+    assert asyncio.run(flow.async_step_pick_vehicle({"vin": "1"}))["type"] == "create_entry"
+    assert reached == [flow._vehicles[0]], reached
+
+
+def test_cars_that_read_the_same_are_told_apart_by_more_of_the_vin_only():
+    """Two cars with one name and the same last four are shown with as much
+    more of the VIN as it takes; a third, and one car listed twice, keep four."""
+    cf, flow = _flow()
+    _prime(flow)
+    a, b, c = "L6T00000000012345", "L6T00000000092345", "L6T00000000000777"
+    flow._vehicles = [_vehicle(a), _vehicle(b), _vehicle(c), _vehicle(c)]
+    options = _options(asyncio.run(flow.async_step_pick_vehicle()))
+    assert options == {"1": "My EX5 (12345)", "2": "My EX5 (92345)",
+                       "3": "My EX5 (0777)", "4": "My EX5 (0777)"}, options
+    flow._vehicles = [_vehicle(a, nickname="Mine"), _vehicle(b)]
+    options = _options(asyncio.run(flow.async_step_pick_vehicle()))
+    assert options == {"1": "Mine (2345)", "2": "My EX5 (2345)"}, options
+    # Two that still read the same one character on are lengthened again.
+    d, e = "L6T00000000112345", "L6T00000000212345"
+    flow._vehicles = [_vehicle(d), _vehicle(e)]
+    options = _options(asyncio.run(flow.async_step_pick_vehicle()))
+    assert options == {"1": "My EX5 (112345)", "2": "My EX5 (212345)"}, options
+
+
+def test_a_submit_picks_the_car_the_form_showed():
+    """The keys resolve through the map the form was built with, not through
+    positions in a list that could have changed since."""
+    cf, flow = _flow()
+    _prime(flow)
+    cf.geely_api.cidpsso_login = lambda *a, **k: _login_ok()
+    cf.geely_api.list_vehicles = lambda *a, **k: [
+        _vehicle(), _vehicle(FAKE_VIN_2, nickname="Second")]
+    cf.geely_api.provision_user_cert = lambda **kw: None
+    res = asyncio.run(flow.async_step_code({"code": "123456"}))
+    assert res["step_id"] == "pick_vehicle", res
+    key = picker_key(flow, FAKE_VIN_2)
+    flow._vehicles.reverse()
+    picked = asyncio.run(flow.async_step_pick_vehicle({"vin": key}))
+    assert picked["type"] == "create_entry" and picked["data"]["vin"] == FAKE_VIN_2, picked
 
 
 # --------------------------------------------------------------- options ---

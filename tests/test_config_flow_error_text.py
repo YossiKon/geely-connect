@@ -12,7 +12,7 @@ import asyncio
 import contextlib
 import logging
 
-from conftest import FAKE_VIN, have_homeassistant, load
+from conftest import FAKE_VIN, have_homeassistant, load, picker_key
 # The flows these build skip the test without Home Assistant.
 from test_config_flow import _flow as _legacy_flow, _vehicle
 from test_zeekr_config_flow import (
@@ -386,7 +386,7 @@ def test_an_unexpected_error_storing_the_password_ends_setup_with_a_line():
                 _zeekr_login_input({"email": EMAIL, "store_password": True})))
             if cars == 2:
                 assert res["type"] == "form" and res["step_id"] == "zeekr_pick", res
-                res = asyncio.run(flow.async_step_zeekr_pick({"vin": FAKE_VIN}))
+                res = asyncio.run(flow.async_step_zeekr_pick({"vin": picker_key(flow, FAKE_VIN)}))
         assert res["type"] == "abort" and res["reason"] == "unknown", (cars, res)
         _left_out(api, log, (EMAIL,))
         _one(log, "storing the password failed (RuntimeError at config_flow.py:")

@@ -8,7 +8,7 @@ path that re-stamps an existing entry.
 
 import asyncio
 
-from conftest import FAKE_VIN, have_homeassistant, load
+from conftest import FAKE_VIN, have_homeassistant, load, picker_key
 from run import skip
 
 
@@ -244,7 +244,7 @@ def test_zeekr_login_with_multiple_vehicles_picks_one():
     asyncio.run(flow.async_step_user({"platform": "zeekr"}))
     res = asyncio.run(flow.async_step_zeekr_login(_zeekr_login_input()))
     assert res["type"] == "form" and res["step_id"] == "zeekr_pick", res
-    res = asyncio.run(flow.async_step_zeekr_pick({"vin": FAKE_VIN}))
+    res = asyncio.run(flow.async_step_zeekr_pick({"vin": picker_key(flow, FAKE_VIN)}))
     assert res["type"] == "create_entry", res
     assert res["data"]["vin"] == FAKE_VIN
 
@@ -257,7 +257,7 @@ def test_zeekr_migration_restamps_and_purges_legacy_keys():
     asyncio.run(flow.async_step_user({"platform": "zeekr"}))
     res = asyncio.run(flow.async_step_zeekr_login(_zeekr_login_input()))
     assert res["step_id"] == "zeekr_pick", res
-    res = asyncio.run(flow.async_step_zeekr_pick({"vin": FAKE_VIN}))
+    res = asyncio.run(flow.async_step_zeekr_pick({"vin": picker_key(flow, FAKE_VIN)}))
     assert res["type"] == "abort" and res["reason"] == "reauth_successful", res
     data = entry.data
     assert data["platform"] == "zeekr", "migration must stamp the platform"
@@ -278,7 +278,7 @@ def test_zeekr_reconfigure_aborts_with_reconfigure_successful():
     asyncio.run(flow.async_step_user({"platform": "zeekr"}))
     res = asyncio.run(flow.async_step_zeekr_login(_zeekr_login_input()))
     assert res["step_id"] == "zeekr_pick", res
-    res = asyncio.run(flow.async_step_zeekr_pick({"vin": FAKE_VIN}))
+    res = asyncio.run(flow.async_step_zeekr_pick({"vin": picker_key(flow, FAKE_VIN)}))
     assert res["type"] == "abort" and res["reason"] == "reconfigure_successful", res
 
 
@@ -301,7 +301,7 @@ def test_zeekr_reauth_prefills_and_persists_the_form_defaults():
     res = asyncio.run(flow.async_step_zeekr_login(
         _zeekr_login_input({"pressure_unit": "bar", "poll_mode": "eco"})))
     assert res["step_id"] == "zeekr_pick", res
-    res = asyncio.run(flow.async_step_zeekr_pick({"vin": FAKE_VIN}))
+    res = asyncio.run(flow.async_step_zeekr_pick({"vin": picker_key(flow, FAKE_VIN)}))
     assert res["reason"] == "reauth_successful", res
     assert entry.data["pressure_unit"] == "bar", "changed unit must persist"
     assert entry.data["poll_mode"] == "eco", "changed mode must persist"
@@ -376,7 +376,7 @@ def test_a_zeekr_reauth_that_renumbers_the_car_moves_the_unique_id_with_it():
     cf._zeekr_login_password = lambda e, p, c: _FakeClient()
     res = asyncio.run(flow.async_step_zeekr_login(_zeekr_login_input()))
     assert res["step_id"] == "zeekr_pick", res
-    res = asyncio.run(flow.async_step_zeekr_pick({"vin": FAKE_VIN}))
+    res = asyncio.run(flow.async_step_zeekr_pick({"vin": picker_key(flow, FAKE_VIN)}))
     assert res["reason"] == "reauth_successful", res
     assert entry.data["vin"] == FAKE_VIN
     assert entry.unique_id == f"zeekr:user@example.com:{FAKE_VIN}"
@@ -420,7 +420,7 @@ def test_an_unreadable_secrets_yaml_stops_the_vehicle_picker_too():
         res = asyncio.run(flow.async_step_zeekr_login(
             _zeekr_login_input({"store_password": True})))
         assert res["type"] == "form" and res["step_id"] == "zeekr_pick", res
-        res = asyncio.run(flow.async_step_zeekr_pick({"vin": FAKE_VIN}))
+        res = asyncio.run(flow.async_step_zeekr_pick({"vin": picker_key(flow, FAKE_VIN)}))
     finally:
         cf.password_encrypt = orig
     assert res["type"] == "abort" and res["reason"] == "unknown", res
@@ -465,12 +465,35 @@ def test_zeekr_login_with_a_crashing_vehicle_list_reads_as_unreachable():
 
 
 def test_zeekr_pick_with_an_unknown_vin_aborts():
+    """Only a key the form offered picks a car: not another key, and not a
+    VIN, the offered car's included."""
     cf, flow = _flow()
     cf._zeekr_login_password = lambda e, p, c: _FakeClient(n_vehicles=2)
     asyncio.run(flow.async_step_user({"platform": "zeekr"}))
     asyncio.run(flow.async_step_zeekr_login(_zeekr_login_input()))
-    res = asyncio.run(flow.async_step_zeekr_pick({"vin": "L6T00000000000099"}))
-    assert res["type"] == "abort" and res["reason"] == "unknown", res
+    for answer in ("3", "L6T00000000000099", FAKE_VIN):
+        res = asyncio.run(flow.async_step_zeekr_pick({"vin": answer}))
+        assert res["type"] == "abort" and res["reason"] == "unknown", (answer, res)
+
+
+def test_zeekr_picker_shows_the_last_four_and_sends_no_vin():
+    """The picker is shown at setup, re-authentication and reconfigure:
+    the label carries the VIN's last four characters, as the entry title
+    does, and the value an opaque key."""
+    cf, flow = _flow()
+    other = "L6T00000000004321"
+    client = _FakeClient(n_vehicles=1)
+    client.list_vehicles = lambda user_id: [
+        {"vin": FAKE_VIN, "nickName": "Mock EX5"}, {"vin": other}]
+    cf._zeekr_login_password = lambda e, p, c: client
+    asyncio.run(flow.async_step_user({"platform": "zeekr"}))
+    res = asyncio.run(flow.async_step_zeekr_login(_zeekr_login_input()))
+    assert res["step_id"] == "zeekr_pick", res
+    marker = next(k for k in res["data_schema"].schema if str(k) == "vin")
+    options = dict(res["data_schema"].schema[marker].container)
+    assert options == {"1": f"Mock EX5 ({FAKE_VIN[-4:]})", "2": "Geely (4321)"}, options
+    shown = " ".join([*options, *options.values()])
+    assert FAKE_VIN not in shown and other not in shown, shown
 
 
 def test_finish_zeekr_refuses_a_malformed_vin():
@@ -578,7 +601,7 @@ def test_zeekr_migration_stores_the_derived_x_vin():
     asyncio.run(flow.async_step_user({"platform": "zeekr"}))
     res = asyncio.run(flow.async_step_zeekr_login(_zeekr_login_input()))
     assert res["step_id"] == "zeekr_pick", res
-    res = asyncio.run(flow.async_step_zeekr_pick({"vin": FAKE_VIN}))
+    res = asyncio.run(flow.async_step_zeekr_pick({"vin": picker_key(flow, FAKE_VIN)}))
     assert res["type"] == "abort" and res["reason"] == "reauth_successful", res
     assert entry.data["zeekr_enc_vin"] == "DERIVED-XVIN=="
 
@@ -607,7 +630,7 @@ def test_european_setup_and_reauth_load_local_keys_without_persisting_them():
                 "user@example.com", "hunter2", "ES", FAKE_PROFILE)
         if reauth:
             assert result["step_id"] == "zeekr_pick", result
-            result = asyncio.run(flow.async_step_zeekr_pick({"vin": FAKE_VIN}))
+            result = asyncio.run(flow.async_step_zeekr_pick({"vin": picker_key(flow, FAKE_VIN)}))
             assert result["reason"] == "reauth_successful", result
             stored = entry.data
         else:
@@ -700,7 +723,7 @@ def test_reauth_and_reconfigure_remember_explicit_region_and_preserve_old_sea_en
                 loader.assert_not_called()
                 login.assert_called_once_with("user@example.com", "hunter2", "GB")
             assert result["step_id"] == "zeekr_pick", result
-            result = asyncio.run(flow.async_step_zeekr_pick({"vin": FAKE_VIN}))
+            result = asyncio.run(flow.async_step_zeekr_pick({"vin": picker_key(flow, FAKE_VIN)}))
             assert result["reason"] == source + "_successful", result
             assert entry.data["zeekr_region"] == (saved_region or "SEA")
 
