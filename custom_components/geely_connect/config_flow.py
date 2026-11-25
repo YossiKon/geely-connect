@@ -156,8 +156,17 @@ def _picker_choices(cars: list[tuple[str, str, dict]]) -> tuple[dict[str, str], 
     of its VIN, as the entry title is, and by as much more of the VIN as
     tells two cars apart where they would otherwise read the same. The
     values are opaque keys, so no VIN goes to the browser as one; the flow
-    keeps the map, so a submit picks the car the form showed.
+    keeps the map, so a submit picks the car the form showed. A VIN listed
+    twice - a re-authentication can read the car in both garages - is
+    offered once and picks its first record, as the VIN-keyed options did.
     """
+    seen: set[str] = set()
+    unique = []
+    for car in cars:
+        if car[0] not in seen:
+            seen.add(car[0])
+            unique.append(car)
+    cars = unique
     tails = [4] * len(cars)
 
     def labels() -> list[str]:
@@ -167,8 +176,7 @@ def _picker_choices(cars: list[tuple[str, str, dict]]) -> tuple[dict[str, str], 
         shown, grown = labels(), False
         for i, (vin, _, _) in enumerate(cars):
             if tails[i] < len(vin) and any(
-                    j != i and shown[j] == shown[i] and other != vin
-                    for j, (other, _, _) in enumerate(cars)):
+                    j != i and shown[j] == shown[i] for j in range(len(cars))):
                 tails[i] += 1
                 grown = True
         if not grown:

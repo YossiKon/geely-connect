@@ -244,6 +244,10 @@ def test_zeekr_login_with_multiple_vehicles_picks_one():
     asyncio.run(flow.async_step_user({"platform": "zeekr"}))
     res = asyncio.run(flow.async_step_zeekr_login(_zeekr_login_input()))
     assert res["type"] == "form" and res["step_id"] == "zeekr_pick", res
+    # The garage lists the one car twice: it is offered once.
+    marker = next(k for k in res["data_schema"].schema if str(k) == "vin")
+    assert dict(res["data_schema"].schema[marker].container) == {
+        "1": f"Mock EX5 ({FAKE_VIN[-4:]})"}, res
     res = asyncio.run(flow.async_step_zeekr_pick({"vin": picker_key(flow, FAKE_VIN)}))
     assert res["type"] == "create_entry", res
     assert res["data"]["vin"] == FAKE_VIN

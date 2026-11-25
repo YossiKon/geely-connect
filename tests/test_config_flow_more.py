@@ -470,14 +470,17 @@ def test_a_choice_the_picker_never_offered_aborts():
 
 def test_cars_that_read_the_same_are_told_apart_by_more_of_the_vin_only():
     """Two cars with one name and the same last four are shown with as much
-    more of the VIN as it takes; a third, and one car listed twice, keep four."""
+    more of the VIN as it takes; a third keeps four, and a car listed twice
+    is offered once, by its first record."""
     cf, flow = _flow()
     _prime(flow)
     a, b, c = "L6T00000000012345", "L6T00000000092345", "L6T00000000000777"
-    flow._vehicles = [_vehicle(a), _vehicle(b), _vehicle(c), _vehicle(c)]
+    flow._vehicles = [_vehicle(a), _vehicle(b), _vehicle(c, nickname="First"),
+                      _vehicle(c, nickname="Second")]
     options = _options(asyncio.run(flow.async_step_pick_vehicle()))
     assert options == {"1": "My EX5 (12345)", "2": "My EX5 (92345)",
-                       "3": "My EX5 (0777)", "4": "My EX5 (0777)"}, options
+                       "3": "First (0777)"}, options
+    assert flow._offered["3"] is flow._vehicles[2], flow._offered
     flow._vehicles = [_vehicle(a, nickname="Mine"), _vehicle(b)]
     options = _options(asyncio.run(flow.async_step_pick_vehicle()))
     assert options == {"1": "Mine (2345)", "2": "My EX5 (2345)"}, options
