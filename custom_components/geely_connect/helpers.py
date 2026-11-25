@@ -23,7 +23,6 @@ import homeassistant.util.yaml as yaml_util
 
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.entity import DeviceInfo
 
 from .const import (
     CONF_VEHICLE_COLOR,
@@ -271,15 +270,6 @@ def api_can_send(api: Any, service_id: str) -> bool:
     sends whatever it is given."""
     can_send = getattr(api, "can_send", None)
     return True if can_send is None else bool(can_send(service_id))
-
-
-def device_info(vin: str, device_name: str | None = None) -> DeviceInfo:
-    """The one device every entity of a vehicle belongs to."""
-    return DeviceInfo(
-        identifiers={(DOMAIN, vin)},
-        manufacturer="Geely",
-        name=device_name or f"Geely ({vin})",
-    )
 
 
 def windows_open(data: Any) -> bool | None:

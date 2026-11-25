@@ -10,6 +10,7 @@ so the offline ones still run in a bare checkout.
 """
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
 import os
 import sys
@@ -63,3 +64,21 @@ def picker_key(flow, vin):
         if record.get("vin") == vin:
             return key
     raise AssertionError(f"the picker offered no car with VIN ...{vin[-4:]}")
+
+
+def device_field(info, key):
+    """One field of an entity's DeviceInfo, raising KeyError for a field the
+    entity left unset, as reading the dict does.
+
+    In the Home Assistant the gate installs, DeviceInfo is a TypedDict, so a
+    plain dict. Newer releases make it a dataclass, where an unset field
+    holds its default sentinel instead of being absent, and where reading it
+    as a dict logs a deprecation warning: 2026.12.0b0 does, and the warning
+    says 2027.12 stops allowing it."""
+    if isinstance(info, dict):
+        return info[key]
+    value = getattr(info, key)
+    unset = next(f.default for f in dataclasses.fields(info) if f.name == key)
+    if value is unset:
+        raise KeyError(key)
+    return value

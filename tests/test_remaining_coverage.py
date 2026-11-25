@@ -75,15 +75,6 @@ def test_walk_stops_at_a_non_dict_midway():
     assert h.walk({"a": "flat"}, ("a", "b")) is None
 
 
-def test_device_info_falls_back_to_a_generic_name():
-    _ha()
-    h = load("helpers")
-    info = h.device_info(FAKE_VIN)
-    assert info["name"] == f"Geely ({FAKE_VIN})"
-    named = h.device_info(FAKE_VIN, "My Car (0000)")
-    assert named["name"] == "My Car (0000)"
-
-
 def _run_scheduled(h, coordinator, *delays, after=None, raise_from_refresh=None):
     """Drive schedule_refresh's background task to completion synchronously."""
     captured = {}

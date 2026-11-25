@@ -6,7 +6,7 @@ import logging
 import os
 from unittest.mock import AsyncMock, patch
 
-from conftest import FAKE_VIN, picker_key
+from conftest import FAKE_VIN, device_field, picker_key
 from test_zeekr_config_flow import _flow, _legacy_entry, _zeekr_login_input
 
 
@@ -193,7 +193,8 @@ def test_vin_case_changes_preserve_entity_identity_and_tokens_without_selection(
             "vin": entry.data["vin"], "api": object(),
             "coordinator": FakeCoordinator()})
         assert before.unique_id == after.unique_id
-        assert before.device_info["identifiers"] == after.device_info["identifiers"]
+        assert (device_field(before.device_info, "identifiers")
+                == device_field(after.device_info, "identifiers"))
         assert entry.options["zeekr_enc_vin"] == _MANUAL_TOKEN
         assert client.probes == []
 
