@@ -475,7 +475,7 @@ def _check_resp(resp: dict, *, ok_codes: set | None = None,
     where code 1000 is capture-verified - a *present* code outside that set is a
     200-wrapped error too. It is omitted for the IDaaS / ms-user-auth legs, whose
     success code is unverified; there the callers detect failure by the specific
-    field they expect (tokenValue, accessToken, ddcCode), so treating an
+    field they expect (tokenValue, accessToken), so treating an
     unfamiliar code as failure could raise on a genuinely successful login.
 
     This matters beyond a clean error: only a raised error re-arms recovery -
@@ -784,7 +784,9 @@ class ZeekrClient:
                  vehicle_model: str = "", profile: ZeekrRegion | None = None):
         self._region_profile = profile
         self.email = email
-        self.password = password
+        # `password` is taken and not kept: no request of this client sends
+        # one. The sign-in that does is ZeekrIdaas.login_by_email_password,
+        # and the adapter holds the password for it.
         self._gateway = gateway.rstrip("/") if gateway else None
         self.access_token = access_token
         self.refresh_token = refresh_token
@@ -969,8 +971,8 @@ class ZeekrClient:
     # ---- auth ---------------------------------------------------------------
 
     def _ms_user_auth_login(self, identifier: str) -> None:
-        """The unsigned ms-user-auth leg: identifier (DDC code or the IDaaS
-        tokenValue) -> accessToken/refreshToken/userId."""
+        """The unsigned ms-user-auth leg: identifier (the IDaaS tokenValue,
+        or the tspCode it yields) -> accessToken/refreshToken/userId."""
         login_body = json.dumps({
             "identifier": identifier,
             "identityType": 10,
@@ -994,16 +996,6 @@ class ZeekrClient:
         if not self.access_token:
             raise ZeekrAuthError("login returned no accessToken: "
                                  f"{_detail(auth, (*sent, *self.hidden(), identifier))}")
-
-    def login(self) -> None:
-        """email+password -> DDC (signed) -> ms-user-auth (unsigned) -> tokens."""
-        ddc_body = json.dumps({"email": self.email, "password": self.password}).encode()
-        ddc = self._request("POST", "/user-service/device/code", body=ddc_body,
-                            urlname="user-api")
-        ddc_code = (ddc.get("data") or {}).get("ddcCode")
-        if not ddc_code:
-            raise ZeekrAuthError(f"device/code returned no ddcCode: {_detail(ddc, self.hidden())}")
-        self._ms_user_auth_login(ddc_code)
 
     def login_otp(self, token_value: str) -> None:
         """IDaaS OTP path: the user-center tokenValue as the ms-user-auth

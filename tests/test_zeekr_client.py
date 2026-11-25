@@ -174,15 +174,8 @@ class _MockGW(BaseHTTPRequestHandler):
                 self.send_response(500)
                 self.end_headers()
                 return
-            try:
-                req = json.loads(body)
-            except Exception:
-                req = {}
-            if req.get("email") == "empty@example.com":
-                payload = {"code": "1000", "success": True, "message": "ok", "data": {}}
-            else:
-                payload = {"code": "1000", "success": True, "message": "ok",
-                           "data": {"ddcCode": "MOCKDDC123"}}
+            payload = {"code": "1000", "success": True, "message": "ok",
+                       "data": {"ddcCode": "MOCKDDC123"}}
         elif pth == "/ms-user-auth/v1.0/auth/login":
             try:
                 req = json.loads(body)
@@ -420,10 +413,7 @@ def test_mock_gateway_roundtrip():
     srv, url, tmp = _start_mock()
     try:
         c = zc.ZeekrClient("user@example.com", "pw", gateway=url)
-        c.login()
-        assert c.access_token == "mock-at", "token not attached"
-
-        # OTP leg: the IDaaS tokenValue rides the same unsigned ms-user-auth leg.
+        # OTP leg: the IDaaS tokenValue rides the unsigned ms-user-auth leg.
         c.login_otp("mock-tv")
         assert c.access_token == "mock-at", f"otp login token: {c.access_token}"
 
@@ -801,14 +791,22 @@ def test_plain_http_transport_branches():
     try:
         url = f"http://127.0.0.1:{_MOCK_PORT}"
         c = zc.ZeekrClient("user@example.com", "pw", gateway=url)
-        c.login()
+        # A v2-signed call over plain HTTP, its signature recomputed by the
+        # mock, then the unsigned ms-user-auth leg.
+        resp = c._request("POST", "/user-service/device/code", body=b"{}",
+                          urlname="user-api")
+        assert resp["data"]["ddcCode"] == "MOCKDDC123", resp
+        assert _EXPECTED_SIGS, "the v2-signed call was not checked"
+        c.login_otp("mock-tv")
         assert c.access_token == "mock-at", "http login failed"
+        before_hf = len(_EXPECTED_SIGS)
 
         zc.HF_GATEWAY = url
         cars = zc._hf_request(
             "GET", "/device-platform/api/v4.0/veh/vehicle-list",
             query="needSharedCar=true", token="mock-hf")
         assert cars["data"]["list"][0]["vin"] == FAKE_VIN, cars
+        assert len(_EXPECTED_SIGS) > before_hf, "the HF leg's signature was not checked"
         assert all(_EXPECTED_SIGS), f"signature failures: {_EXPECTED_SIGS}"
     finally:
         zc.HF_GATEWAY = _ORIGINAL_HF_GATEWAY
@@ -872,14 +870,6 @@ def test_login_raises_on_empty_responses():
     _EXPECTED_SIGS.clear()
     srv, url, tmp = _start_mock()
     try:
-        # device/code returns no ddcCode for the empty account.
-        c0 = zc.ZeekrClient("empty@example.com", "pw", gateway=url)
-        try:
-            c0.login()
-            assert False, "expected ZeekrAuthError when no ddcCode is returned"
-        except zc.ZeekrAuthError:
-            pass
-
         # ms-user-auth returns no accessToken for the failing identifier.
         c1 = zc.ZeekrClient("user@example.com", "pw", gateway=url)
         try:
