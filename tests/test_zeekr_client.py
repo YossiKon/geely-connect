@@ -699,6 +699,120 @@ def test_snc_sign_query_canonical_and_non_whitelisted_headers():
     assert sig == sig2, "snc signature not deterministic"
 
 
+# ---------------------------------------------------------------------------
+# snc_sign against a canonical written apart from it
+#
+# Every other test recomputes X-SIGNATURE with zc.snc_sign itself (the mock
+# gateways do), so a change inside snc_sign would leave them all green while
+# the real gateway refused every Geely EM request. This builder shares no code
+# with the client: it is the docstring's canonical plus the rules snc_sign
+# applies that the docstring does not state (which headers are signed, an
+# empty token left out, the query and body lines only when present, the path
+# cut at "?", an IP gateway's own path). It catches a change to snc_sign, not
+# a rule the port got wrong from the start; live use checks those only for
+# the requests the integration sends.
+# ---------------------------------------------------------------------------
+
+_SNC_SIGNED = frozenset({
+    "x-app-id", "content-type", "x-api-signature-nonce", "x-timestamp",
+    "x-api-signature-version", "x-project-id", "authorization",
+    "accept-language", "x-vin", "x-device-id", "x-platform",
+})
+
+
+def _independent_snc(*, method, url, headers, body, secret):
+    import hashlib
+    import hmac
+    from base64 import b64encode
+    lines = []
+    for name, value in headers.items():
+        low = name.lower()
+        if low not in _SNC_SIGNED:
+            continue
+        if low in ("authorization", "x-vin") and not value:
+            continue        # an empty token or x-vin is not signed
+        lines.append(low + ":" + value + "\n")
+    canonical = "".join(sorted(lines))
+    base, _, query = url.partition("?")
+    pairs = []
+    for pair in query.split("&"):
+        if pair:
+            key, _, value = pair.partition("=")
+            value = value.replace("*", "%2A").replace("%2F", "/").replace("%3F", "?")
+            pairs.append(key + "=" + value)
+    if pairs:
+        canonical += "&".join(sorted(pairs)) + "\n"
+    if body and "json" in headers.get("Content-Type", "").lower():
+        canonical += b64encode(hashlib.md5(body).digest()).decode() + "\n"
+    canonical += method.upper() + "\n"
+    if ".com" in base:
+        canonical += base[base.index(".com") + 4:]
+    else:                                   # an IP gateway: the URL's own path
+        canonical += "/" + base.split("://", 1)[1].split("/", 1)[1]
+    return b64encode(hmac.new(secret.encode(), canonical.encode(),
+                              hashlib.sha256).digest()).decode()
+
+
+def _snc_headers(**more):
+    headers = {
+        "X-APP-ID": zc.SNC_APP_ID, "Accept": zc.ACCEPT,
+        "X-AGENT-TYPE": "android", "Connection": "close",
+        "Content-Type": "application/json; charset=UTF-8",
+        "User-Agent": "okhttp/4.11.0", "X-PROJECT-ID": zc.SNC_PROJECT_ID,
+        "AppId": "ONEX97FB91F061405", "X-API-SIGNATURE-VERSION": "2.0",
+        "X-API-SIGNATURE-NONCE": "00000000-0000-0000-0000-000000000001",
+        "X-TIMESTAMP": "1764150000000",
+        "X-DEVICE-ID": "00000000-0000-0000-0000-000000000002",
+        "X-PLATFORM": "APP", "X-APP-OS-VERSION": "17", "ACCEPT-LANGUAGE": "en-AU",
+    }
+    headers.update(more)
+    return headers
+
+
+def test_snc_sign_matches_a_canonical_built_apart_from_it():
+    gw = "https://sea-snc-tsp-api-gw.zeekrlife.com"
+    cases = [
+        # The login leg: a JSON body, no session yet.
+        ("POST", gw + "/ms-user-auth/v1.0/auth/login", _snc_headers(),
+         b'{"identifier":"fake-id"}'),
+        # A session and a vehicle token; a query to sort and restore.
+        ("GET", gw + "/ms-app-bff/api/v4.0/veh/vehicle-list?needSharedCar=true&a=x*y%2Fz%3F",
+         _snc_headers(Authorization="fake-access", **{"x-vin": "fake-x-vin-0123"}), b""),
+        # Empty Authorization and x-vin are left out of the canonical.
+        ("GET", gw + "/ms-vehicle-status/api/v1.0/vehicle/status/latest?target=new&latest=false",
+         _snc_headers(Authorization="", **{"x-vin": ""}), b""),
+        # A body under a content type that is not JSON is not hashed.
+        ("POST", gw + "/ms-remote-control/x", _snc_headers(**{"Content-Type": "text/plain"}),
+         b"not json"),
+        # A port after a .com host stays in the signed path, as the ported
+        # rule has it (the app's gateways carry no port).
+        ("GET", "https://gw.example.com:8443/ms-app-bff/x?b=2&a=1", _snc_headers(), b""),
+        # An IP gateway (the test mocks): the path is the URL's own.
+        ("POST", "http://127.0.0.1:8080/ms-user-auth/v1.0/auth/login", _snc_headers(),
+         b'{"identifier":"fake-id"}'),
+    ]
+    for secret in (zc.SNC_SECRET, "ZmFrZS1ldS1zZWNyZXQ="):
+        for method, url, headers, body in cases:
+            got = zc.snc_sign(method=method, url=url, headers=headers, body=body,
+                              secret=secret)
+            want = _independent_snc(method=method, url=url, headers=headers,
+                                    body=body, secret=secret)
+            assert got == want, (method, url)
+    # Two signatures pinned once from today's signer, which the live gateway
+    # accepts for the requests the integration sends. They cover two shapes,
+    # the login leg and a session with x-vin and a query to restore and sort,
+    # so a change made to the signer and to the builder above alike still
+    # shows for these two.
+    assert zc.snc_sign(method="POST", url=gw + "/ms-user-auth/v1.0/auth/login",
+                       headers=_snc_headers(), body=b'{"identifier":"fake-id"}') == \
+        "cBiyFtFxl4049dIGFWxcD514K3cb863IlZvufer3HlM="
+    assert zc.snc_sign(
+        method="GET",
+        url=gw + "/ms-app-bff/api/v4.0/veh/vehicle-list?needSharedCar=true&a=x*y%2Fz%3F",
+        headers=_snc_headers(Authorization="fake-access", **{"x-vin": "fake-x-vin-0123"}),
+        body=b"") == "IOPhbHZzpaqxFdEAygTsFS7h1wJRC4EDHfaVma7eaCA="
+
+
 def test_idaas_transport_http_errors():
     srv, url, tmp = _start_mock()
     try:
