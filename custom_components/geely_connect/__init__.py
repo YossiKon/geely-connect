@@ -738,9 +738,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         assert last_exc is not None
         raise last_exc
 
-    # Closure state: tolerate up to N consecutive failures before marking
-    # entities unavailable. With SCAN_INTERVAL_SECONDS=90 and N=2 we need
-    # ~3min of sustained failure before HA reports unavailable.
+    # Retain general entity availability for two failed polls. Contact outcome
+    # and age are independent of this grace, including at Eco's long interval.
     _FAILURE_TOLERANCE = 2
     fail_state = {"consecutive": 0}
     # Efficient-polling state: cycle counter, idle streak, last-change signature.
@@ -838,10 +837,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except Exception as e:  # noqa: BLE001
             fail_state["consecutive"] += 1
             if fail_state["consecutive"] <= _FAILURE_TOLERANCE and prev:
+                err_text = api.without_secrets(e)
+                coordinator.geely_status_success = False
+                coordinator.geely_last_status_error = f"vehicle_status: {err_text}"
                 _LOGGER.warning(
                     "vehicle_status failed (%d/%d consecutive); reusing last "
                     "snapshot: %s", fail_state["consecutive"], _FAILURE_TOLERANCE,
-                    api.without_secrets(e),
+                    err_text,
                 )
                 return prev
             # `from None`: a chained error carries its raw text into the
@@ -863,6 +865,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.debug("vehicle_status returned non-dict data: top-level=%s",
                           api.without_secrets(redact(resp)))
             data = {}
+        coordinator.geely_status_success = True
+        coordinator.geely_last_successful_contact = dt_util.utcnow()
+        coordinator.geely_last_status_error = None
 
         # The zeekr adapter renews the old-platform HF JWT silently from the
         # stored password; persist the refreshed token + expiry so the next
@@ -1068,6 +1073,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # None means "never schedule an update yourself" - manual mode.
         update_interval=None if _MANUAL else timedelta(seconds=profile["base"]),
     )
+    coordinator.geely_status_success = False
+    coordinator.geely_last_successful_contact = None
+    coordinator.geely_last_status_error = None
     await coordinator.async_config_entry_first_refresh()
 
     # Fetch the per-vehicle capability catalog once at setup. Used by
