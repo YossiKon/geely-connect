@@ -406,7 +406,7 @@ def test_mock_gateway_roundtrip():
         assert cars and cars[0]["vin"] == FAKE_VIN, f"list: {cars}"
         assert zc.vehicle_vin(cars[0]) == FAKE_VIN, "vin helper"
         assert zc.vehicle_nickname(cars[0]) == "Mock EX5", "nickname helper"
-        st3 = c.vehicle_status(FAKE_VIN, user_id="mock-uid")
+        st3 = c.vehicle_status_resp(FAKE_VIN, user_id="mock-uid")["data"]
         assert st3["vehicleStatus"]["basicVehicleStatus"]["powerLevel"] == 98, \
             f"hf status: {st3}"
         caps = c.fetch_capabilities(FAKE_VIN)
@@ -415,7 +415,7 @@ def test_mock_gateway_roundtrip():
         cs = c.charge_server_post(FAKE_VIN, {"bizType": 7})
         assert cs["code"] == "1000" and cs["data"] == {"bizType": 7}, cs
 
-        ctl = c.control(LEGACY_VIN, {"command": "start"})
+        ctl = c.control_resp(LEGACY_VIN, {"command": "start"})["data"]
         assert ctl.get("result", {}).get("code") == 1000, f"control: {ctl}"
         assert all(_EXPECTED_SIGS), f"signature failures: {_EXPECTED_SIGS}"
     finally:
@@ -496,12 +496,12 @@ def test_auth_errors_and_bad_gateway_responses():
         # Not logged in: vehicle calls refuse without an HF session.
         c = zc.ZeekrClient("user@example.com", "pw", gateway=url)
         try:
-            c.vehicle_status(FAKE_VIN)
+            c.vehicle_status_resp(FAKE_VIN)
             assert False, "expected ZeekrAuthError without an HF session"
         except zc.ZeekrAuthError:
             pass
         try:
-            c.control(FAKE_VIN, {"command": "start"})
+            c.control_resp(FAKE_VIN, {"command": "start"})
             assert False, "expected ZeekrAuthError without an HF session"
         except zc.ZeekrAuthError:
             pass
@@ -521,7 +521,7 @@ def test_auth_errors_and_bad_gateway_responses():
         _EXPECTED_SIGS.clear()
         c.hf_token = "not-a-token"
         try:
-            c.vehicle_status(FAKE_VIN)
+            c.vehicle_status_resp(FAKE_VIN)
             assert False, "expected ZeekrApiError for a bad token"
         except zc.ZeekrApiError:
             pass
@@ -669,7 +669,7 @@ def test_vehicle_status_and_no_session_guards():
         c = zc.ZeekrClient("user@example.com", "pw", gateway=url,
                            vehicle_model="E245-J1")
         c.hf_token = "mock-hf"
-        st = c.vehicle_status(FAKE_VIN)
+        st = c.vehicle_status_resp(FAKE_VIN)["data"]
         assert st["vehicleStatus"]["basicVehicleStatus"]["powerLevel"] == 98, st
 
         # fetch_capabilities with a non-list data payload -> [].
@@ -680,10 +680,10 @@ def test_vehicle_status_and_no_session_guards():
 
         # No HF session: the vehicle methods refuse with ZeekrAuthError.
         c2 = zc.ZeekrClient("user@example.com", "pw", gateway=url)
-        for call in (lambda: c2.vehicle_status(FAKE_VIN),
+        for call in (lambda: c2.vehicle_status_resp(FAKE_VIN),
                      lambda: c2.fetch_capabilities(FAKE_VIN),
                      lambda: c2.list_vehicles("mock-uid"),
-                     lambda: c2.control(FAKE_VIN, {"command": "start"}),
+                     lambda: c2.control_resp(FAKE_VIN, {"command": "start"}),
                      lambda: c2.charge_server_post(FAKE_VIN, {"bizType": 7})):
             try:
                 call()

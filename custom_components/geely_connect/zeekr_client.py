@@ -989,18 +989,10 @@ class ZeekrClient:
             token=self.hf_token, vin=vin, vehicle_model=self.vehicle_model,
             timezone=self.timezone, device_identifier=self.hf_device_id)
 
-    def vehicle_status(self, vin: str, user_id: str | None = None) -> dict:
-        """The data block only (legacy-style convenience for callers that
-        already stripped the envelope)."""
-        return self.vehicle_status_resp(vin, user_id).get("data") or {}
-
-    def control(self, vin: str, body: dict) -> dict:
-        """PUT /remote-control/vehicle/telematics/{vin} — same RemoteControlRequest
-        family as the legacy client (climate, locks, windows...)."""
-        return self.control_resp(vin, body).get("data") or {}
-
     def control_resp(self, vin: str, body: dict) -> dict:
-        """Full response for a telematics control call (HF JWT, ecloudkr)."""
+        """PUT /remote-control/vehicle/telematics/{vin} with the HF JWT
+        (ecloudkr), the full response - the same RemoteControlRequest family
+        as the legacy client (climate, locks, windows...)."""
         if not self.hf_token:
             raise ZeekrAuthError("not logged in (no HF session)")
         return self._hf_request(
