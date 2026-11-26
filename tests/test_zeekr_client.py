@@ -106,11 +106,11 @@ class _MockGW(BaseHTTPRequestHandler):
                 ok = False
                 _EXPECTED_SIGS.append(False)
 
-        if pth == "/user-service/device/code":
-            if self.headers.get("X-BAD") == "1":
-                self.send_response(500)
-                self.end_headers()
-                return
+        if pth == "/user-service/device/http500":
+            self.send_response(500)
+            self.end_headers()
+            return
+        elif pth == "/user-service/device/code":
             payload = {"code": "1000", "success": True, "message": "ok",
                        "data": {"ddcCode": "MOCKDDC123"}}
         elif pth == "/ms-user-auth/v1.0/auth/login":
@@ -632,14 +632,13 @@ def test_vehicle_status_and_no_session_guards():
         _stop_mock(srv, tmp)
 
 
-def test_request_extra_and_query_options():
+def test_request_body_and_query_options():
     _EXPECTED_SIGS.clear()
     srv, url, tmp = _start_mock()
     try:
         c = zc.ZeekrClient("user@example.com", "pw", gateway=url)
-        # An extra header rides along; X-EXTRA is not one the snc signer includes.
-        resp = c._request("POST", "/user-service/device/code", body=b"{}",
-                          extra={"X-EXTRA": "1"})
+        # A body is sent and signed.
+        resp = c._request("POST", "/user-service/device/code", body=b"{}")
         assert resp["data"]["ddcCode"] == "MOCKDDC123", resp
         # query param is appended and signed.
         resp2 = c._request("GET", "/user-service/device/code", query="a=1")
@@ -661,8 +660,7 @@ def test_plain_http_transport_branches():
         c = zc.ZeekrClient("user@example.com", "pw", gateway=url)
         # An snc-signed call over plain HTTP, its signature recomputed by
         # the mock, then the ms-user-auth leg.
-        resp = c._request("POST", "/user-service/device/code", body=b"{}",
-                          urlname="user-api")
+        resp = c._request("POST", "/user-service/device/code", body=b"{}")
         assert resp["data"]["ddcCode"] == "MOCKDDC123", resp
         assert _EXPECTED_SIGS, "the snc-signed call was not checked"
         c._ms_user_auth_login("mock-tv")
@@ -726,8 +724,7 @@ def test_tsp_gateway_http_500():
     try:
         c = zc.ZeekrClient("user@example.com", "pw", gateway=url)
         try:
-            c._request("POST", "/user-service/device/code", body=b"{}",
-                       extra={"X-BAD": "1"})
+            c._request("POST", "/user-service/device/http500", body=b"{}")
             assert False, "expected ZeekrApiError for HTTP 500"
         except zc.ZeekrApiError as e:
             assert "500" in str(e), f"unexpected message: {e}"

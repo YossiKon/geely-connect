@@ -775,9 +775,7 @@ class ZeekrClient:
     # ---- transport ----------------------------------------------------------
 
     def _request(self, method: str, path: str, *, body: bytes = b"",
-                 urlname: str | None = None, query: str = "",
-                 extra: dict | None = None, bearer: bool = False,
-                 hide: Iterable[Any] = ()) -> dict:
+                 query: str = "", hide: Iterable[Any] = ()) -> dict:
         """One snc-signed call to the new gateway. Its error text leaves out
         what hidden() names as the call goes out, and each of `hide` - a
         sign-in code the body carries."""
@@ -786,7 +784,6 @@ class ZeekrClient:
         port = p.port or (443 if p.scheme == "https" else 80)
         ts_ms = str(int(time.time() * 1000))
         headers = {
-            # Set again below; first here so the headers keep their order.
             "X-APP-ID": SNC_APP_ID,
             "Accept": ACCEPT,
             "X-AGENT-TYPE": "android",
@@ -795,16 +792,11 @@ class ZeekrClient:
             "Content-Type": "application/json; charset=utf-8",
             "User-Agent": "okhttp/4.11.0",
         }
-        if urlname:
-            headers["urlname"] = urlname
-        if extra:
-            headers.update(extra)
         # Authorization rides INSIDE the snc canonical (the app's nj/a
         # interceptor adds it before nj/h signs), so attach it before
-        # computing X-SIGNATURE.
+        # computing X-SIGNATURE. It carries the bare token, as every call has.
         if self.access_token:
-            headers["Authorization"] = (
-                f"Bearer {self.access_token}" if bearer else self.access_token)
+            headers["Authorization"] = self.access_token
         # snc stack: derived app identity + the header set the app's own
         # SignInterceptor signs (nj/a.java + nj/h.java). The app uses a UUID
         # nonce on this gateway rather than the 32-char random string the
@@ -813,7 +805,6 @@ class ZeekrClient:
         if self.enc_vin:
             headers["x-vin"] = self.enc_vin
         headers.update({
-            "X-APP-ID": SNC_APP_ID,
             "X-PROJECT-ID": self.profile.snc_project_id if self.profile else SNC_PROJECT_ID,
             "AppId": "ONEX97FB91F061405",
             "X-API-SIGNATURE-VERSION": "2.0",
