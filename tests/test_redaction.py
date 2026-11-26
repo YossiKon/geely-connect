@@ -75,14 +75,40 @@ def test_pin_field_is_masked_because_it_carries_the_vin():
 
 
 def test_the_certificate_paths_are_masked_by_both_passes():
-    """cert_path and key_path read .storage/geely_connect/<VIN>/...: the second
-    pass dropped them and the first let them through, which is exactly the
-    drift the two lists exist to prevent."""
-    out = api.redact({"cert_path": f"/config/.storage/geely_connect/{FAKE_VIN}/cert.pem",
-                      "keyPath": f"/config/.storage/geely_connect/{FAKE_VIN}/key.pem"})
-    assert out == {"cert_path": "***redacted***", "keyPath": "***redacted***"}, out
+    """cert_path, key_path and legacy_cert_paths carry VINs: both redaction
+    passes must drop all three so neither is a single point of failure."""
+    sample = {
+        "cert_path": f"/config/.storage/geely_connect/{FAKE_VIN}/cert.pem",
+        "keyPath": f"/config/.storage/geely_connect/{FAKE_VIN}/key.pem",
+        "legacy_cert_paths": [{"vin": FAKE_VIN}],
+    }
+    out = api.redact(sample)
+    assert out == {
+        "cert_path": "***redacted***",
+        "keyPath": "***redacted***",
+        "legacy_cert_paths": "***redacted***",
+    }, out
+    assert FAKE_VIN not in str(out)
     diag = load("diagnostics")
-    assert {"cert_path", "key_path"} <= diag._REDACT
+    assert {"cert_path", "key_path", "legacy_cert_paths"} <= diag._REDACT
+
+
+def test_legacy_vin_records_are_masked_even_by_v161_style_redaction():
+    """Rolling back to v1.61.0 leaves an entry with legacy_cert_paths on a build
+    whose redaction lists do not know that key. Storing [{"vin": "<old>"}]
+    ensures redaction knowing only "vin" still masks every stored legacy VIN."""
+    from unittest.mock import patch
+    sample = {"legacy_cert_paths": [{"vin": FAKE_VIN}]}
+    v161_secret_keys = api._SECRET_KEYS - {"legacycertpaths"}
+    with patch.object(api, "_SECRET_KEYS", v161_secret_keys):
+        out = api.redact(sample)
+    assert out == {"legacy_cert_paths": [{"vin": f"...{FAKE_VIN[-4:]}"}]}, out
+    assert FAKE_VIN not in str(out)
+    if have_homeassistant():
+        diag = load("diagnostics")
+        ha_out = diag.async_redact_data(sample, {"vin"})
+        assert ha_out == {"legacy_cert_paths": [{"vin": "**REDACTED**"}]}, ha_out
+        assert FAKE_VIN not in str(ha_out)
 
 
 def test_the_login_account_and_an_authorization_header_are_covered():
@@ -237,7 +263,7 @@ _A_REPORT_MAY_SHOW = {
 }
 _A_REPORT_MUST_HIDE = {
     "email", "user_id", "vin", "device_id", "device_idfa", "device_idfv",
-    "cert_path", "key_path", "cidpsso_token",
+    "cert_path", "key_path", "legacy_cert_paths", "cidpsso_token",
     "zeekr_access_token", "zeekr_refresh_token", "zeekr_hf_token",
     "zeekr_password", "zeekr_enc_vin",
 }

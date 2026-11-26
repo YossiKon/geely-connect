@@ -150,10 +150,11 @@ _SECRET_KEYS: set = {
     # with its secret (region_keys.py, #105); "appsecret" is covered above.
     "appid",
     # The entry's certificate and key paths are named after the VIN
-    # (.storage/geely_connect/<VIN>/cert.pem). diagnostics._REDACT drops them;
-    # this pass used to let them through, which is the drift the two lists
-    # exist to prevent.
-    "certpath", "keypath",
+    # (.storage/geely_connect/<VIN>/cert.pem), and legacy_cert_paths records
+    # retired vehicle VINs for cleanup on removal. diagnostics._REDACT drops
+    # them; this pass used to let cert_path/key_path through, which is the
+    # drift the two lists exist to prevent.
+    "certpath", "keypath", "legacycertpaths",
     # The new platform's HF JWT travels in an Authorization header. No path
     # folds headers into a log today; the hedge costs nothing.
     "authorization",
@@ -704,12 +705,13 @@ def _load_pin_store(pin_path: str | None) -> dict[str, dict]:
             raw = json.load(fh)
     except (OSError, ValueError) as e:
         # The OS error names the file, and the file sits in a directory named
-        # after the VIN - mask the error text as well as the path.
+        # after the VIN - mask the error text as well as the path, and drop
+        # the original cause so a formatted traceback does not print it raw.
         raise GeelyTLSPinError(
             f"{mask_path(pin_path)} exists but could not be read ({mask_path(e)}). "
             "Refusing to continue without the pins it should contain - fix or "
             "delete it."
-        ) from e
+        ) from None
     if not isinstance(raw, dict):
         raise GeelyTLSPinError(f"{mask_path(pin_path)} is not a JSON object; refusing to use it")
 
@@ -886,10 +888,12 @@ def _secure_tls_connect(host: str, port: int, *, pin_path: str | None,
         _save_pin_store(pin_path, store)
     except OSError as e:
         ssock.close()
+        # Drop the raw OSError cause so formatted tracebacks do not print the
+        # unmasked VIN directory inside pin_path.
         raise GeelyTLSPinError(
             f"{host}: could not persist the first-use pin to {mask_path(pin_path)} "
             f"({mask_path(e)}); refusing to continue unverified."
-        ) from e
+        ) from None
     _LOGGER.warning(
         "%s is not publicly-trusted and ships no bundled pin; recorded its "
         "public key on first use: %s. Later connections require this exact "

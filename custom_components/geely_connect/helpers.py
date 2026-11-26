@@ -15,8 +15,9 @@ import hashlib
 import logging
 import math
 import os
+import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import homeassistant.util.yaml as yaml_util
@@ -25,15 +26,122 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 
 from .const import (
+    CONF_CERT_PATH,
+    CONF_KEY_PATH,
+    CONF_LEGACY_CERT_PATHS,
     CONF_VEHICLE_COLOR,
     CONF_VEHICLE_MODEL_CODE,
     CONF_VEHICLE_NICKNAME,
     CONF_VEHICLE_POWER_TYPE,
     CONF_VEHICLE_SERIES,
+    CONF_VIN,
     DOMAIN,
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+_VIN_DIR_RE = re.compile(r"[A-Za-z0-9]{8,20}")
+
+
+def _validated_storage_dir(
+    root: str,
+    original: str,
+    *,
+    source: str,
+    warn: bool,
+) -> str | None:
+    """Return `<root>/<vin>` when `original` resolves directly inside `root`.
+
+    Refuses non-VIN basenames, symlinks, junctions, and anything whose parent
+    or target resolves outside `root`.
+    """
+    name = os.path.basename(original)
+    directory = os.path.join(root, name)
+    if (not _VIN_DIR_RE.fullmatch(name)
+            or os.path.commonpath([directory, root]) != root
+            or os.path.realpath(os.path.dirname(original)) != root
+            or os.path.islink(original)
+            or os.path.realpath(original) != directory):
+        if warn:
+            _LOGGER.warning(
+                "Ignoring unsafe %s reference: must be a non-symlinked "
+                "vehicle directory inside integration storage",
+                source,
+            )
+        return None
+    return directory
+
+
+def legacy_material_dirs(
+    hass: HomeAssistant,
+    data: dict,
+    existing_only: bool = False,
+    *,
+    include_legacy: bool = True,
+    warn: bool = True,
+) -> list[str]:
+    """Validated immediate vehicle directories, never the storage root.
+
+    Runs in the executor: realpath checks must not block HA's event loop.
+    Symlinked vehicle directories and paths outside our root are refused.
+    `include_legacy=False` inspects only active references (cert/key paths
+    and current VIN), used when checking whether surviving sibling entries
+    still rely on a directory.
+    """
+    root = os.path.realpath(os.path.join(hass.config.path(".storage"), DOMAIN))
+    candidates: list[tuple[str, str]] = []
+
+    for key in (CONF_CERT_PATH, CONF_KEY_PATH):
+        path = data.get(key)
+        if not path:
+            continue
+        if (not isinstance(path, str)
+                or "\x00" in path
+                or not os.path.isabs(path)
+                or os.path.basename(path) not in ("cert.pem", "key.pem")):
+            if warn:
+                _LOGGER.warning(
+                    "Ignoring invalid %s reference: expected an absolute "
+                    "cert.pem or key.pem path",
+                    key,
+                )
+            continue
+        candidates.append((key, os.path.abspath(os.path.dirname(path))))
+
+    vin = data.get(CONF_VIN)
+    if isinstance(vin, str) and _VIN_DIR_RE.fullmatch(vin):
+        candidates.append((CONF_VIN, os.path.join(root, vin)))
+
+    if include_legacy:
+        retained = data.get(CONF_LEGACY_CERT_PATHS)
+        if isinstance(retained, (list, tuple)):
+            for item in retained:
+                old_vin = item.get(CONF_VIN) if isinstance(item, Mapping) else None
+                if not isinstance(old_vin, str) or not _VIN_DIR_RE.fullmatch(old_vin):
+                    if warn:
+                        _LOGGER.warning(
+                            "Ignoring invalid %s entry: expected a valid VIN record",
+                            CONF_LEGACY_CERT_PATHS,
+                        )
+                    continue
+                candidates.append((CONF_LEGACY_CERT_PATHS, os.path.join(root, old_vin)))
+        elif retained is not None and warn:
+            _LOGGER.warning(
+                "Ignoring invalid %s value: expected a list of VIN records",
+                CONF_LEGACY_CERT_PATHS,
+            )
+
+    directories: list[str] = []
+    for source, original in candidates:
+        directory = _validated_storage_dir(root, original, source=source, warn=warn)
+        if directory is None:
+            continue
+        if existing_only and not os.path.isdir(directory):
+            continue
+        if directory not in directories:
+            directories.append(directory)
+    return directories
 
 
 def vehicle_metadata(vehicle: dict) -> dict[str, str]:

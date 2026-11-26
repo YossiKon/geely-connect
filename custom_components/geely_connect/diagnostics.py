@@ -37,7 +37,7 @@ from .helpers import api_serves
 # which carries the VIN, into the report.
 _REDACT = {
     "token", "cidpsso_token", "accessToken", "access_token", "authCode",
-    "cert_path", "key_path", "user_id", "userId", "vin", "device_id",
+    "cert_path", "key_path", "legacy_cert_paths", "user_id", "userId", "vin", "device_id",
     "device_idfa", "device_idfv", "email",
     "latitude", "longitude", "lat", "lon", "lng",
     # New Geely EM (Zeekr) platform, forward-support for #33: the account

@@ -66,6 +66,7 @@ from .const import (
     CONF_DEVICE_IDFV,
     CONF_EMAIL,
     CONF_KEY_PATH,
+    CONF_LEGACY_CERT_PATHS,
     CONF_POLL_MODE,
     CONF_PRESSURE_UNIT,
     CONF_USER_ID,
@@ -73,7 +74,13 @@ from .const import (
     CONF_VIN,
     DOMAIN,
 )
-from .helpers import PasswordKeyError, password_encrypt, quote_failure, vehicle_metadata
+from .helpers import (
+    PasswordKeyError,
+    legacy_material_dirs,
+    password_encrypt,
+    quote_failure,
+    vehicle_metadata,
+)
 from .region_keys import LocalRegionKeysError, load_region_backend
 from .zeekr_regions import (
     RegionKeysError, ZeekrRegion, load_region_profile,
@@ -950,6 +957,26 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if self._reauth_entry is not None:
             entry = self._reauth_entry
             new_data = dict(entry.data)
+            # Keep any existing validated legacy VIN before replacing the VIN
+            # and dropping legacy credentials. Stored as {"vin": ...} records so
+            # rollback to older versions still masks them via the "vin" key and
+            # removal rebuilds paths from the current storage root after a move.
+            try:
+                directories = await self.hass.async_add_executor_job(
+                    legacy_material_dirs, self.hass, entry.data, True)
+            except Exception as e:  # noqa: BLE001 - best-effort retention
+                _LOGGER.warning(
+                    "could not inspect legacy credential directory (%s)",
+                    type(e).__name__,
+                )
+            else:
+                if directories:
+                    new_data[CONF_LEGACY_CERT_PATHS] = [
+                        {CONF_VIN: os.path.basename(directory)}
+                        for directory in directories
+                    ]
+                else:
+                    new_data.pop(CONF_LEGACY_CERT_PATHS, None)
             new_data[CONF_PLATFORM] = PLATFORM_ZEEKR
             new_data[CONF_ZEEKR_REGION] = self._zeekr_region
             new_data[CONF_ZEEKR_ACCESS_TOKEN] = tokens[0]

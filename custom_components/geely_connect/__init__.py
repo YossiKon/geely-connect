@@ -5,7 +5,6 @@ import asyncio
 import functools
 import logging
 import os
-import re
 import shutil
 import socket
 from datetime import timedelta
@@ -85,9 +84,9 @@ from .const import (
     region_config,
 )
 from .helpers import (api_can_send, api_reads_charge_server, api_serves,
-                      password_decrypt, vehicle_metadata, schedule_refresh,
-                      speed_is_stale, schedule_read_due, schedule_read_missed,
-                      schedule_read_result)
+                      legacy_material_dirs, password_decrypt, vehicle_metadata,
+                      schedule_refresh, speed_is_stale, schedule_read_due,
+                      schedule_read_missed, schedule_read_result)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1528,52 +1527,47 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     # A Repairs issue outliving the entry it was about would point at a
     # Configure page that no longer exists.
     ir.async_delete_issue(hass, DOMAIN, _x_vin_issue_id(entry))
-    expected_root = os.path.join(hass.config.path(".storage"), DOMAIN)
-    cert_path = entry.data.get(CONF_CERT_PATH)
-    if cert_path:
-        vin_dir = os.path.dirname(cert_path)
-    else:
-        # An entry that moved to the new platform dropped its certificate
-        # paths but not the files: the key stayed on disk, in every backup
-        # since, with nothing left pointing at it. The directory is named
-        # after the VIN, so it can still be found - under the root check below.
-        vin = entry.data.get(CONF_VIN)
-        if not isinstance(vin, str) or not re.fullmatch(r"[A-Za-z0-9]{8,20}", vin):
-            return
-        vin_dir = os.path.join(expected_root, vin)
-        if not await hass.async_add_executor_job(os.path.isdir, vin_dir):
-            return
-    # Only ever inside our own storage directory, never a path the server chose.
-    if os.path.commonpath([os.path.abspath(vin_dir),
-                           os.path.abspath(expected_root)]) != os.path.abspath(expected_root):
-        _LOGGER.warning("refusing to remove %s: outside the integration's storage",
-                        geely_api.mask_path(vin_dir))
-        return
-    # Never another entry's material. Two entries on one car - which a
+    directories = await hass.async_add_executor_job(legacy_material_dirs, hass, entry.data)
+    # Never another entry's active material. Two entries on one car - which a
     # re-authentication in an earlier version could leave behind - share the
-    # VIN-named directory, and removing one must not cut the other off.
-    target = os.path.abspath(vin_dir)
+    # VIN-named directory, and removing one must not cut the other off. A
+    # sibling's retired legacy_cert_paths does not keep an unowned key alive.
+    shared: set[str] = set()
     for other in hass.config_entries.async_entries(DOMAIN):
-        if other.entry_id == entry.entry_id:
+        if other.entry_id != entry.entry_id:
+            shared.update(await hass.async_add_executor_job(
+                functools.partial(
+                    legacy_material_dirs,
+                    hass,
+                    other.data,
+                    include_legacy=False,
+                    warn=False,
+                )
+            ))
+    for vin_dir in directories:
+        masked_vin = (geely_api.AnyCase(os.path.basename(vin_dir)),)
+        masked_dir = geely_api.hide_values(geely_api.mask_path(vin_dir), masked_vin)
+        if vin_dir in shared:
+            if await hass.async_add_executor_job(os.path.lexists, vin_dir):
+                _LOGGER.info("keeping %s: another entry still uses it", masked_dir)
             continue
-        other_cert = other.data.get(CONF_CERT_PATH)
-        if (other.data.get(CONF_VIN) == os.path.basename(target)
-                or (other_cert
-                    and os.path.abspath(os.path.dirname(other_cert)) == target)):
-            _LOGGER.info("keeping %s: another entry still uses it",
-                         geely_api.mask_path(vin_dir))
-            return
-    try:
-        await hass.async_add_executor_job(
-            functools.partial(shutil.rmtree, vin_dir, ignore_errors=True)
-        )
-    except Exception as e:  # noqa: BLE001 - removal is best-effort
-        _LOGGER.warning("could not remove %s (%s); delete it by hand to be sure "
-                        "the vehicle key is gone", geely_api.mask_path(vin_dir),
-                        geely_api.mask_path(e))
-    else:
-        _LOGGER.info("Removed stored certificate and key for %s",
-                     geely_api.mask_path(vin_dir))
+        existed = True
+        try:
+            await hass.async_add_executor_job(shutil.rmtree, vin_dir)
+        except FileNotFoundError:
+            # Missing directory is already clean; a missing child during a
+            # partial removal is not proof the directory itself disappeared.
+            existed = False
+        except Exception as e:  # noqa: BLE001 - removal is best-effort
+            reason = geely_api.hide_values(geely_api.mask_path(e), masked_vin)
+            _LOGGER.warning("could not remove %s (%s); delete it by hand to be sure "
+                            "the vehicle key is gone", masked_dir, reason)
+            continue
+        if await hass.async_add_executor_job(os.path.lexists, vin_dir):
+            _LOGGER.warning("could not remove %s; legacy material remains on disk",
+                            masked_dir)
+        elif existed:
+            _LOGGER.info("Removed stored certificate and key for %s", masked_dir)
 
 
 # Unique-id fragments of the entities that ship disabled from v3 onwards.
