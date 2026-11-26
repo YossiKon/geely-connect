@@ -1208,8 +1208,6 @@ def test_the_simple_read_endpoints_hit_their_documented_paths():
     for call, path in (
         (a.vehicle_status_state,
          f"/remote-control/vehicle/status/state/{FAKE_VIN}"),
-        (a.charging_reservation,
-         f"/remote-control/charging/reservation/{FAKE_VIN}"),
         (lambda: a.charge_server_get("6"),
          f"/charge-server/ecarx_charge_set/{FAKE_VIN}?bizType=6"),
     ):

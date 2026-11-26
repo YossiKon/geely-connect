@@ -103,10 +103,6 @@ class Verdict:
     fuel_type: str = ""          # configuration.fuelType, corroboration only
 
     @property
-    def is_hybrid(self) -> bool:
-        return self.kind is Propulsion.HYBRID
-
-    @property
     def charges(self) -> bool:
         """Whether charging entities make sense on this car.
 

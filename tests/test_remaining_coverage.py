@@ -30,17 +30,6 @@ class _Coord:
         self.refreshes += 1
 
 
-# ---------------------------------------------------------------- propulsion ---
-
-def test_is_hybrid_is_the_kind_question_not_the_plug_one():
-    """A PHEV and an HEV are both hybrids; a BEV is not. The property is
-    consumed by humans reading diagnostics, so it must track `kind` alone."""
-    _ha()
-    p = load("propulsion")
-    assert p.classify("混动", {}).is_hybrid is True
-    assert p.classify("纯电动", {}).is_hybrid is False
-
-
 # ------------------------------------------------------------- binary sensor ---
 
 def test_connectivity_is_available_even_when_the_cloud_is_not():

@@ -285,13 +285,14 @@ def test_charge_power_is_a_power_entity_so_statistics_work():
 
 def test_the_raw_charge_fields_are_not_duplicated_by_full_exposure():
     """Each of the four paths a computed sensor owns must be excluded from the
-    raw pass, or turning it on yields a twin of every one."""
+    raw pass, or turning it on yields a twin of every one. The setup adds
+    _CHARGE_LEG_PATHS to what the raw pass skips on a car that charges."""
     if not have_homeassistant():
         skip("homeassistant not installed")
     sensor = load("sensor")
     ev = "vehicleStatus.additionalVehicleStatus.electricVehicleStatus"
     for k in ("chargeUAct", "chargeIAct", "dcChargeUAct", "dcChargeIAct"):
-        assert f"{ev}.{k}" in sensor._CURATED_PATHS, k
+        assert f"{ev}.{k}" in sensor._CHARGE_LEG_PATHS, k
 
 
 # ---------------------------------------------------- the DC session of #10 -

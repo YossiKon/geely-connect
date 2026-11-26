@@ -446,13 +446,6 @@ _CHARGE_LEG_PATHS = frozenset(
     ".".join((*_EV, k))
     for k in ("chargeUAct", "chargeIAct", "dcChargeUAct", "dcChargeIAct"))
 
-# Every path a curated or computed sensor CAN own. The full-exposure pass
-# skips a path only when the owning entity was actually created for this car
-# (see async_setup_entry) - suppressing a field whose curated twin does not
-# exist would make it invisible everywhere, breaking full exposure's contract.
-_CURATED_PATHS: set[str] = ({".".join(spec[2]) for spec in (*SENSOR_SPECS, *HYBRID_SPECS)}
-                            | _CHARGE_LEG_PATHS)
-
 
 _MAX_FLATTEN_DEPTH = 12   # deeper than any real status payload nests
 _MAX_LIST_ITEMS = 64      # indexed list entries kept per list

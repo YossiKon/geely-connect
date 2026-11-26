@@ -656,7 +656,8 @@ def _get_json(url: str, headers: dict, hide: Iterable[Any] = ()) -> dict:
 
 
 class ZeekrIdaas:
-    """IDaaS user-center client: checkUserV2 / captcha-email / loginByEmailEncrypt."""
+    """IDaaS user-center client: loginByEmailEncrypt with the password, and
+    user/tspCode."""
 
     def __init__(self, gateway: str | None = None, path: str | None = None,
                  country: str = "AU", profile: ZeekrRegion | None = None):
@@ -672,35 +673,6 @@ class ZeekrIdaas:
         return idaas_headers(method, path, body, query=query,
                              country=self.country, token=token, profile=self.profile)
 
-    def check_user(self, email: str) -> dict:
-        body = {"email": email, "checkType": "1"}
-        resp = _post_json(f"{self.base}/auth/checkUserV2", body,
-                          self._headers("POST", f"/{self.path}/auth/checkUserV2", json.dumps(body).encode()),
-                          (email,))
-        return _check_resp(resp, hide=(email,)).get("data") or {}
-
-    def request_code(self, email: str, operation_type: str = "login") -> dict:
-        """captcha/email: sends the OTP email, returns SendCodeResponse (codeId)."""
-        body = {"email": email, "operationType": operation_type,
-                "humanMachineTicket": "", "language": "en"}
-        resp = _post_json(f"{self.base}/captcha/email", body,
-                          self._headers("POST", f"/{self.path}/captcha/email", json.dumps(body).encode()),
-                          (email,))
-        return _check_resp(resp, hide=(email,)).get("data") or {}
-
-    def login_by_email(self, email: str, code_id: str, code: str) -> str:
-        """loginByEmailEncrypt -> tokenValue. password omitted for OTP-only accounts."""
-        body = {"email": email, "codeId": code_id, "code": code}
-        resp = _post_json(f"{self.base}/auth/loginByEmailEncrypt", body,
-                          self._headers("POST", f"/{self.path}/auth/loginByEmailEncrypt",
-                                        json.dumps(body).encode()),
-                          (email,))
-        data = _check_resp(resp, hide=(email,)).get("data") or {}
-        token = data.get("tokenValue")
-        if not token:
-            raise ZeekrAuthError(f"loginByEmailEncrypt returned no tokenValue: {_detail(resp, (email,))}")
-        return token
-
     def login_by_email_password(self, email: str, password: str) -> str:
         """loginByEmailEncrypt{email, RSA(password)} -> tokenValue (post-switch)."""
         body = {"email": email, "password": _rsa_encrypt_password(password)}
@@ -713,52 +685,6 @@ class ZeekrIdaas:
         if not token:
             raise ZeekrAuthError(f"loginByEmailEncrypt(password) returned no tokenValue: {_detail(resp, (email,))}")
         return token
-
-    def edit_password(self, email: str, code_id: str, code: str, password: str) -> dict:
-        """editPasswordByEmailEncrypt: reset password with a reset-op OTP."""
-        body = {"email": email, "codeId": code_id, "code": code,
-                "password": _rsa_encrypt_password(password)}
-        resp = _post_json(f"{self.base}/auth/editPasswordByEmailEncrypt", body,
-                          self._headers("POST", f"/{self.path}/auth/editPasswordByEmailEncrypt",
-                                        json.dumps(body).encode()),
-                          (email,))
-        return _check_resp(resp, hide=(email,)).get("data") or {}
-
-    def verify_code(self, account: str, code_id: str, code: str,
-                    operation_type: str = "addPassword") -> bool:
-        """captcha/verify: validates the OTP before completing the operation."""
-        body = {"account": account, "code": code, "codeId": code_id,
-                "operationType": operation_type}
-        resp = _post_json(f"{self.base}/captcha/verify", body,
-                          self._headers("POST", f"/{self.path}/captcha/verify",
-                                        json.dumps(body).encode()),
-                          (account,))
-        data = _check_resp(resp, hide=(account,)).get("data")
-        return data is True
-
-    def complete_migration(self, email: str, code_id: str, code: str, password: str,
-                           first_name: str, last_name: str) -> dict:
-        """completeMigration: set password for old-geely accounts, returns
-        LoginTokenResponse {tokenValue, uuid, ...} (login included)."""
-        body = {"email": email, "codeId": code_id, "code": code,
-                "password": _rsa_encrypt_password(password),
-                "firstName": first_name, "lastName": last_name}
-        resp = _post_json(f"{self.base}/auth/completeMigration", body,
-                          self._headers("POST", f"/{self.path}/auth/completeMigration",
-                                        json.dumps(body).encode()),
-                          (email,))
-        data = _check_resp(resp, hide=(email,)).get("data") or {}
-        if not data.get("tokenValue"):
-            raise ZeekrAuthError(f"completeMigration returned no tokenValue: {_detail(resp, (email,))}")
-        return data
-
-    def user_info(self, token_value: str) -> dict:
-        """POST /user/info (empty body) with the login token: confirms identity."""
-        resp = _post_raw_json(
-            f"{self.base}/user/info", b"",
-            self._headers("POST", f"/{self.path}/user/info", b"",
-                          token=token_value))
-        return _check_resp(resp, hide=(token_value,)).get("data") or {}
 
     def tsp_code(self, token_value: str, client_id: str = _IDAAS_TSP_CLIENT) -> dict:
         """user/tspCode: exchange the IDaaS login token for a TSP auth code.
@@ -997,11 +923,6 @@ class ZeekrClient:
             raise ZeekrAuthError("login returned no accessToken: "
                                  f"{_detail(auth, (*sent, *self.hidden(), identifier))}")
 
-    def login_otp(self, token_value: str) -> None:
-        """IDaaS OTP path: the user-center tokenValue as the ms-user-auth
-        identifier (identityType 10), same unsigned leg."""
-        self._ms_user_auth_login(token_value)
-
     def login_tsp(self, token_value: str) -> None:
         """New-platform chain (app-verified 2026-08-10): tokenValue ->
         user/tspCode?tspClientId=... -> ms-user-auth{identifier: tspCode,
@@ -1055,16 +976,6 @@ class ZeekrClient:
     # with the HF JWT (capture-verified 2026-08-10): status, capability and
     # vehicle-list all hit ecloudkr with the raw HF JWT + vehicle headers.
 
-    def get_vehicle_status(self, vin: str) -> dict:
-        if not self.hf_token:
-            raise ZeekrAuthError("not logged in (no HF session)")
-        resp = self._hf_request(
-            "GET", f"/remote-control/vehicle/status/{vin}",
-            query=f"userId={self.user_id or ''}",
-            token=self.hf_token, vin=vin, vehicle_model=self.vehicle_model,
-            timezone=self.timezone, device_identifier=self.hf_device_id)
-        return resp.get("data") or {}
-
     def vehicle_status_resp(self, vin: str, user_id: str | None = None) -> dict:
         """Full BaseResult envelope for the old-platform status endpoint
         (remote-control/vehicle/status/{vin}?userId=...) with the HF JWT.
@@ -1082,25 +993,6 @@ class ZeekrClient:
         """The data block only (legacy-style convenience for callers that
         already stripped the envelope)."""
         return self.vehicle_status_resp(vin, user_id).get("data") or {}
-
-    def refresh_session(self) -> bool:
-        """PUT /auth/account/session/secure with the refresh token (Ecarx
-        refreshTspToken family). Returns True on success (new accessToken set)."""
-        if not self.refresh_token:
-            return False
-        body = json.dumps({"refreshToken": self.refresh_token,
-                           "morecloud": "0"}).encode()
-        try:
-            resp = self._request("PUT", "/auth/account/session/secure",
-                                 body=body, urlname="user-api")
-        except ZeekrApiError:
-            return False
-        data = resp.get("data") or {}
-        new_token = data.get("accessToken")
-        if new_token:
-            self.access_token = new_token
-            return True
-        return False
 
     def control(self, vin: str, body: dict) -> dict:
         """PUT /remote-control/vehicle/telematics/{vin} — same RemoteControlRequest

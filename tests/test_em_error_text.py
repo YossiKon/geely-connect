@@ -509,7 +509,7 @@ def test_the_sign_in_service_leaves_out_the_email_and_the_login_token():
     assert "3001" in str(e), e
     e = _raises(_through, _says(200, {"success": True,
                                       "data": {"note": f"welcome {EMAIL}"}}),
-                idaas.login_by_email, EMAIL, "fake-id", "123456")
+                idaas.login_by_email_password, EMAIL, "fake-password")
     _clean(str(e))
     assert "returned no tokenValue" in str(e), e
     e = _raises(_through, _says(401, {"message": f"login token {LOGIN} expired"}),

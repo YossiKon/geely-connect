@@ -191,27 +191,6 @@ class _MockGW(BaseHTTPRequestHandler):
             self.send_response(500)
             self.end_headers()
             return
-        elif pth == "/zeekr-cuc-idaas-sea/auth/checkUserV2":
-            payload = {"code": "1000", "success": True, "message": "ok",
-                       "data": {"uuid": "mock-uuid", "passwordSet": 1}}
-        elif pth == "/zeekr-cuc-idaas-sea/captcha/email":
-            payload = {"code": "1000", "success": True, "message": "ok",
-                       "data": {"codeId": "mock-code-id"}}
-        elif pth == "/zeekr-cuc-idaas-sea/captcha/verify":
-            payload = {"code": "1000", "success": True, "message": "ok",
-                       "data": True}
-        elif pth == "/zeekr-cuc-idaas-sea/auth/editPasswordByEmailEncrypt":
-            payload = {"code": "1000", "success": True, "message": "ok", "data": {}}
-        elif pth == "/zeekr-cuc-idaas-sea/auth/completeMigration":
-            try:
-                req = json.loads(body)
-            except Exception:
-                req = {}
-            if req.get("email") == "empty@example.com":
-                payload = {"code": "1000", "success": True, "message": "ok", "data": {}}
-            else:
-                payload = {"code": "1000", "success": True, "message": "ok",
-                           "data": {"tokenValue": "mock-migrated-tv", "uuid": "mock-uuid"}}
         elif pth == "/zeekr-cuc-idaas-sea/auth/loginByEmailEncrypt":
             try:
                 req = json.loads(body)
@@ -222,9 +201,6 @@ class _MockGW(BaseHTTPRequestHandler):
             else:
                 payload = {"code": "1000", "success": True, "message": "ok",
                            "data": {"tokenValue": "mock-tv"}}
-        elif pth == "/zeekr-cuc-idaas-sea/user/info":
-            payload = {"code": "1000", "success": True, "message": "ok",
-                       "data": {"email": "user@example.com"}}
         elif pth == "/zeekr-cuc-idaas-sea/user/tspCode":
             payload = {"code": "1000", "success": True, "message": "ok",
                        "data": {"code": "mock-tsp-code", "clientId": "mock-client"}}
@@ -237,11 +213,7 @@ class _MockGW(BaseHTTPRequestHandler):
                 req = json.loads(body)
             except Exception:
                 req = {}
-            if req.get("refreshToken") == "fail":
-                self.send_response(500)
-                self.end_headers()
-                return
-            if req.get("refreshToken") == "empty" or req.get("authCode") == "empty":
+            if req.get("authCode") == "empty":
                 payload = {"code": "1000", "success": True, "message": "ok", "data": {}}
             elif (self.headers.get("x-app-id") == zc.HF_APP_ID
                     and str(self.headers.get("x-api-signature-version", "")).startswith("1")):
@@ -250,8 +222,11 @@ class _MockGW(BaseHTTPRequestHandler):
                            "data": {"accessToken": "mock-hf", "expiresIn": 172800,
                                     "clientId": "MOCKCLIENT"}}
             else:
-                payload = {"code": "1000", "success": True, "message": "ok",
-                           "data": {"accessToken": "mock-at2"}}
+                # Only the HF exchange is sent here; anything else is a mistake.
+                payload = {"code": "8500", "success": False,
+                           "message": "not an HF exchange"}
+                ok = False
+                _EXPECTED_SIGS.append(False)
         elif pth == "/device-platform/api/v4.0/veh/vehicle-list":
             if self.headers.get("Authorization") != "mock-hf":
                 payload = {"code": "8500", "success": False, "message": "bad token"}
@@ -302,7 +277,7 @@ class _MockGW(BaseHTTPRequestHandler):
                                "basicVehicleStatus": {"powerLevel": 98, "lockState": 1},
                                "additionalVehicleStatus": {"odometerValue": 12345}}}}
         elif pth.startswith("/remote-control/vehicle/telematics/"):
-            if self.headers.get("Authorization") not in ("mock-at", "mock-at2", "mock-hf"):
+            if self.headers.get("Authorization") not in ("mock-at", "mock-hf"):
                 payload = {"code": "8500", "success": False, "message": "bad token"}
                 ok = False
                 _EXPECTED_SIGS.append(False)
@@ -413,9 +388,9 @@ def test_mock_gateway_roundtrip():
     srv, url, tmp = _start_mock()
     try:
         c = zc.ZeekrClient("user@example.com", "pw", gateway=url)
-        # OTP leg: the IDaaS tokenValue rides the unsigned ms-user-auth leg.
-        c.login_otp("mock-tv")
-        assert c.access_token == "mock-at", f"otp login token: {c.access_token}"
+        # The ms-user-auth leg login_tsp ends on, handed an identifier directly.
+        c._ms_user_auth_login("mock-tv")
+        assert c.access_token == "mock-at", f"ms-user-auth token: {c.access_token}"
 
         # HF leg: client-2 tspCode -> old-platform session/secure exchange
         hf_resp = zc._hf_request(
@@ -440,8 +415,6 @@ def test_mock_gateway_roundtrip():
         cs = c.charge_server_post(FAKE_VIN, {"bizType": 7})
         assert cs["code"] == "1000" and cs["data"] == {"bizType": 7}, cs
 
-        assert c.refresh_session(), "refresh failed"
-        assert c.access_token == "mock-at2", f"refresh token: {c.access_token}"
         ctl = c.control(LEGACY_VIN, {"command": "start"})
         assert ctl.get("result", {}).get("code") == 1000, f"control: {ctl}"
         assert all(_EXPECTED_SIGS), f"signature failures: {_EXPECTED_SIGS}"
@@ -454,16 +427,7 @@ def test_idaas_methods_roundtrip():
     srv, url, tmp = _start_mock()
     try:
         idaas = zc.ZeekrIdaas(gateway=url, path="zeekr-cuc-idaas-sea", country="AU")
-        assert idaas.check_user("user@example.com")["passwordSet"] == 1
-        assert idaas.request_code("user@example.com")["codeId"] == "mock-code-id"
-        assert idaas.verify_code("user@example.com", "mock-code-id", "123456") is True
-        assert idaas.edit_password("user@example.com", "mock-code-id", "123456", "pw") == {}
-        mig = idaas.complete_migration("user@example.com", "mock-code-id",
-                                       "123456", "pw", "Mock", "User")
-        assert mig["tokenValue"] == "mock-migrated-tv"
-        assert idaas.login_by_email("user@example.com", "mock-code-id", "123456") == "mock-tv"
         assert idaas.login_by_email_password("user@example.com", "pw") == "mock-tv"
-        assert idaas.user_info("mock-tv")["email"] == "user@example.com"
         assert idaas.tsp_code("mock-tv")["code"] == "mock-tsp-code"
         assert all(_EXPECTED_SIGS), f"idaas signature failures: {_EXPECTED_SIGS}"
     finally:
@@ -549,17 +513,6 @@ def test_auth_errors_and_bad_gateway_responses():
             assert False, "expected ZeekrAuthError when no tokenValue is returned"
         except zc.ZeekrAuthError:
             pass
-        try:
-            idaas.login_by_email("empty@example.com", "mock-code-id", "123456")
-            assert False, "expected ZeekrAuthError when no tokenValue is returned"
-        except zc.ZeekrAuthError:
-            pass
-        try:
-            idaas.complete_migration("empty@example.com", "mock-code-id",
-                                     "123456", "pw", "Mock", "User")
-            assert False, "expected ZeekrAuthError when no tokenValue is returned"
-        except zc.ZeekrAuthError:
-            pass
         assert all(_EXPECTED_SIGS), f"idaas signature failures: {_EXPECTED_SIGS}"
 
         # Bad token: the gateway answers 8500 -> ZeekrApiError. (The route
@@ -589,7 +542,7 @@ def test_a_failed_login_never_leaks_a_token_into_the_exception_text():
     Assistant's re-auth card. A body carrying a token but no tokenValue must
     come out masked, not verbatim."""
     # A success envelope (so _check_resp passes) whose data carries tokens but
-    # no tokenValue: login_by_email then raises with the body folded in.
+    # no tokenValue: login_by_email_password then raises with the body folded in.
     leaky = {"code": "1000", "success": True,
              "data": {"accessToken": "eyJLEAK.header.sig", "refreshToken": "RT-LEAK-9"}}
     orig = zc._post_json
@@ -597,7 +550,7 @@ def test_a_failed_login_never_leaks_a_token_into_the_exception_text():
     try:
         raised = None
         try:
-            zc.ZeekrIdaas().login_by_email("owner@example.com", "cid", "123")
+            zc.ZeekrIdaas().login_by_email_password("owner@example.com", "fake-password")
         except zc.ZeekrAuthError as e:
             raised = str(e)
     finally:
@@ -653,7 +606,7 @@ def test_the_account_country_reaches_the_request_headers():
 
     zc._post_json = _cap
     try:
-        zc.ZeekrIdaas(country="NZ").login_by_email("owner@example.com", "cid", "1")
+        zc.ZeekrIdaas(country="NZ").login_by_email_password("owner@example.com", "fake-password")
     finally:
         zc._post_json = orig
     assert captured.get("Country") == "NZ", captured.get("Country")
@@ -708,7 +661,7 @@ def test_vehicle_record_helpers_accept_nested_shapes():
     assert zc.vehicle_nickname({"vehicleInfo": {"name": "B"}}) == "B"
 
 
-def test_get_vehicle_status_and_no_session_guards():
+def test_vehicle_status_and_no_session_guards():
     _EXPECTED_SIGS.clear()
     srv, url, tmp = _start_mock()
     try:
@@ -716,7 +669,7 @@ def test_get_vehicle_status_and_no_session_guards():
         c = zc.ZeekrClient("user@example.com", "pw", gateway=url,
                            vehicle_model="E245-J1")
         c.hf_token = "mock-hf"
-        st = c.get_vehicle_status(FAKE_VIN)
+        st = c.vehicle_status(FAKE_VIN)
         assert st["vehicleStatus"]["basicVehicleStatus"]["powerLevel"] == 98, st
 
         # fetch_capabilities with a non-list data payload -> [].
@@ -727,7 +680,7 @@ def test_get_vehicle_status_and_no_session_guards():
 
         # No HF session: the vehicle methods refuse with ZeekrAuthError.
         c2 = zc.ZeekrClient("user@example.com", "pw", gateway=url)
-        for call in (lambda: c2.get_vehicle_status(FAKE_VIN),
+        for call in (lambda: c2.vehicle_status(FAKE_VIN),
                      lambda: c2.fetch_capabilities(FAKE_VIN),
                      lambda: c2.list_vehicles("mock-uid"),
                      lambda: c2.control(FAKE_VIN, {"command": "start"}),
@@ -737,28 +690,6 @@ def test_get_vehicle_status_and_no_session_guards():
                 assert False, "expected ZeekrAuthError without an HF session"
             except zc.ZeekrAuthError:
                 pass
-        assert all(_EXPECTED_SIGS), f"signature failures: {_EXPECTED_SIGS}"
-    finally:
-        _stop_mock(srv, tmp)
-
-
-def test_refresh_session_edge_cases():
-    _EXPECTED_SIGS.clear()
-    srv, url, tmp = _start_mock()
-    try:
-        # No refresh token at all: returns False without a request.
-        c0 = zc.ZeekrClient("user@example.com", "pw", gateway=url)
-        assert c0.refresh_session() is False
-
-        # Gateway 500 on the refresh: returns False (transient).
-        c1 = zc.ZeekrClient("user@example.com", "pw", gateway=url)
-        c1.refresh_token = "fail"
-        assert c1.refresh_session() is False
-
-        # Response without a new accessToken: returns False.
-        c2 = zc.ZeekrClient("user@example.com", "pw", gateway=url)
-        c2.refresh_token = "empty"
-        assert c2.refresh_session() is False
         assert all(_EXPECTED_SIGS), f"signature failures: {_EXPECTED_SIGS}"
     finally:
         _stop_mock(srv, tmp)
@@ -797,7 +728,7 @@ def test_plain_http_transport_branches():
                           urlname="user-api")
         assert resp["data"]["ddcCode"] == "MOCKDDC123", resp
         assert _EXPECTED_SIGS, "the v2-signed call was not checked"
-        c.login_otp("mock-tv")
+        c._ms_user_auth_login("mock-tv")
         assert c.access_token == "mock-at", "http login failed"
         before_hf = len(_EXPECTED_SIGS)
 

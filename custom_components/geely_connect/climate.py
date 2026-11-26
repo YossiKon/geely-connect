@@ -92,7 +92,6 @@ from .helpers import (
 
 _LOGGER = logging.getLogger(__name__)
 
-_BASIC_PATH         = ("vehicleStatus", "basicVehicleStatus")
 _CLIMATE_PATH       = ("vehicleStatus", "additionalVehicleStatus", "climateStatus")
 _INTERIOR_TEMP_PATH = (*_CLIMATE_PATH, "interiorTemp")
 _EXTERIOR_TEMP_PATH = (*_CLIMATE_PATH, "exteriorTemp")

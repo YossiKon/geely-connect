@@ -137,7 +137,6 @@ PLATFORM_LABELS: dict[str, str] = {
 
 # User preferences chosen during setup.
 CONF_PRESSURE_UNIT = "pressure_unit"
-CONF_LANGUAGE      = "language"
 CONF_POLL_MODE     = "poll_mode"
 # Opt-in: expose every raw field the server returns as a diagnostic sensor.
 # Off by default - it is ~180 entities on an EX5 and buries the useful ones.
@@ -209,14 +208,6 @@ PRESSURE_UNITS: dict[str, str] = {
     "kPa": "kPa",
 }
 DEFAULT_PRESSURE_UNIT = "psi"
-
-# Entity display language chosen at setup ("auto" follows Home Assistant's UI).
-LANGUAGES: dict[str, str] = {
-    "auto": "Automatic (Home Assistant language)",
-    "he": "עברית",
-    "en": "English",
-}
-DEFAULT_LANGUAGE = "auto"
 
 # Countries whose accounts reach a backend this integration has credentials
 # for (EU or NA). Rendered as a dropdown in the config flow. code -> display
@@ -349,7 +340,7 @@ SERIES_TO_FRIENDLY_NAME: dict[str, str] = {
 # keep. Where owners contradict it, it has been removed: the tailgate entry
 # below carried the same label and two owners report the app only unlocking
 # and the key fob doing the opening.
-# Rapid warm/cool is the exception - see SERVICE_RAPID_*_PATH below.
+# Rapid warm/cool is the exception - see GeelyApi.rapid_climate in api.py.
 
 # --- Lock (verified live) ---
 SERVICE_LOCK         = "RDL_2"
@@ -480,20 +471,6 @@ SERVICE_GCLEAN_DURATION = 6
 # nothing in the car. This switch's own start, with no parameters, is untried.
 SERVICE_PARKING_COMFORT = "RSM"
 
-# --- charge-server family (AVD-verified) ---
-# All these go to POST /charge-server/ecarx_charge_set/{VIN}.
-# bizType picks the feature; the body shape varies per bizType.
-CHARGE_SERVER_PATH = "/charge-server/ecarx_charge_set"
-BIZ_TYPE_SCHEDULED_TRIP   = "4"   # the app's Scheduled trip (#4), not Parking Comfort (#45)
-BIZ_TYPE_SCHED_CHARGING   = "6"   # rbc fields (rbcStartTime, rbcEndTime, rbcTarget, rbc, rbcModel, pin)
-BIZ_TYPE_RAPID            = "7"   # ac+heat[]/ventilation[]+temp+vlt
-RAPID_DEFAULT_DURATION    = "180"
-RAPID_DEFAULT_VLT_POS     = "12"
-RAPID_DEFAULT_VLT_DUR     = "60"
-# Legacy aliases
-SERVICE_RAPID_PATH      = CHARGE_SERVER_PATH
-SERVICE_RAPID_BIZ_TYPE  = BIZ_TYPE_RAPID
-
 # --- Steering wheel heat (captured from the official app, #4, 2026-08-10) ---
 # An owner recorded the app's own steering-wheel button against a real car,
 # after two rounds of guessed candidates had all been accepted and done
@@ -511,7 +488,6 @@ SERVICE_RAPID_BIZ_TYPE  = BIZ_TYPE_RAPID
 #
 # The same capture's rapid-warming body (bizType=7) carries the wheel as
 # "sw": "true" - the field the "bw" probe candidates were guessing at.
-SERVICE_STEERING_HEAT_KEY = "steerWhlHeatingSts"  # status: 1 heating, 2 off, 0 not fitted
 RCE_VAL_STEERING_WHEEL    = "steering_wheel"
 # The value the app put in operationScheduling.duration on the start call. That
 # field is seconds everywhere else it is verified (90 for seats, 180 for AC), so
@@ -520,7 +496,6 @@ RCE_STEERING_DURATION_SEC = 48
 
 # --- Window / sunshade / sunroof / ventilate (verified) ---
 SERVICE_WINDOW = "RWS_2"
-SERVICE_WINDOW_VENT_PARAMS = [{"key": "target", "value": "ventilate"}]
 
 # The windows in the 1.0 scheme, from the same E2 app (#72): `RWS` with one
 # parameter, `rws`. Down is start `window`, up is stop `all`, and ventilation
@@ -542,12 +517,6 @@ SERVICE_CHARGING_STOP_PARAMS = [
     {"key": "operation",     "value": "0"},
     {"key": "rcs.terminate", "value": "1"},
 ]
-# Legacy aliases (kept for old switch.py import path)
-
-# --- Capability discovery endpoint ---
-# GET /geelyTCAccess/tcservices/capability/{VIN}?pageSize=2000&pageIndex=1&vehicleType=0
-# Returns the per-vehicle feature catalog. Used to build dynamic entities.
-CAPABILITY_PATH = "/geelyTCAccess/tcservices/capability"
 
 # === Climate entity defaults (overridden by capability if available) ===
 CLIMATE_MIN_TEMP_C  = 15.5

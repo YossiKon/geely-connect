@@ -472,7 +472,8 @@ def test_full_exposure_keeps_fields_whose_curated_twin_was_not_built():
 
     add = _RichCoord.data["vehicleStatus"]["additionalVehicleStatus"]
     add["runningStatus"]["fuelLevel"] = "0"
-    add["electricVehicleStatus"]["chargeUAct"] = "0.0"
+    for k in ("chargeUAct", "chargeIAct", "dcChargeUAct", "dcChargeIAct"):
+        add["electricVehicleStatus"][k] = "0.0"
     # The poller's own verdict rides in every snapshot (#72); it is not a
     # field the server returns and must not become a raw sensor.
     _RichCoord.data["_charging"] = False
@@ -488,8 +489,9 @@ def test_full_exposure_keeps_fields_whose_curated_twin_was_not_built():
            if type(e).__name__ == "GeelyRawSensor"}
     assert any(uid.endswith("runningStatus.fuelLevel") for uid in raw), \
         "the unowned fuel field vanished from full exposure"
-    assert not any(uid.endswith("electricVehicleStatus.chargeUAct") for uid in raw), \
-        "the charge leg grew a raw twin despite its computed owner"
+    for k in ("chargeUAct", "chargeIAct", "dcChargeUAct", "dcChargeIAct"):
+        assert not any(uid.endswith(f"electricVehicleStatus.{k}") for uid in raw), \
+            f"the charge leg {k} grew a raw twin despite its computed owner"
     assert f"geely_{FAKE_VIN}_raw__charging" not in raw, "the poller's verdict became a sensor"
 
 

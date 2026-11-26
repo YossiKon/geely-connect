@@ -232,7 +232,7 @@ _A_REPORT_MAY_SHOW = {
     "store_password",         # the yes/no choice, not the password
     "vehicle_nickname", "vehicle_series", "vehicle_model_code",
     "vehicle_color", "vehicle_power_type",
-    "pressure_unit", "language", "poll_mode", "full_exposure",
+    "pressure_unit", "poll_mode", "full_exposure",
     "battery_capacity_kwh", "exterior_temp_offset",
 }
 _A_REPORT_MUST_HIDE = {

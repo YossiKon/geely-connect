@@ -354,19 +354,6 @@ def test_the_verbose_path_prints_without_changing_the_result():
     assert loud == quiet == envelope
 
 
-def test_the_override_helper_can_replace_any_plaintext_field():
-    """Used to probe which fields the server actually checks - it must apply
-    the overrides after the payload is built, not before."""
-    gs = _solver()
-    session = _PipelineSession({"status": "success", "data": {"result": "fail"}})
-    with _patched_session(gs, session):
-        out = gs.solve_with_overrides(
-            plaintext_overrides={"answer": 999}, verbose=False)
-    assert out["data"]["result"] == "fail"
-    with _patched_session(gs, _PipelineSession({"status": "x"})):
-        assert gs.solve_with_overrides(verbose=True)["status"] == "x"
-
-
 def test_the_session_survives_a_broken_trust_store_setup():
     """Same contract as the api-side session: a missing CA bundle degrades,
     verification itself stays required."""

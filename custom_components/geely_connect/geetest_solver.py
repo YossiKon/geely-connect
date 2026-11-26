@@ -222,10 +222,6 @@ def _canny_edges(im: np.ndarray, low: float = 50.0, high: float = 100.0) -> np.n
     return edges.astype(np.float32)
 
 
-# Backwards-compat alias for the old name (kept in case anything imports it)
-_gradient_edges = _canny_edges
-
-
 def find_gap_x(bg_png: bytes, slice_png: bytes) -> int:
     """Return the X offset (in puzzle pixels) where the slice fits the gap.
     Uses pure-Python Canny + FFT-based cross-correlation. Equivalent to
@@ -478,10 +474,6 @@ def get_verify_jsonp(s: requests.Session, load: LoadResponse, w: str, *, client_
         return {"http": r.status_code, "raw": text[:500]}
 
 
-# Back-compat alias - old `post_verify` -> new `get_verify_jsonp`
-post_verify = get_verify_jsonp
-
-
 # ---------- top-level driver ----------
 
 def solve(captcha_id: str = GEELY_CAPTCHA_ID, verbose: bool = True) -> dict:
@@ -520,27 +512,6 @@ def solve(captcha_id: str = GEELY_CAPTCHA_ID, verbose: bool = True) -> dict:
     resp = get_verify_jsonp(s, load, w)
     if verbose: print(f"    response: {json.dumps(resp, indent=2, ensure_ascii=False)[:600]}")
 
-    return resp
-
-
-def solve_with_overrides(*, plaintext_overrides: dict | None = None, client_type: str = "web", verbose: bool = True) -> dict:
-    """Test a single attempt with custom plaintext fields. For matrix testing."""
-    s = make_session()
-    load = fetch_load(s, GEELY_CAPTCHA_ID)
-    bg = fetch_image(s, load.static_servers, load.bg_path)
-    sl = fetch_image(s, load.static_servers, load.slice_path)
-    gap_x = find_gap_x(bg, sl)
-    passtime = random.randint(900, 1500)
-    inner = build_inner_payload(load, gap_x, passtime)
-    if plaintext_overrides:
-        inner.update(plaintext_overrides)
-    plaintext = json.dumps(inner, separators=(",", ":"))
-    w = encrypt_w(plaintext)
-    if verbose:
-        print(f"  [variant] fields={list(inner.keys())} pt_len={len(plaintext)} w_len={len(w)}")
-    resp = post_verify(s, load, w, client_type=client_type)
-    if verbose:
-        print(f"            -> {json.dumps(resp, ensure_ascii=False)[:300]}")
     return resp
 
 

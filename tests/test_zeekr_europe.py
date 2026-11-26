@@ -58,8 +58,7 @@ def test_every_idaas_operation_signs_its_actual_path():
     def post(url, raw, headers, hide=()):
         calls.append(("POST", url))
         _assert_idaas_signature("POST", url, raw, headers)
-        data = True if url.endswith("/captcha/verify") else {"tokenValue": "fake-token"}
-        return {"success": True, "data": data}
+        return {"success": True, "data": {"tokenValue": "fake-token"}}
 
     def get(url, headers, hide=()):
         calls.append(("GET", url))
@@ -71,17 +70,10 @@ def test_every_idaas_operation_signs_its_actual_path():
     for path in (None, "custom-user-center"):
         client = zc.ZeekrIdaas(country=" es ", path=path, profile=FAKE_PROFILE)
         with patch.object(zc, "_post_raw_json", post), patch.object(zc, "_get_json", get):
-            client.check_user("owner@example.invalid")
-            client.request_code("owner@example.invalid")
-            client.login_by_email("owner@example.invalid", "fake-id", "fake-code")
             client.login_by_email_password("owner@example.invalid", "fake-password")
-            client.edit_password("owner@example.invalid", "fake-id", "fake-code", "fake-password")
-            client.verify_code("owner@example.invalid", "fake-id", "fake-code")
-            client.complete_migration("owner@example.invalid", "fake-id", "fake-code",
-                                      "fake-password", "Example", "Owner")
-            client.user_info("fake-token")
             client.tsp_code("fake-token")
         expected = path or "zeekr-cuc-idaas"
+        assert len(calls) == 2, calls
         assert all(urlparse(url).path.startswith(f"/{expected}/") for _, url in calls)
         calls.clear()
 

@@ -1460,10 +1460,6 @@ class GeelyApi(CommandTrail):
         path = f"/remote-control/vehicle/status/state/{self.vin}"
         return self._authed_apis_call("GET", path, b"")
 
-    def charging_reservation(self) -> dict:
-        path = f"/remote-control/charging/reservation/{self.vin}"
-        return self._authed_apis_call("GET", path, b"")
-
     def charge_server_get(self, biz_type: str) -> dict:
         """GET /charge-server/ecarx_charge_set/{VIN}?bizType=N.
 
