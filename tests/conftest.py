@@ -27,6 +27,8 @@ def load(module: str):
     the pure-logic tests do not need, so each module is loaded on its own under
     a synthetic package name.
     """
+    # Home Assistant first, as in production: see have_homeassistant().
+    have_homeassistant()
     name = f"gc.{module}"
     if name in sys.modules:
         return sys.modules[name]
@@ -49,7 +51,20 @@ def load(module: str):
 
 
 def have_homeassistant() -> bool:
-    return importlib.util.find_spec("homeassistant") is not None
+    """Whether Home Assistant is installed - and, when it is, imported.
+
+    From 2026.9, Home Assistant replaces voluptuous with probatio when the
+    homeassistant package is imported (install_as_voluptuous() in its
+    __init__.py), and in production that import always comes before any
+    integration's. A module the suite loads earlier keeps the real
+    voluptuous's classes while every later `import voluptuous` gets
+    probatio's, so a schema check would depend on which test file ran first.
+    Every loader asks this before it runs a module, so importing the package
+    here keeps the production order."""
+    if importlib.util.find_spec("homeassistant") is None:
+        return False
+    import homeassistant  # noqa: F401
+    return True
 
 
 # A VIN-shaped string that is obviously fake. Never use a real one in tests.
