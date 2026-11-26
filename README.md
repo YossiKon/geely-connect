@@ -464,8 +464,8 @@ banner print `mi` and `mph` when that is what the entity is in
 | **Range At Full Charge** | Remaining range extrapolated to 100% - see [above](#-range-at-full-charge---two-honest-answers). Blank below 10% charge, where the estimate is mostly noise |
 | **Last Trip** | How far the last completed journey went, from the odometer between engine-on and engine-off |
 | **Trip In Progress** | How far the current journey has gone; 0 when parked |
-| **Connected** | Whether the integration is reaching the car right now |
-| **Last Updated** | When the last successful poll ran |
+| **Connected** | Whether the last status read from Geely's server succeeded. Off from the first read that fails |
+| **Last Updated** | When a status read from Geely's server last succeeded |
 
 ### ⛽ Hybrid & PHEV only
 
@@ -1071,8 +1071,8 @@ ten degrees.
 Two things let you see this rather than guess at it:
 
 - **Car Reported At** - the car's own timestamp on the snapshot. *Last Updated*
-  is the integration's clock and advances on every poll; this one advances only
-  when the car actually says something.
+  is the integration's clock and advances on every successful status read from
+  Geely's server; this one advances only when the car actually says something.
 - **Interior / Exterior Temperature** carry `car_reported_at` and `age_minutes`
   attributes.
 

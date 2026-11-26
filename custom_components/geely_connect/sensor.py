@@ -841,7 +841,7 @@ class GeelyEfficiencySensor(CoordinatorEntity, _AutoPrecision):
 
 
 class GeelyLastUpdatedSensor(CoordinatorEntity, SensorEntity):
-    """Timestamp of the last successful poll - HA shows it as a relative age."""
+    """When a status read last succeeded - HA shows it as a relative age."""
 
     _attr_has_entity_name = True
     _attr_device_class = SensorDeviceClass.TIMESTAMP
@@ -880,8 +880,8 @@ class GeelyLastUpdatedSensor(CoordinatorEntity, SensorEntity):
 class GeelyCarReportedAtSensor(CoordinatorEntity, SensorEntity):
     """When the CAR last reported, as opposed to when we last asked.
 
-    `Last Updated` above is our own clock: it advances on every successful poll,
-    including the polls that bring back a snapshot the car has not refreshed. The
+    `Last Updated` above is our own clock: it advances on every successful status
+    read, including reads that bring back a snapshot the car has not refreshed. The
     difference matters more than it sounds, and #24 is why it exists.
 
     An owner graphed his EX5's exterior and interior temperatures against two
