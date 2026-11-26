@@ -71,20 +71,18 @@ from .zeekr_regions import ZeekrRegion
 
 _LOGGER = logging.getLogger(__name__)
 
+# The new platform's gateway (SEA; an EU profile names its own) and the
+# Accept header every call to it sends.
+GATEWAY = "https://sea-snc-tsp-api-gw.zeekrlife.com"
+ACCEPT = "application/json;responseformat=3"
+
 # Public protocol identity, embedded in the shipped app APK and extractable
 # by anyone - the same pattern as the legacy integration's per-region app
 # secrets (const.py). Sent in cleartext request headers by design and only
 # ever used for request signing.
-GATEWAY = "https://sea-snc-tsp-api-gw.zeekrlife.com"
-APP_ID = "GEELY-APP-NEW"
-APP_SECRET = "eeec50cb855a4c69a12f297c0d27a07f"
-ACCEPT = "application/json;responseformat=3"
-SIG_VERSION = "2"
-
 # Derived app identity for the snc stack (pj.j.e("geely") / pj.j.d("geely","SEA")):
-# the PROD TSP gateway's registry REJECTS APP_ID ("GEELY-APP-NEW", 079002)
-# but accepts these (verified live 2026-08-10). The ecarx/vehicle stack keeps
-# sending APP_ID (user_app_id) exactly like the app does.
+# the PROD TSP gateway's registry rejects the app's own id ("GEELY-APP-NEW",
+# 079002) but accepts these (verified live 2026-08-10).
 SNC_APP_ID = "GEELYSEACH001M0001"
 SNC_PROJECT_ID = "GEELY"
 # snc SignInterceptor HMAC-SHA256 secret for (geely, SEA, prod), decrypted
@@ -363,39 +361,6 @@ def _make_nonce() -> str:
     middle = "".join(random.choices(_NONCE_HEX, k=12))
     suffix = "".join(random.choices(_NONCE_ALNUM, k=7))
     return f"{prefix}-{middle}{suffix}{int(time.time() * 1000)}"
-
-
-def _normalize_query_value(v: str) -> str:
-    """Java SignUtil.getParam normalization on raw query values."""
-    return v.replace("+", "%20").replace("*", "%2A").replace("%7E", "~").replace(",", "%2C")
-
-
-def build_sign_string(*, method: str, path: str, query: str, accept: str,
-                      nonce: str, sig_version: str, timestamp_ms: str,
-                      body: bytes) -> str:
-    """Canonical string for signer v2 (byte-exact vs app's SignUtil, oracle-verified)."""
-    sh = {"x-api-signature-nonce": nonce, "x-api-signature-version": sig_version}
-    canonical_headers = "".join(f"{k}:{sh[k]}\n" for k in sorted(sh))
-    kv = []
-    for pair in query.split("&"):
-        if not pair:
-            continue
-        k, _, v = pair.partition("=")
-        kv.append((k, _normalize_query_value(v)))
-    canonical_query = "&".join(f"{k}={v}" for k, v in sorted(kv))
-    md5_b64 = base64.b64encode(hashlib.md5(body).digest()).decode()
-    return "\n".join([accept, canonical_headers, canonical_query, md5_b64,
-                      timestamp_ms, method.upper(), path])
-
-
-def sign_v2(*, method: str, path: str, query: str, accept: str, nonce: str,
-            sig_version: str, timestamp_ms: str, body: bytes, secret: str) -> str:
-    ss = build_sign_string(method=method, path=path, query=query, accept=accept,
-                           nonce=nonce, sig_version=sig_version,
-                           timestamp_ms=timestamp_ms, body=body)
-    return base64.b64encode(
-        hmac.new(secret.encode(), ss.encode(), hashlib.sha1).digest()
-    ).decode()
 
 
 def snc_sign(*, method: str, url: str, headers: dict, body: bytes,
@@ -810,20 +775,19 @@ class ZeekrClient:
     # ---- transport ----------------------------------------------------------
 
     def _request(self, method: str, path: str, *, body: bytes = b"",
-                 signed: bool = True, urlname: str | None = None,
-                 query: str = "", extra: dict | None = None,
-                 signer: str = "v2", bearer: bool = False,
+                 urlname: str | None = None, query: str = "",
+                 extra: dict | None = None, bearer: bool = False,
                  hide: Iterable[Any] = ()) -> dict:
-        """One call to the new gateway. Its error text leaves out what
-        hidden() names as the call goes out, and each of `hide` - a sign-in
-        code the body carries."""
+        """One snc-signed call to the new gateway. Its error text leaves out
+        what hidden() names as the call goes out, and each of `hide` - a
+        sign-in code the body carries."""
         hide = (*hide, *self.hidden())
         p = urlparse(self.gateway)
         port = p.port or (443 if p.scheme == "https" else 80)
-        nonce = _make_nonce()
         ts_ms = str(int(time.time() * 1000))
         headers = {
-            "X-APP-ID": APP_ID,
+            # Set again below; first here so the headers keep their order.
+            "X-APP-ID": SNC_APP_ID,
             "Accept": ACCEPT,
             "X-AGENT-TYPE": "android",
             "X-OPERATOR-CODE": "geely",   # parity with old platform; harmless if unused
@@ -837,44 +801,35 @@ class ZeekrClient:
             headers.update(extra)
         # Authorization rides INSIDE the snc canonical (the app's nj/a
         # interceptor adds it before nj/h signs), so attach it before
-        # computing X-SIGNATURE. Signer v2's canonical never includes it.
+        # computing X-SIGNATURE.
         if self.access_token:
             headers["Authorization"] = (
                 f"Bearer {self.access_token}" if bearer else self.access_token)
-        if signer == "snc":
-            # snc stack (ms-user-auth): derived app identity + the header set
-            # the app's own SignInterceptor signs (nj/a.java + nj/h.java).
-            # The app uses a UUID nonce on this gateway rather than the
-            # 32-char random string the other legs use, and it is inside
-            # the signed canonical.
-            nonce = str(uuid.uuid4())
-            if self.enc_vin:
-                headers["x-vin"] = self.enc_vin
-            headers.update({
-                "X-APP-ID": SNC_APP_ID,
-                "X-PROJECT-ID": self.profile.snc_project_id if self.profile else SNC_PROJECT_ID,
-                "AppId": "ONEX97FB91F061405",
-                "X-API-SIGNATURE-VERSION": "2.0",
-                "X-API-SIGNATURE-NONCE": nonce,
-                "X-TIMESTAMP": ts_ms,
-                "X-DEVICE-ID": str(uuid.uuid4()),
-                "X-PLATFORM": "APP",
-                "X-APP-OS-VERSION": "17",
-                "ACCEPT-LANGUAGE": f"en-{self.country_code.upper()}" if self.profile else "en-AU",
-                "Content-Type": "application/json; charset=UTF-8",
-            })
-            full_path = f"{path}?{query}" if query else path
-            headers["X-SIGNATURE"] = snc_sign(
-                method=method, url=f"{self.gateway}{full_path}",
-                headers=headers, body=body,
-                secret=self.profile.snc_secret if self.profile else SNC_SECRET)
-        elif signed:
-            headers["X-api-signature-version"] = SIG_VERSION
-            headers["X-api-signature-nonce"] = nonce
-            headers["X-TIMESTAMP"] = ts_ms
-            headers["X-SIGNATURE"] = sign_v2(
-                method=method, path=path, query=query, accept=ACCEPT, nonce=nonce,
-                sig_version=SIG_VERSION, timestamp_ms=ts_ms, body=body, secret=APP_SECRET)
+        # snc stack: derived app identity + the header set the app's own
+        # SignInterceptor signs (nj/a.java + nj/h.java). The app uses a UUID
+        # nonce on this gateway rather than the 32-char random string the
+        # other legs use, and it is inside the signed canonical.
+        nonce = str(uuid.uuid4())
+        if self.enc_vin:
+            headers["x-vin"] = self.enc_vin
+        headers.update({
+            "X-APP-ID": SNC_APP_ID,
+            "X-PROJECT-ID": self.profile.snc_project_id if self.profile else SNC_PROJECT_ID,
+            "AppId": "ONEX97FB91F061405",
+            "X-API-SIGNATURE-VERSION": "2.0",
+            "X-API-SIGNATURE-NONCE": nonce,
+            "X-TIMESTAMP": ts_ms,
+            "X-DEVICE-ID": str(uuid.uuid4()),
+            "X-PLATFORM": "APP",
+            "X-APP-OS-VERSION": "17",
+            "ACCEPT-LANGUAGE": f"en-{self.country_code.upper()}" if self.profile else "en-AU",
+            "Content-Type": "application/json; charset=UTF-8",
+        })
+        full_path = f"{path}?{query}" if query else path
+        headers["X-SIGNATURE"] = snc_sign(
+            method=method, url=f"{self.gateway}{full_path}",
+            headers=headers, body=body,
+            secret=self.profile.snc_secret if self.profile else SNC_SECRET)
         if query:
             path = f"{path}?{query}"
 
@@ -897,8 +852,8 @@ class ZeekrClient:
     # ---- auth ---------------------------------------------------------------
 
     def _ms_user_auth_login(self, identifier: str) -> None:
-        """The unsigned ms-user-auth leg: identifier (the IDaaS tokenValue,
-        or the tspCode it yields) -> accessToken/refreshToken/userId."""
+        """The ms-user-auth leg: identifier (the IDaaS tokenValue, or the
+        tspCode it yields) -> accessToken/refreshToken/userId."""
         login_body = json.dumps({
             "identifier": identifier,
             "identityType": 10,
@@ -910,7 +865,7 @@ class ZeekrClient:
             "loginSystem": "Android 17",
         }).encode()
         auth = self._request("POST", "/ms-user-auth/v1.0/auth/login",
-                             body=login_body, signed=False, signer="snc",
+                             body=login_body,
                              hide=(identifier,))
         # The session this call went out with, before the answer replaces it:
         # an error worded around it must leave it out as well.
@@ -1054,7 +1009,7 @@ class ZeekrClient:
             raise ZeekrAuthError("not logged in (no new-platform session)")
         resp = self._request(
             "GET", "/ms-app-bff/api/v4.0/veh/vehicle-list",
-            query="needSharedCar=true", signer="snc")
+            query="needSharedCar=true")
         data = resp.get("data")
         if isinstance(data, list):
             return [v for v in data if isinstance(v, dict)]
@@ -1178,7 +1133,7 @@ class ZeekrClient:
             raise ZeekrAuthError("no x-vin vehicle token configured")
         resp = self._request(
             "GET", "/ms-vehicle-capability/api/v1.0/vehicle/function/model/info",
-            query="", signer="snc")
+            query="")
         data = resp.get("data")
         return [r for r in data if isinstance(r, dict)] if isinstance(data, list) else []
 
@@ -1208,7 +1163,7 @@ class ZeekrClient:
         }
         return self._request(
             "POST", "/ms-remote-control/v1.0/remoteControl/control",
-            body=json.dumps(body).encode(), signer="snc")
+            body=json.dumps(body).encode())
 
     def set_smart_temp_new(self, setting: dict, command: str = "immediately") -> dict:
         """Rapid warm/cool on the NEW gateway (capture-verified 2026-08-29).
@@ -1226,7 +1181,7 @@ class ZeekrClient:
         body = {"command": command, "serviceId": "PAA", "setting": setting}
         return self._request(
             "POST", "/ms-remote-control/v1.0/remoteControl/setSmartTemp",
-            body=json.dumps(body).encode(), signer="snc")
+            body=json.dumps(body).encode())
 
     def charge_control_new(self, command: str,
                            parameters: list[dict] | None = None) -> dict:
@@ -1253,7 +1208,7 @@ class ZeekrClient:
         }
         return self._request(
             "POST", "/ms-charge-manage/api/v1.0/charge/control",
-            body=json.dumps(body).encode(), signer="snc")
+            body=json.dumps(body).encode())
 
     def charging_plan_new(self) -> dict:
         """The car's charging schedule on the NEW gateway (capture-verified).
@@ -1271,7 +1226,7 @@ class ZeekrClient:
             raise ZeekrAuthError("no x-vin vehicle token configured")
         return self._request(
             "GET", "/ms-charge-manage/api/v1.0/charge/getChargingPlan",
-            query="", signer="snc")
+            query="")
 
     def travel_plan_new(self) -> dict:
         """The app's Scheduled trip on the NEW gateway (read only, captured).
@@ -1284,7 +1239,7 @@ class ZeekrClient:
             raise ZeekrAuthError("no x-vin vehicle token configured")
         return self._request(
             "GET", "/ms-charge-manage/api/v1.0/charge/getLatestTravelPlan",
-            query="", signer="snc")
+            query="")
 
     def set_charging_plan_new(self, *, command: str, start_time: str = "",
                               end_time: str = "", target: str = "2") -> dict:
@@ -1319,7 +1274,7 @@ class ZeekrClient:
             body.update(startTime=start_time, endTime=end_time, scheduledTime="")
         return self._request(
             "POST", "/ms-charge-manage/api/v1.0/charge/setChargingPlan",
-            body=json.dumps(body).encode(), signer="snc")
+            body=json.dumps(body).encode())
 
     def vehicle_status_new_resp(self) -> dict:
         """Live status from the NEW gateway, for vehicles that live there.
@@ -1339,7 +1294,7 @@ class ZeekrClient:
             raise ZeekrAuthError("no x-vin vehicle token configured")
         return self._request(
             "GET", "/ms-vehicle-status/api/v1.0/vehicle/status/latest",
-            query="latest=false&target=new", signer="snc")
+            query="latest=false&target=new")
 
     def list_vehicles(self, user_id: str) -> list[dict]:
         """GET /device-platform/api/v4.0/veh/vehicle-list?needSharedCar=true

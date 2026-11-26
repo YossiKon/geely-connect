@@ -94,7 +94,7 @@ def _real(trip):
     asked = []
 
     def request(method, path, **kw):
-        asked.append((method, path.rsplit("/", 1)[1], kw.get("signer")))
+        asked.append((method, path.rsplit("/", 1)[1]))
         return {"code": "000000", "message": "ok",
                 "data": trip if path.endswith("/getLatestTravelPlan") else plan}
 
@@ -118,8 +118,8 @@ def test_the_real_client_class_keeps_the_trip_fields():
                 "bcCycleActive": "true", "bcTempActive": "false",
                 "rbcStartTime": "23:00", "rbcEndTime": "05:00",
                 "rbcTarget": "2", "timerId": "2"}}
-    assert asked == ([("GET", "getLatestTravelPlan", "snc")] * 2
-                     + [("GET", "getChargingPlan", "snc")] * 4)
+    assert asked == ([("GET", "getLatestTravelPlan")] * 2
+                     + [("GET", "getChargingPlan")] * 4)
 
 
 def test_a_trip_that_is_not_armed_reads_off_and_the_rest_unknown():

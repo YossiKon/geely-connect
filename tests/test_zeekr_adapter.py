@@ -1411,7 +1411,7 @@ def test_the_client_builds_the_captured_charging_bodies():
     c = zc.ZeekrClient.__new__(zc.ZeekrClient)
     c.access_token, c.enc_vin = "at", "opaque-token"
     seen = []
-    c._request = lambda method, path, body=b"", query="", signer="v2", **_: (
+    c._request = lambda method, path, body=b"", query="", **_: (
         seen.append((method, path, json.loads(body) if body else None))
         or {"code": "000000"})
     c.charge_control_new("stop", [{"key": "rcs.terminate", "value": "1"}])

@@ -8,15 +8,12 @@ here instead of on a user's car.
 Only fake VINs appear in this file (conftest rule - never real ones).
 """
 
-import hashlib
-import hmac as hmac_mod
 import ipaddress
 import json
 import os
 import ssl as ssl_mod
 import tempfile
 import threading
-from base64 import b64encode
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -29,8 +26,8 @@ from conftest import FAKE_VIN, load
 
 zc = load("zeekr_client")
 
-# The account's legacy-platform VIN, replaced with a fake one in the oracle
-# below (the original capture contained a personal VIN and is not committed).
+# The account's legacy-platform VIN, replaced with a fake one (the original
+# capture contained a personal VIN and is not committed).
 LEGACY_VIN = "LJXK0EX50N00000001"
 
 _EXPECTED_SIGS: list[bool] = []
@@ -38,53 +35,6 @@ _MOCK_PORT = 0
 _ORIGINAL_HF_GATEWAY = zc.HF_GATEWAY
 _ORIGINAL_IDAAS_CLASS = zc.ZeekrIdaas
 _ORIGINAL_SSL_CTX = zc.ssl.create_default_context
-
-
-# ---------------------------------------------------------------------------
-# independent canonical builder (oracle for sign_v2)
-#
-# Written from the spec in zeekr_client.build_sign_string's docstring, with no
-# code shared with the client, so a wrong join/order/encoding in the client
-# cannot reproduce itself here. Validated locally against the app-captured
-# vector (see test_sign_v2_canonical_matches_the_captured_shape).
-# ---------------------------------------------------------------------------
-
-
-def _independent_canonical(*, method, path, query, accept, nonce, sig_version,
-                           timestamp_ms, body) -> str:
-    sh = {"x-api-signature-nonce": nonce, "x-api-signature-version": sig_version}
-    headers = "".join(f"{k}:{sh[k]}\n" for k in sorted(sh))
-    pairs = []
-    for pair in query.split("&"):
-        if not pair:
-            continue
-        k, _, v = pair.partition("=")
-        v = v.replace("+", "%20").replace("*", "%2A").replace("%7E", "~").replace(",", "%2C")
-        pairs.append((k, v))
-    q = "&".join(f"{k}={v}" for k, v in sorted(pairs))
-    md5 = b64encode(hashlib.md5(body).digest()).decode()
-    return "\n".join([accept, headers, q, md5, timestamp_ms, method.upper(), path])
-
-
-def test_sign_v2_canonical_matches_the_captured_shape():
-    # The captured vector used a real VIN in the query; the canonical treats
-    # the query as opaque bytes, so a fake VIN validates the same machinery.
-    # Independently derived (not by calling sign_v2), per the docstring spec.
-    canon = _independent_canonical(
-        method="POST", path="/user-service/device/code",
-        query="a=1&b=two%20words&vin=LJXK0EX50N00000001&x=a+b",
-        accept=zc.ACCEPT, nonce="abc-123def456ghi789JKL0123",
-        sig_version="2", timestamp_ms="1754800000000", body=b"hello")
-    expected = b64encode(
-        hmac_mod.new(zc.APP_SECRET.encode(), canon.encode(), hashlib.sha1).digest()
-    ).decode()
-    got = zc.sign_v2(
-        method="POST", path="/user-service/device/code",
-        query="a=1&b=two%20words&vin=LJXK0EX50N00000001&x=a+b",
-        accept=zc.ACCEPT, nonce="abc-123def456ghi789JKL0123",
-        sig_version="2", timestamp_ms="1754800000000",
-        body=b"hello", secret=zc.APP_SECRET)
-    assert got == expected, f"sign_v2 diverged from the independent canonical: {got}"
 
 
 def test_xhmac_signature_vectors():
@@ -137,10 +87,9 @@ class _MockGW(BaseHTTPRequestHandler):
                 body=body, secret=zc.HF_SECRET)
             ok = (got == want)
             _EXPECTED_SIGS.append(ok)
-        elif self.path.startswith(("/ms-user-auth", "/ms-app-bff",
-                                   "/ms-vehicle-status", "/ms-remote-control",
-                                   "/ms-vehicle-capability")):
-            # snc-signed leg: recompute X-SIGNATURE from received headers
+        else:
+            # Everything else is the new gateway, which _request always
+            # snc-signs: recompute X-SIGNATURE from the received headers.
             got = self.headers.get("X-SIGNATURE")
             want = zc.snc_sign(
                 method=self.command,
@@ -156,18 +105,6 @@ class _MockGW(BaseHTTPRequestHandler):
             if len(nonce) < 32:
                 ok = False
                 _EXPECTED_SIGS.append(False)
-        else:
-            # signed leg: recompute from received headers
-            got = self.headers.get("X-SIGNATURE")
-            want = zc.sign_v2(
-                method=self.command, path=pth, query=q,
-                accept=self.headers.get("Accept", ""),
-                nonce=self.headers.get("X-api-signature-nonce", ""),
-                sig_version=self.headers.get("X-api-signature-version", ""),
-                timestamp_ms=self.headers.get("X-TIMESTAMP", ""),
-                body=body, secret=zc.APP_SECRET)
-            ok = (got == want)
-            _EXPECTED_SIGS.append(ok)
 
         if pth == "/user-service/device/code":
             if self.headers.get("X-BAD") == "1":
@@ -700,7 +637,7 @@ def test_request_extra_and_query_options():
     srv, url, tmp = _start_mock()
     try:
         c = zc.ZeekrClient("user@example.com", "pw", gateway=url)
-        # extra headers ride along (outside the signed canonical).
+        # An extra header rides along; X-EXTRA is not one the snc signer includes.
         resp = c._request("POST", "/user-service/device/code", body=b"{}",
                           extra={"X-EXTRA": "1"})
         assert resp["data"]["ddcCode"] == "MOCKDDC123", resp
@@ -722,12 +659,12 @@ def test_plain_http_transport_branches():
     try:
         url = f"http://127.0.0.1:{_MOCK_PORT}"
         c = zc.ZeekrClient("user@example.com", "pw", gateway=url)
-        # A v2-signed call over plain HTTP, its signature recomputed by the
-        # mock, then the unsigned ms-user-auth leg.
+        # An snc-signed call over plain HTTP, its signature recomputed by
+        # the mock, then the ms-user-auth leg.
         resp = c._request("POST", "/user-service/device/code", body=b"{}",
                           urlname="user-api")
         assert resp["data"]["ddcCode"] == "MOCKDDC123", resp
-        assert _EXPECTED_SIGS, "the v2-signed call was not checked"
+        assert _EXPECTED_SIGS, "the snc-signed call was not checked"
         c._ms_user_auth_login("mock-tv")
         assert c.access_token == "mock-at", "http login failed"
         before_hf = len(_EXPECTED_SIGS)
@@ -784,6 +721,7 @@ def test_idaas_transport_http_errors():
 
 
 def test_tsp_gateway_http_500():
+    _EXPECTED_SIGS.clear()
     srv, url, tmp = _start_mock()
     try:
         c = zc.ZeekrClient("user@example.com", "pw", gateway=url)
@@ -793,6 +731,8 @@ def test_tsp_gateway_http_500():
             assert False, "expected ZeekrApiError for HTTP 500"
         except zc.ZeekrApiError as e:
             assert "500" in str(e), f"unexpected message: {e}"
+        # The refused call was snc-signed like any other.
+        assert _EXPECTED_SIGS and all(_EXPECTED_SIGS), f"signature failures: {_EXPECTED_SIGS}"
     finally:
         _stop_mock(srv, tmp)
 
