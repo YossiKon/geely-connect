@@ -375,11 +375,6 @@ class ZeekrAdapter(CommandTrail):
         self._renewals = 0
         self._charge_refused = False
 
-    @property
-    def hf_expiry(self) -> int:
-        """Absolute epoch the current HF JWT expires at (0 = unknown)."""
-        return self._hf_expiry_ts
-
     def take_renewed_session(self) -> tuple[str, int, str, str] | None:
         """Return (hf_token, expiry_ts, access_token, refresh_token) when a
         silent renewal happened since the last poll (clearing the dirty flag),

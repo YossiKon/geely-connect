@@ -77,7 +77,7 @@ def test_constructor_and_basic_surface():
     a, c = _make_adapter()
     assert a.vin == FAKE_VIN
     assert a.user_id == "mock-uid"
-    assert a.hf_expiry == 10 ** 15
+    assert a._hf_expiry_ts == 10 ** 15
     assert a.take_renewed_session() is None, "no renewal yet"
     assert c.timezone == "UTC"
 
