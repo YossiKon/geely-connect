@@ -45,7 +45,7 @@ vehicle-token route; its older fallback route has different capabilities.
 | Charging schedule | Switch and start/end time entities, full card | Original slots 6/2 and EM mappings. Off-state edits can be discarded on original APAC ([#123](https://github.com/YossiKon/geely-connect/issues/123)); do not assume an acknowledgement persisted. |
 | Charge connector release | No independent control | The reported latch follows door locks; stopping charge is not a separate release command. |
 | Native one-off departure | Administrator action and [script blueprint](../blueprints/script/geely_connect/native_departure.yaml) | Original 2.0 request only. Reads current settings before writing. EM and E2 1.0 writes remain refused. |
-| Native weekly departure | Official app only | On the one car tested ([#4](https://github.com/YossiKon/geely-connect/issues/4)), `stop` from HA switched off a weekday schedule set in the app (leaving its days as they were, with only the app able to turn it back on). `start` cannot re-arm a weekday schedule set in the app, and what `start` does to an armed weekly schedule has not been measured. |
+| Native weekly departure | Official app only | On the one car tested ([#4](https://github.com/YossiKon/geely-connect/issues/4)), `stop` from HA switched off a weekly schedule set in the app (leaving its days as they were, with only the app able to turn it back on). `start` cannot re-arm a weekly schedule set in the app, and what `start` does to an armed weekly schedule has not been measured. |
 | Independent battery conditioning | No standalone setter | Native departure preserves the existing battery setting. It does not expose a new independent toggle. |
 | HA-timed preconditioning | Existing automation blueprints | HA calls the climate entity at the chosen time. Distinct from a departure stored in the car. |
 | Camping / Parking Comfort | Switch where available | State reading demonstrated; accepted remote writes have not demonstrated a vehicle effect ([#45](https://github.com/YossiKon/geely-connect/issues/45)). EM token route suppresses the unmapped switch. |
@@ -68,11 +68,11 @@ the first release whose `set_scheduled_trip` accepts `entity_id`. Select any
 entity belonging to the intended Geely and an
 `input_datetime` helper with **both date and time** enabled. Set a future date
 and time, then run the script as an administrator. Start is the default and
-arms a one-off trip (it cannot re-arm a weekday schedule set in the app, and
+arms a one-off trip (it cannot re-arm a weekly schedule set in the app, and
 what Start does to an armed weekly schedule has not been measured). Choose
 Stop to disarm using the departure already stored in the car, even if the
 helper is unavailable — on the one car tested ([#4](https://github.com/YossiKon/geely-connect/issues/4)),
-Stop switched off a weekday schedule set in the app, leaving its days as they
+Stop switched off a weekly schedule set in the app, leaving its days as they
 were, with only the app able to turn it back on. Judge the result by the app's
 Scheduled trip screen, never by the response. Dates use Home Assistant's time
 zone.

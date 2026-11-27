@@ -107,7 +107,7 @@
         }
       },
       "name": "Set scheduled trip",
-      "description": "Arm or disarm a scheduled trip on supported original-backend cars, preserving stored cabin and battery settings (EM trip writes are unavailable). Start arms a one-off trip and cannot re-arm a weekday schedule set in the app; Stop switches off a weekday schedule set in the app (only the app can turn it back on). What Start does to an armed weekly schedule has not been measured. Judge it by the app's Scheduled trip screen, never by the response."
+      "description": "Arm or disarm a scheduled trip on supported original-backend cars, preserving stored cabin and battery settings (EM trip writes are unavailable). Start arms a one-off trip and cannot re-arm a weekly schedule set in the app; Stop switches off a weekly schedule set in the app (only the app can turn it back on). What Start does to an armed weekly schedule has not been measured. Judge it by the app's Scheduled trip screen, never by the response."
     }
   },
   "exceptions": {

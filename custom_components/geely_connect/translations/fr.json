@@ -107,7 +107,7 @@
         }
       },
       "name": "Définir un trajet planifié",
-      "description": "Activez ou désactivez un trajet planifié sur les véhicules compatibles avec le serveur d’origine, en conservant les réglages enregistrés de l’habitacle et de la batterie (l’écriture des trajets EM n’est pas disponible). start arme un trajet ponctuel et ne peut pas réactiver un programme de jours de semaine défini dans l’application ; stop désactive un programme de jours de semaine défini dans l’application (seule l’application peut le réactiver). L’effet de start sur un programme hebdomadaire actif n’a pas été mesuré. Jugez-en d’après l’écran de l’application, jamais d’après la réponse."
+      "description": "Activez ou désactivez un trajet planifié sur les véhicules compatibles avec le serveur d’origine, en conservant les réglages enregistrés de l’habitacle et de la batterie (l’écriture des trajets EM n’est pas disponible). start arme un trajet ponctuel et ne peut pas réactiver un programme hebdomadaire défini dans l’application ; stop désactive un programme hebdomadaire défini dans l’application (seule l’application peut le réactiver). L’effet de start sur un programme hebdomadaire actif n’a pas été mesuré. Jugez-en d’après l’écran de l’application, jamais d’après la réponse."
     }
   },
   "exceptions": {

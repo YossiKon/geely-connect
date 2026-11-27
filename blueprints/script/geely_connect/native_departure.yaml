@@ -10,8 +10,8 @@ blueprint:
     EM trip writes and E2/EX2 1.0 trips are not mapped and are refused.
     Existing cabin and battery settings are preserved by the action, and
     battery heating is not selected independently. Start arms a one-off trip
-    and cannot re-arm a weekday schedule set in the app; Stop switches off a
-    weekday schedule set in the app (leaving its days intact, with only the
+    and cannot re-arm a weekly schedule set in the app; Stop switches off a
+    weekly schedule set in the app (leaving its days intact, with only the
     app able to turn it back on). What Start does to an armed weekly schedule
     has not been measured. Judge the result by the app's Scheduled trip
     screen, never by the response. Unlike the HA preconditioning blueprints,

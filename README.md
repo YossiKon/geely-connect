@@ -438,7 +438,7 @@ banner print `mi` and `mph` when that is what the entity is in
 | Trunk Lock | The tailgate's own latch, not whether the gate is open - the way to tell whether **Unlock Trunk** did anything on your car ([#20](https://github.com/YossiKon/geely-connect/issues/20)) |
 | Park Brake Engaged | On / off for automations, beside the *Park Brake* text sensor. A code the integration doesn't know reads unknown rather than *released* ([#41](https://github.com/YossiKon/geely-connect/issues/41)) |
 | Battery Temperature Maintenance | The app's *Scheduled trip → Battery Temperature Maintenance* toggle - a setting, not a live activity ([#4](https://github.com/YossiKon/geely-connect/issues/4)) |
-| Scheduled Trip Weekly / Scheduled Trip One-off | Whether the app's weekday schedule, or a one-off departure, is armed |
+| Scheduled Trip Weekly / Scheduled Trip One-off | Whether the app's weekly schedule, or a one-off departure, is armed |
 
 ### Maintenance & health
 
@@ -530,8 +530,8 @@ provides Start/Stop for an original-backend one-off trip, with a vehicle entity
 selector and a date-and-time helper. It preserves the trip's cabin/battery
 settings; EM trip writes remain unavailable. On the one car tested
 ([#4](https://github.com/YossiKon/geely-connect/issues/4)), `stop` switched off
-a weekday schedule set in the app (leaving its days as they were, with only the
-app able to turn it back on); `start` cannot re-arm a weekday schedule set in
+a weekly schedule set in the app (leaving its days as they were, with only the
+app able to turn it back on); `start` cannot re-arm a weekly schedule set in
 the app, and what `start` does to an armed weekly schedule has not been
 measured. Judge it by the app's Scheduled trip screen, never by the response.
 
@@ -679,7 +679,7 @@ sit beside them:
   heaters, spaced out so the car accepts every command.
 - **`blueprints/script/geely_connect/native_departure.yaml`** arms a one-off
   departure stored in the car on the original platform, or switches the
-  scheduled trip off. On the one car tested, Stop also switched off a weekday
+  scheduled trip off. On the one car tested, Stop also switched off a weekly
   schedule set in the app (see
   [the control guide](docs/CONTROL_SUPPORT.md#native-departure-setup)). It
   needs Geely Connect v1.62.0 or later, and an administrator to run it.

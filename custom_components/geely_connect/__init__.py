@@ -1402,7 +1402,7 @@ def _register_debug_service(hass: HomeAssistant) -> None:
     # a control that invented a departure would silently move the owner's
     # 07:00, which is why this is not a switch. A switch would also need a
     # readable armed state, and the one car read armed and disarmed (#4)
-    # splits it in two: `btActive` for the weekday schedule, `btTempActive`
+    # splits it in two: `btActive` for the weekly schedule, `btTempActive`
     # for a one-off - read, not written, by the two Scheduled Trip sensors. bizType 4 stays unreachable from fire_rapid for the same
     # reason: there, a malformed probe would clobber the schedule.
     trip_schema = vol.Schema({

@@ -168,7 +168,7 @@ SPECS: tuple[tuple[str, str, tuple[str, ...], BinarySensorDeviceClass | None, tu
     #   one-off trip for the next day      false     true          1
     #   weekday on, battery temp off       true      false         0
     #
-    # So `btActive` is the weekday schedule, `btTempActive` a one-off trip, and
+    # So `btActive` is the weekly schedule, `btTempActive` a one-off trip, and
     # `bw` the Battery Temperature Maintenance toggle - the only field that
     # moved when that alone was switched off. This sensor used to read
     # `btTempActive`, which agreed with the toggle on the first car only

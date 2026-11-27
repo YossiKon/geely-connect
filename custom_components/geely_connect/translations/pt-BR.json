@@ -107,7 +107,7 @@
         }
       },
       "name": "Definir viagem programada",
-      "description": "Ative ou desative uma viagem programada nos carros compatíveis com o servidor original, preservando os ajustes salvos da cabine e da bateria (a gravação de viagens EM não está disponível). start ativa uma viagem única e não consegue reativar uma programação de dias úteis definida no aplicativo; stop desliga uma programação de dias úteis definida no aplicativo (somente o aplicativo pode ligá-la novamente). O efeito de start em uma programação semanal ativa não foi medido. Julgue pela tela do aplicativo, nunca pela resposta."
+      "description": "Ative ou desative uma viagem programada nos carros compatíveis com o servidor original, preservando os ajustes salvos da cabine e da bateria (a gravação de viagens EM não está disponível). start ativa uma viagem única e não consegue reativar uma programação semanal definida no aplicativo; stop desliga uma programação semanal definida no aplicativo (somente o aplicativo pode ligá-la novamente). O efeito de start em uma programação semanal ativa não foi medido. Julgue pela tela do aplicativo, nunca pela resposta."
     }
   },
   "exceptions": {
