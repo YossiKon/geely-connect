@@ -153,7 +153,7 @@ def test_uncontacted_coordinator_and_legacy_test_double_do_not_invent_success():
     assert entity.native_value is not None
 
 
-def test_explicit_refresh_surfaces_both_grace_failures_then_recovers():
+def test_explicit_refresh_stays_quiet_in_grace_and_fails_past_it():
     m = _mod()
     sensor_mod = load("sensor")
     button_mod = load("button")
@@ -171,28 +171,33 @@ def test_explicit_refresh_surfaces_both_grace_failures_then_recovers():
 
         button = button_mod.GeelyRefreshButton(hass, bundle)
 
-        # Grace failures under a frozen clock (now == setup stamp) must still
-        # raise, and each press must drive the real forced-press path.
+        # During the grace a press stays quiet, as it always has, so a script
+        # that ends with one does not stop on an error; Connected says the
+        # car was not reached. Each press still drives the forced-press path.
         api.vehicle_status = failed
         for i in range(2):
             pos_before = api.calls.count("position")
-            try:
-                asyncio.run(button.async_press())
-            except button_mod.HomeAssistantError as err:
-                assert str(err) == "Geely sync failed: vehicle_status: offline", str(err)
-            else:
-                raise AssertionError("failed explicit refresh was reported as successful")
+            asyncio.run(button.async_press())
             assert poll_state.get("force_secondary") is True
             assert api.calls.count("position") == pos_before + 1, f"press {i + 1} did not wake"
             assert coord.last_update_success, "general availability grace must remain"
             assert not coord.geely_status_success
 
-        # Recovery under the same frozen clock must succeed and spend force_secondary.
+        # Past the grace the press fails, quoting the scrubbed error.
+        try:
+            asyncio.run(button.async_press())
+        except button_mod.HomeAssistantError as err:
+            assert str(err) == "Geely sync failed: vehicle_status: offline", str(err)
+        else:
+            raise AssertionError("a press past the grace was reported as successful")
+        assert not coord.last_update_success
+
+        # Recovery succeeds and spends force_secondary.
         api.vehicle_status = good
         state_before = api.calls.count("state")
         asyncio.run(button.async_press())
         assert coord.geely_status_success
-        assert coord.geely_last_status_error is None
+        assert coord.last_update_success
         assert api.calls.count("state") == state_before + 1
         assert "force_secondary" not in poll_state
         assert "force_woke" not in poll_state
@@ -200,9 +205,9 @@ def test_explicit_refresh_surfaces_both_grace_failures_then_recovers():
 
 def test_refresh_press_succeeds_when_overlapping_refresh_hits_grace():
     """On HA versions without a coordinator refresh lock, another refresh can
-    overlap a Refresh press during its secondary reads. If the press's own
-    status read succeeded at >= press start time, the press must not raise
-    a false 'Geely sync failed'."""
+    overlap a Refresh press during its secondary reads. The press's own status
+    read still stamps the contact time, the overlapping grace failure turns
+    Connected off, and the press, whose refresh succeeded, does not raise."""
     m = _mod()
     sensor_mod = load("sensor")
     button_mod = load("button")
@@ -240,10 +245,11 @@ def test_refresh_press_succeeds_when_overlapping_refresh_hits_grace():
         assert coord.geely_status_success is False
 
 
-def test_grace_refresh_quotes_today_scrubbed_error_not_stale_last_exception():
-    """HA never clears last_exception after recovery. A later grace failure on
-    Refresh Data must quote today's scrubbed error, never the stale exception
-    from an earlier outage; past grace it quotes the new last_exception."""
+def test_grace_press_stays_quiet_and_past_grace_quotes_todays_scrubbed_error():
+    """HA never clears last_exception after recovery. A later grace failure is
+    logged with today's scrubbed error and the press stays quiet, so the stale
+    exception from an earlier outage is never quoted; past the grace the press
+    quotes the new last_exception, scrubbed."""
     m = _mod()
     sensor_mod = load("sensor")
     button_mod = load("button")
@@ -274,24 +280,21 @@ def test_grace_refresh_quotes_today_scrubbed_error_not_stale_last_exception():
         now[0] = t0 + timedelta(days=7)
         asyncio.run(coord.async_refresh())
         assert coord.last_update_success is True
-        assert coord.geely_last_status_error is None
         assert "last week's outage" in str(coord.last_exception)
 
-        # 3) New grace failures containing a secret and the full VIN.
+        # 3) New grace failures containing a secret and the full VIN: the press
+        #    stays quiet, and the poll's warning carries today's error, scrubbed.
         api.vehicle_status = lambda: (_ for _ in ()).throw(
             ValueError(f"today's blip: {words}"))
         for step in (1, 2):
             now[0] = t0 + timedelta(days=7, minutes=step)
-            try:
+            with patch.object(m._LOGGER, "warning") as warn:
                 asyncio.run(button.async_press())
-            except button_mod.HomeAssistantError as err:
-                msg = str(err)
-            else:
-                raise AssertionError(f"grace press {step} did not fail")
-            assert "today's blip" in msg, msg
-            assert "last week's outage" not in msg, msg
-            _quoted_clean(msg, secret)
-            assert f"...{FAKE_VIN[-4:]}" in msg, msg
+            logged = " ".join(c.args[0] % c.args[1:] for c in warn.call_args_list)
+            assert "today's blip" in logged, logged
+            assert "last week's outage" not in logged, logged
+            _quoted_clean(logged, secret)
+            assert f"...{FAKE_VIN[-4:]}" in logged, logged
             assert coord.last_update_success is True
             assert connected.is_on is False
 
@@ -330,11 +333,11 @@ class _EMGateway:
         pass
 
 
-def test_geely_em_contact_tracking_grace_and_refresh_error():
-    """Real Geely EM (Zeekr) adapter + client: in-flight Connected stays on,
-    grace turns Connected off while freezing Last Updated and quoting today's
-    scrubbed error rather than a stale last_exception, and recovery clears
-    force_secondary (serves_state=False)."""
+def test_geely_em_contact_tracking_grace_and_a_quiet_refresh():
+    """Real Geely EM (Zeekr) adapter + client: in-flight Connected stays on;
+    grace turns Connected off and freezes Last Updated, the press stays quiet
+    and the poll logs today's scrubbed error, never a stale last_exception;
+    recovery clears force_secondary (serves_state=False)."""
     from test_zeekr_adapter import _make_adapter, _patch_idaas, _restore_idaas
     from test_zeekr_init import _mod as _em_mod, _setup_zeekr
 
@@ -400,7 +403,9 @@ def test_geely_em_contact_tracking_grace_and_refresh_error():
         # Simulate a stale last_exception from an earlier outage that HA kept.
         coord.last_exception = m.UpdateFailed("vehicle_status: stale em outage")
 
-        # Gateway now returns a failure carrying the VIN and access token.
+        # Gateway now returns a failure carrying the VIN and access token. The
+        # press stays quiet during the grace; the poll's warning carries the
+        # failure, scrubbed, and never the stale error.
         token = api._client.access_token
         state["status"] = {
             "code": "500", "success": False,
@@ -408,15 +413,12 @@ def test_geely_em_contact_tracking_grace_and_refresh_error():
         }
         for step in (1, 2):
             now[0] = t1 + timedelta(minutes=step)
-            try:
+            with patch.object(m._LOGGER, "warning") as warn:
                 asyncio.run(button.async_press())
-            except button_mod.HomeAssistantError as err:
-                msg = str(err)
-            else:
-                raise AssertionError(f"EM grace press {step} did not fail")
-            assert "em gateway down" in msg, msg
-            assert "stale em outage" not in msg, msg
-            assert token not in msg and FAKE_VIN not in msg, msg
+            logged = " ".join(c.args[0] % c.args[1:] for c in warn.call_args_list)
+            assert "em gateway down" in logged, logged
+            assert "stale em outage" not in logged, logged
+            assert token not in logged and FAKE_VIN not in logged, logged
             assert coord.last_update_success is True
             assert connected.is_on is False
             last_updated._stamp()
@@ -430,5 +432,4 @@ def test_geely_em_contact_tracking_grace_and_refresh_error():
         last_updated._stamp()
         assert connected.is_on is True
         assert last_updated.native_value == t_rec
-        assert coord.geely_last_status_error is None
         assert "force_secondary" not in poll_state

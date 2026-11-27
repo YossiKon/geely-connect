@@ -837,13 +837,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except Exception as e:  # noqa: BLE001
             fail_state["consecutive"] += 1
             if fail_state["consecutive"] <= _FAILURE_TOLERANCE and prev:
-                err_text = api.without_secrets(e)
                 coordinator.geely_status_success = False
-                coordinator.geely_last_status_error = f"vehicle_status: {err_text}"
                 _LOGGER.warning(
                     "vehicle_status failed (%d/%d consecutive); reusing last "
                     "snapshot: %s", fail_state["consecutive"], _FAILURE_TOLERANCE,
-                    err_text,
+                    api.without_secrets(e),
                 )
                 return prev
             # `from None`: a chained error carries its raw text into the
@@ -867,7 +865,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             data = {}
         coordinator.geely_status_success = True
         coordinator.geely_last_successful_contact = dt_util.utcnow()
-        coordinator.geely_last_status_error = None
 
         # The zeekr adapter renews the old-platform HF JWT silently from the
         # stored password; persist the refreshed token + expiry so the next
@@ -1075,7 +1072,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     coordinator.geely_status_success = False
     coordinator.geely_last_successful_contact = None
-    coordinator.geely_last_status_error = None
     await coordinator.async_config_entry_first_refresh()
 
     # Fetch the per-vehicle capability catalog once at setup. Used by

@@ -35,7 +35,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.util import dt as dt_util
 
 from .api import GeelyControlError, redact
 from .helpers import quote_failure
@@ -131,33 +130,13 @@ class GeelyRefreshButton(ButtonEntity):
             self._poll_state["force_secondary"] = True
             # A new press may wake the car once more for a position fix (#95).
             self._poll_state.pop("force_woke", None)
-        started = dt_util.utcnow()
-        prev_contact = getattr(self._coordinator, "geely_last_successful_contact", None)
         await self._coordinator.async_refresh()
-        contact_ok = True
-        if hasattr(self._coordinator, "geely_last_successful_contact"):
-            contact = self._coordinator.geely_last_successful_contact
-            contact_ok = (
-                contact is not None
-                and contact >= started
-                and (
-                    getattr(self._coordinator, "geely_status_success", True)
-                    or contact != prev_contact
-                )
-            )
-        if not self._coordinator.last_update_success or not contact_ok:
+        if not self._coordinator.last_update_success:
             # Quoted through the client like any caught error: an unexpected
-            # one reaches last_exception as it was raised. During grace
-            # last_update_success stays True and HA never clears last_exception
-            # on success, so quote the grace failure rather than a stale error.
-            grace_err = getattr(self._coordinator, "geely_last_status_error", None)
-            if not self._coordinator.last_update_success:
-                err = self._coordinator.last_exception
-                detail = self._api.without_secrets(err) if err else grace_err
-            else:
-                detail = grace_err
+            # one reaches last_exception as it was raised.
+            err = self._coordinator.last_exception
             raise HomeAssistantError(
-                f"Geely sync failed: {detail}" if detail
+                f"Geely sync failed: {self._api.without_secrets(err)}" if err
                 else "Geely sync failed"
             )
 
