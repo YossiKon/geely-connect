@@ -1275,6 +1275,7 @@
     .chips { display: flex; flex-wrap: wrap; gap: 6px; }
     .chip {
       display: inline-flex; align-items: center; gap: 5px;
+      font: inherit; letter-spacing: inherit; line-height: inherit;
       font-size: 11px; font-weight: 500; padding: 4px 10px; border-radius: 999px;
       border: 1px solid var(--divider-color, rgba(120,130,140,.25));
       color: var(--secondary-text-color, #7a7f87); white-space: nowrap;
@@ -1691,6 +1692,11 @@
       // and rapid-preset taps there have been - each gives a waiting one up.
       this._tempSends = 0;
       this._tempGiveUps = 0;
+      this._commandContext = 0;
+      this._focusAction = null;
+      this._visualHoldUntil = 0;
+      this._retryTimers = new Set();
+      this._holdWaiters = [];
       this._sig = "";
     }
 
@@ -1698,6 +1704,11 @@
       // A pending arm-timeout must not fire a render on a removed card.
       clearTimeout(this._armedTimer);
       this._armed = null;
+      clearTimeout(this._holdTimer);
+      this._holdTimer = null;
+      this._holdUntil = 0;
+      this._visualHoldUntil = 0;
+      this._clearRetries();
       // A charging countdown must not keep re-rendering a removed card.
       this._ensureMinuteTick(false);
       // The expand dialog lives in document.body, so it will not be removed
@@ -1723,6 +1734,7 @@
     }
 
     setConfig(config) {
+      const previousVehicle = this._hass && this._vehicleBinding();
       this._config = config || {};
       // YAML hands over a bare number for `prefix: 2024`; _title() and the
       // entity ids need a string.
@@ -1730,8 +1742,21 @@
       this._sig = "";
       if (this._hass) {
         this._prefix = this._prefix || this._detectPrefix(this._hass);
+        if (previousVehicle !== this._vehicleBinding()) {
+          this._commandContext += 1;
+          this._dropPendingTemp();
+          this._clearRetries();
+          clearTimeout(this._armedTimer);
+          this._armed = null;
+        }
         this._safeRender();
       }
+    }
+
+    _vehicleBinding() {
+      const entity = this._eid("sensor", "battery");
+      const registered = (this._hass.entities || {})[entity];
+      return registered && registered.device_id || entity;
     }
 
     set hass(hass) {
@@ -1768,9 +1793,19 @@
      * forever - fail visibly instead. */
     _safeRender() {
       try {
+        const focusAction = this._focusAction;
+        this._focusAction = null;
         this._render();
         this._wirePhoto();
         this._wireExpand();
+        // Arming replaces the buttons. Keep the keyboard on the same action
+        // after a keyboard tap so a second press can confirm, without keeping
+        // focus after mouse clicks or timed disarms.
+        if (focusAction) {
+          const next = [...this.shadowRoot.querySelectorAll("[data-act]")]
+            .find((el) => el.dataset.act === focusAction);
+          if (next && !next.disabled) next.focus({ preventScroll: true });
+        }
       } catch (err) {
         this.shadowRoot.innerHTML = `<style>${BASE_CSS}</style>
           <div class="shell"><p class="micro">Geely Card</p>
@@ -1951,6 +1986,40 @@
       return this._holdUntil != null && Date.now() < this._holdUntil;
     }
 
+    _controlsHeld() {
+      return this._waiting()
+        || (this._visualHoldUntil != null && Date.now() < this._visualHoldUntil);
+    }
+
+    _afterHold(run) {
+      return new Promise((resolve, reject) => {
+        this._holdWaiters.push({
+          run: () => {
+            try {
+              Promise.resolve(run()).then(resolve, reject);
+            } catch (err) {
+              reject(err);
+            }
+          },
+          cancel: () => resolve(NOT_SENT),
+        });
+      });
+    }
+
+    _flushHoldWaiters() {
+      while (this._holdWaiters.length && !this._controlsHeld()) {
+        this._holdWaiters.shift().run();
+      }
+    }
+
+    _clearRetries() {
+      for (const cancel of [...this._retryTimers]) cancel();
+      this._retryTimers.clear();
+      const pending = this._holdWaiters;
+      this._holdWaiters = [];
+      for (const entry of pending) entry.cancel();
+    }
+
     /* Does this rejection mean "the car is still busy" rather than "no"? */
     _isBusyError(err) {
       const text = `${(err && (err.message || err.error || err.code)) || err || ""}`;
@@ -1962,10 +2031,12 @@
       // "Failed to perform the action" toast before we get a chance to see
       // whether the car simply wanted another moment. We surface the failures
       // that matter ourselves, in _send.
+      const entity = this._eid(domain, entitySuffix);
       return this._send(() => this._hass.callService(
         domain, service,
-        { entity_id: this._eid(domain, entitySuffix), ...data },
-        undefined, false), false, still);
+        { entity_id: entity, ...data },
+        undefined, false), false, still, this._commandContext,
+        domain === "button" && entitySuffix === "refresh_data");
     }
 
     /* Write the stepper's number without rebuilding the card. */
@@ -2019,7 +2090,7 @@
       return out;
     }
 
-    /* One command at a time, with a gap after it.
+    /* Space commands with a bounded wait.
      *
      * The car executes one remote command at a time and refuses the next with
      * "the last request has not yet been executed" - and a refused command is
@@ -2029,7 +2100,9 @@
      * There is no way to know when the car has finished: the gateway
      * acknowledges receipt, not execution, and nothing in the payload reports
      * a command completing. So this is a timer, not a status - held for
-     * `cooldown` after the call resolves, with the controls visibly waiting.
+     * `cooldown` after the call resolves. While awaiting its answer, a separate
+     * 30-second ceiling covers slow round trips without permanently disabling
+     * controls for a lost call. cooldown: 0 disables both waits.
      *
      * A command the car refused *because it was busy* is retried once, after
      * twice the wait. That is not the double-fire this project reverted in
@@ -2046,21 +2119,39 @@
      * A later tap stops the try only while its own hold lasts; this stops it
      * after that as well.
      */
-    _send(fire, retried = false, still = null) {
+    _send(fire, retried = false, still = null, context = this._commandContext, allowDriving = false) {
       // No car to send to: a dialog left open from before the prefix went
       // stale must not fire at an id that names nothing.
-      if (this._waiting() || this._lostCar()) return Promise.resolve(NOT_SENT);
+      if (context !== this._commandContext || this._waiting() || this._lostCar()
+          || (!allowDriving && this._isDriving())) return Promise.resolve(NOT_SENT);
       const hold = this._cooldownMs();
-      const release = () => {
-        this._holdUntil = Date.now() + hold;
+      const command = {};
+      this._gateCommand = command;
+      const gate = (delay, visualOnly = false) => {
+        if (this._gateCommand !== command) return;
         clearTimeout(this._holdTimer);
-        this._holdTimer = setTimeout(() => {
+        this._holdTimer = null;
+        if (delay > 0) {
+          const until = Date.now() + delay;
+          this._holdUntil = visualOnly ? 0 : until;
+          this._visualHoldUntil = visualOnly ? until : 0;
+          this._holdTimer = setTimeout(() => {
+            if (this._gateCommand !== command) return;
+            this._holdTimer = null;
+            this._holdUntil = 0;
+            this._visualHoldUntil = 0;
+            this._applyGate();
+            this._flushHoldWaiters();
+          }, delay);
+        } else {
           this._holdUntil = 0;
-          this._applyGate();
-        }, hold);
+          this._visualHoldUntil = 0;
+        }
+        this._applyGate();
+        if (delay <= 0) this._flushHoldWaiters();
       };
-      this._holdUntil = Date.now() + hold;
-      this._applyGate();
+      const release = () => gate(hold);
+      gate(hold ? Math.max(30000, hold) : 0);
       // Fired now rather than on a microtask: a command should leave the moment
       // the button is pressed, and only its *result* is handled asynchronously.
       let sent;
@@ -2072,14 +2163,41 @@
       }
       return Promise.resolve(sent)
         .then(release, (err) => {
-          release();
           if (!retried && this._isBusyError(err)) {
             // Retried quietly: the car was busy, the command never ran, and a
             // toast for something that is about to work on its own is noise.
-            this._holdUntil = 0;
-            return new Promise((r) => setTimeout(r, hold * 2))
-              .then(() => (still && !still() ? NOT_SENT : this._send(fire, true, still)));
+            // Keep the controls visually held for the cooldown (matching main)
+            // without leaving a stale timer that can release a newer command.
+            gate(hold, true);
+            if (this._gateCommand !== command) return NOT_SENT;
+            return new Promise((resolve) => {
+              let timer;
+              const cancel = () => {
+                clearTimeout(timer);
+                this._retryTimers.delete(cancel);
+                resolve(false);
+              };
+              this._retryTimers.add(cancel);
+              timer = setTimeout(() => {
+                this._retryTimers.delete(cancel);
+                resolve(true);
+              }, hold * 2);
+            }).then((ready) => {
+              if (!ready || context !== this._commandContext) return NOT_SENT;
+              if (still && !still()) return NOT_SENT;
+              // If another command is currently holding the controls when a
+              // direct command's retry comes due, wait for that hold to end
+              // instead of silently dropping it.
+              if (!still && this._controlsHeld()) {
+                return this._afterHold(() => (
+                  context !== this._commandContext ? NOT_SENT
+                    : this._send(fire, true, still, context, allowDriving)
+                ));
+              }
+              return this._send(fire, true, still, context, allowDriving);
+            });
           }
+          release();
           // Anything else is the car saying no, or saying no twice. Hiding that
           // would leave the owner believing a command worked.
           this._toast(`${(err && (err.message || err.error)) || "command failed"}`);
@@ -2214,9 +2332,15 @@
           // re-rendering the card, so a run of taps does not make it jump.
           this._showPendingTemp();
           clearTimeout(this._tempTimer);
+          const entity = this._eid("climate", "climate");
+          const context = this._commandContext;
           const timer = this._tempTimer = setTimeout(() => {
             const target = this._pendingTemp;
             if (target == null) return;
+            if (context !== this._commandContext || entity !== this._eid("climate", "climate")) {
+              this._dropPendingTemp();
+              return;
+            }
             // Held, NOT cleared on firing. Clearing it here made the display
             // fall back to the entity's old target for as long as the round
             // trip took - so the number the user had just dialled in visibly
@@ -2338,8 +2462,19 @@
     }
 
     _wire() {
-      this.shadowRoot.querySelectorAll("[data-act]").forEach((el) =>
-        el.addEventListener("click", () => this._onAction(el.dataset.act)));
+      this.shadowRoot.querySelectorAll("[data-act]").forEach((el) => {
+        el.addEventListener("keydown", (ev) => {
+          if (ev.repeat) ev.preventDefault();
+        });
+        el.addEventListener("click", (ev) => {
+          this._focusAction = ev.detail === 0 ? el.dataset.act : null;
+          try {
+            this._onAction(el.dataset.act);
+          } finally {
+            this._focusAction = null;
+          }
+        });
+      });
       this.shadowRoot.querySelectorAll("input[data-time]").forEach((el) =>
         el.addEventListener("change", () => {
           if (/^\d\d:\d\d$/.test(el.value)) {
@@ -2368,7 +2503,7 @@
      */
     _applyGate() {
       const driving = this._isDriving();
-      const waiting = this._waiting();
+      const waiting = this._controlsHeld();
       this.shadowRoot.querySelectorAll("[data-act]").forEach((el) => {
         const off = waiting || (driving && el.dataset.act !== "refresh");
         el.toggleAttribute("disabled", off);
@@ -2751,6 +2886,7 @@
       };
       wrap.addEventListener("click", open);
       wrap.addEventListener("keydown", (ev) => {
+        if (ev.repeat) { ev.preventDefault(); return; }
         if (ev.key === "Enter" || ev.key === " ") open(ev);
       });
     }
@@ -2817,6 +2953,9 @@
       const add = (label, act) => {
         const b = document.createElement("button");
         b.textContent = label;
+        b.addEventListener("keydown", (ev) => {
+          if (ev.repeat) ev.preventDefault();
+        });
         b.addEventListener("click", () => { dlg.close(); this._onAction(act); });
         panel.appendChild(b);
       };
@@ -3144,7 +3283,7 @@
         s.doorsOpen.length > 0 && `<span class="chip warn">${esc(this._t("chip.n_open", "{count} open", { count: s.doorsOpen.length }))}</span>`,
         // Windows: only while open, the lit fraction shows how far, and a tap
         // opens a small Open / Close menu (blocked while driving like any action).
-        windowsOpen && `<span class="chip lvl" style="--lvl:${winFrac}" data-act="windows_menu" role="button" tabindex="0" title="${esc(this._t("tooltip.windows_menu", "Open or close the windows"))}">${icon("window")} ${esc(windowsWord)}${typeof winPos === "number" ? ` ${winPos}%` : ""}</span>`,
+        windowsOpen && `<button type="button" class="chip lvl" style="--lvl:${winFrac}" data-act="windows_menu" title="${esc(this._t("tooltip.windows_menu", "Open or close the windows"))}">${icon("window")} ${esc(windowsWord)}${typeof winPos === "number" ? ` ${winPos}%` : ""}</button>`,
       ].filter(Boolean).join("");
 
       // `buttons:` picks them, as on the strip and mini (#87). Unset, it is
