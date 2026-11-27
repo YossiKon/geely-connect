@@ -23,7 +23,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: "3.14"
 
       # The captcha-solver tests need the manifest requirements (pycryptodome
       # etc.), and the entity tests skip themselves unless Home Assistant is
@@ -33,7 +33,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -c "import json; print('\n'.join(json.load(open('custom_components/geely_connect/manifest.json'))['requirements']))" > requirements-ci.txt
-          python -m pip install -r requirements-ci.txt homeassistant coverage playwright
+          python -m pip install -r requirements-ci.txt homeassistant==2026.12.0b2 coverage playwright
 
       # The cards are JavaScript, and four of their fixes are invisible to a
       # Python test - a registry-wiping polyfill, the 12V-battery prefix
@@ -48,6 +48,8 @@ jobs:
       # A PR that adds uncovered code fails here - either test it or discuss
       # lowering the bar in the PR.
       - name: Run tests with coverage
+        env:
+          PYTHONWARNINGS: "default::DeprecationWarning,default::PendingDeprecationWarning"
         run: |
           python -m coverage run --source=custom_components/geely_connect tests/run.py
           python -m coverage report --fail-under=100 --show-missing
