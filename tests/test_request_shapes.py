@@ -137,8 +137,10 @@ def test_every_authenticated_call_goes_through_the_refresh_wrapper():
                  if isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)}
         if "_mtls_send" in calls and "_authed_apis_call" not in calls:
             offenders.append(n.name)
-    # refresh_jwt performs the refresh itself; _authed_apis_call IS the wrapper.
-    assert set(offenders) <= {"refresh_jwt", "_authed_apis_call"}, offenders
+    # refresh_jwt and _renew_with_refresh_token perform the refresh itself;
+    # _authed_apis_call IS the wrapper.
+    assert set(offenders) <= {"refresh_jwt", "_renew_with_refresh_token",
+                              "_authed_apis_call"}, offenders
 
 
 def test_control_raises_on_a_rejected_command():

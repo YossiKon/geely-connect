@@ -118,7 +118,7 @@ must reach these hosts; a Geely EM entry talks to a different set.
 |---|---|---|
 | `captcha4.geely.com` | 🇨🇳 China (Alibaba, Hangzhou) | **Login only** - the captcha that runs before the email code |
 | `access-app-global.geely.com` | 🇩🇪 Frankfurt | Login only - sends the email code, exchanges the OTP |
-| `m-lcmsam-eu.geely.com` | 🇩🇪 Frankfurt | Login - the vehicle list. On a car on the EU backend (South African accounts included) also **ongoing**: every session renewal takes a one-time code from it |
+| `m-lcmsam-eu.geely.com` | 🇩🇪 Frankfurt | Login - the vehicle list. On a car on the EU backend (South African accounts included) also **now and then**: a one-time code from it starts a session, or replaces a refresh token the server refused |
 | `api.ecloudeu.com` | 🇩🇪 Frankfurt (AWS) | Once at setup - provisions the certificate |
 | `apis.ecloudeu.com` | 🇩🇪 Frankfurt (AWS) | **Ongoing** - every poll and every command |
 
@@ -126,8 +126,18 @@ An APAC-market car uses the Korean pair instead: `api.ecloudkr.com` and
 `apis.ecloudkr.com` (AWS, Seoul/Incheon), plus `m-lcmsam-kr.geely.com`. Its
 session renewals go to `m-lcmsam-kr.geely.com` and `api.ecloudkr.com`, so both
 stay in use after setup. A North-American car, and a Brazilian account, which
-resolves there, uses `api.ecloudus.com` and `apis.ecloudus.com`, and renews its
-session through `m-lcmsam-us.geely.com`.
+resolves there, uses `api.ecloudus.com` and `apis.ecloudus.com`, and takes its
+one-time codes from `m-lcmsam-us.geely.com`.
+
+On the EU and North-American backends the session renews with the refresh
+token the server issues beside it, on `apis.ecloudeu.com` /
+`apis.ecloudus.com` alone. A timer does that renewal in every polling mode,
+Manual included; it only ever renews with the refresh token, never starts a
+session and never wakes the car. A one-time code is spent only by a poll or a
+command, to start a session or when the server has refused the refresh token.
+The refresh token itself lasts 30 days. Unless the server issues a new one on
+renewal, a fresh login is still expected then: Home Assistant asks you to
+re-authenticate once the one-time code fails too.
 
 **Blocking China after setup is fine.** Only the captcha lives there, and only
 the login touches it. Lift the block when you add a car, or if Home Assistant
@@ -577,8 +587,9 @@ own schedule.
 
 ### ✋ Manual mode - sync only when you ask
 
-Manual runs **no timer at all**: Home Assistant never contacts the car on its
-own, so the integration never signs the phone app out. A sync happens only when you press **Refresh Data**, when something
+Manual runs **no polling timer**: Home Assistant never contacts the car on its
+own, and the background session renewal touches only the auth gateway with the
+refresh token, so the integration never signs the phone app out. A sync happens only when you press **Refresh Data**, when something
 calls `homeassistant.update_entity` on any of the car's entities, or after a
 command you send. Each sync fetches **everything**. Automations that read car
 state act on stale data unless they sync first, and a failed sync is shown on

@@ -582,6 +582,198 @@ def test_setup_builds_the_bundle_and_forwards_every_platform():
     # A shipped region keeps refresh_jwt's own choice of login-code host.
     assert api.kw["control_host"] == "apis.ecloudeu.com"
     assert api.kw["mint_host"] is None
+    # No session kept yet: the client starts from the cidpsso exchange.
+    assert api.kw["access_token"] is None and api.kw["refresh_token"] is None
+
+
+def test_a_restart_hands_the_kept_session_pair_to_the_client():
+    """The pair an earlier poll kept goes back into the client, so a restart
+    renews with the refresh token instead of spending cidpsso (#101)."""
+    m = _mod()
+    ok, hass, entry, api, coord, _ = _setup(
+        m, entry=_entry(access_token="jwt-kept", refresh_token="rt-kept"))
+    assert ok is True
+    assert api.kw["access_token"] == "jwt-kept"
+    assert api.kw["refresh_token"] == "rt-kept"
+
+
+def _session_writes(entry_extra, takes):
+    """Set up with a client that hands out `takes` one poll at a time, and
+    collect the entry writes that follow."""
+    m = _mod()
+    queue = list(takes)
+    hass = _Hass()
+    writes = []
+
+    def _update(entry, data=None, **kw):
+        writes.append(dict(data))
+        entry.data = data
+
+    hass.config_entries.async_update_entry = _update
+
+    def _tweak(api):
+        api.take_renewed_jwt = lambda: queue.pop(0) if queue else None
+
+    ok, hass, entry, api, coord, _ = _setup(
+        m, hass=hass, entry=_entry(**entry_extra), api_tweak=_tweak)
+    assert ok is True
+    return m, hass, entry, coord, writes
+
+
+def test_a_renewed_session_pair_is_kept_in_the_entry_only_when_it_changes():
+    m, hass, entry, coord, writes = _session_writes(
+        {}, [("jwt-1", "rt-1"), None, ("jwt-1", "rt-1"), ("jwt-2", "rt-1")])
+    # The first refresh ran inside setup, before the bundle existed.
+    assert writes == [dict(entry.data)]
+    assert (entry.data["access_token"], entry.data["refresh_token"]) == (
+        "jwt-1", "rt-1")
+    bundle = hass.data["geely_connect"]["e1"]
+    asyncio.run(coord.refresh())                 # no renewal
+    asyncio.run(coord.refresh())                 # the same pair handed back
+    assert len(writes) == 1, "an unchanged pair must not rewrite the entry"
+    assert "_skip_reload_once" not in bundle
+    asyncio.run(coord.refresh())
+    assert len(writes) == 2
+    assert entry.data["access_token"] == "jwt-2"
+    assert bundle.get("_skip_reload_once") is True, \
+        "the write flags itself so the update listener skips the reload"
+
+
+def _keepalive_setup(applies=True, keep=None, takes=()):
+    """Set up with the timer helper recorded, not run. Returns the setup and
+    what was scheduled: (hass, action, interval, name) per call."""
+    m = _mod()
+    hass = _Hass()
+    writes, unloads, timers, unsubbed = [], [], [], []
+
+    def _update(entry, data=None, **kw):
+        writes.append(dict(data))
+        entry.data = data
+
+    hass.config_entries.async_update_entry = _update
+    entry = _entry()
+    entry.async_on_unload = unloads.append
+    hass.config_entries.async_get_entry = (
+        lambda entry_id: entry if entry_id == entry.entry_id else None)
+    queue = list(takes)
+
+    def _tweak(api):
+        api.kept = 0
+
+        def _keep():
+            api.kept += 1
+            if keep is not None:
+                keep(hass, api)
+
+        if applies is not None:
+            api.session_keepalive_applies = lambda: applies
+        api.keep_session_alive = _keep
+        api.take_renewed_jwt = lambda: queue.pop(0) if queue else None
+
+    def _track(hass_, action, interval, *, name=None):
+        timers.append((hass_, action, interval, name))
+        return lambda: unsubbed.append(name)
+
+    with _Patched(m, async_track_time_interval=_track):
+        ok, hass, entry, api, coord, _ = _setup(
+            m, hass=hass, entry=entry, api_tweak=_tweak)
+    assert ok is True
+    return types.SimpleNamespace(m=m, hass=hass, entry=entry, api=api,
+                                 coord=coord, writes=writes, unloads=unloads,
+                                 timers=timers, unsubbed=unsubbed)
+
+
+def test_the_session_keepalive_runs_while_a_refresh_token_is_held():
+    """Super Eco's 2 h cap and Manual mode renew only after the JWT expired,
+    which the PUT refuses (#101): a gateway-only timer keeps it alive."""
+    s = _keepalive_setup(takes=[None, ("jwt-k", "rt-k")])
+    assert len(s.timers) == 1
+    hass_, action, interval, name = s.timers[0]
+    assert hass_ is s.hass and interval.total_seconds() == 50 * 60
+    assert name and "keepalive" in name
+    calls, writes = list(s.api.calls), len(s.writes)
+    data = s.coord.data
+    asyncio.run(action(None))
+    assert s.api.kept == 1
+    assert s.api.calls == calls, "the keepalive must never reach the car"
+    assert s.coord.data is data, "nor run a coordinator refresh"
+    assert len(s.writes) == writes + 1
+    assert (s.entry.data["access_token"], s.entry.data["refresh_token"]) == (
+        "jwt-k", "rt-k")
+    assert s.hass.data["geely_connect"]["e1"].get("_skip_reload_once") is True
+
+
+def test_the_session_keepalive_is_cancelled_on_unload():
+    s = _keepalive_setup()
+    for cb in s.unloads:
+        cb()
+    assert s.unsubbed == ["geely_connect session keepalive"]
+
+
+def test_the_keepalive_is_registered_on_eu_and_na_even_without_a_token_yet():
+    """Whether a refresh token is held is the tick's question
+    (GeelyApi.keep_session_alive), so a session that gains one later is
+    kept alive too. A tick with nothing renewed writes nothing."""
+    s = _keepalive_setup(takes=[])
+    assert len(s.timers) == 1
+    asyncio.run(s.timers[0][1](None))
+    assert s.api.kept == 1 and s.writes == []
+
+
+def test_no_keepalive_on_apac_or_the_geely_em_platform():
+    # APAC answers False (GeelyApi.session_keepalive_applies); a Geely EM
+    # adapter has no such method.
+    for applies in (False, None):
+        s = _keepalive_setup(applies=applies)
+        assert s.timers == [], applies
+
+
+def test_a_tick_for_an_entry_that_is_gone_writes_nothing():
+    """A tick waiting on its executor job while the entry is unloaded or
+    removed must not write into it; one that starts after does nothing."""
+    def removed(hass, api):
+        hass.config_entries.async_get_entry = lambda entry_id: None
+
+    def replaced(hass, api):
+        hass.data["geely_connect"]["e1"]["api"] = object()
+
+    for gone in (removed, replaced):
+        s = _keepalive_setup(keep=gone, takes=[None, ("jwt-k", "rt-k")])
+        asyncio.run(s.timers[0][1](None))
+        assert s.api.kept == 1 and s.writes == [], gone.__name__
+        asyncio.run(s.timers[0][1](None))
+        assert s.api.kept == 1, "no renewal for an entry that is gone"
+
+
+def test_a_failing_keepalive_never_escalates():
+    """A failure in the timer is logged and left for the next poll, which
+    raises any re-authentication; the timer itself never raises."""
+    from homeassistant.exceptions import ConfigEntryAuthFailed
+    api_mod = load("api")
+
+    for error in (api_mod.GeelyAuthError("cidpsso token rejected"),
+                  api_mod.GeelyTLSPinError("pin mismatch"),
+                  TimeoutError("timed out"),
+                  RuntimeError("session refresh failed")):
+        def _fail(hass, api, error=error):
+            raise error
+
+        s = _keepalive_setup(keep=_fail)
+        _, action, _, _ = s.timers[0]
+        try:
+            asyncio.run(action(None))
+        except ConfigEntryAuthFailed:
+            raise AssertionError("the timer asked for re-auth itself")
+        assert s.api.kept == 1 and s.writes == [], error
+
+
+def test_a_session_without_a_refresh_token_clears_only_a_kept_pair():
+    _, _, entry, _, writes = _session_writes({}, [("", "")])
+    assert writes == [] and "access_token" not in entry.data
+    _, _, entry, _, writes = _session_writes(
+        {"access_token": "jwt-old", "refresh_token": "rt-old"}, [("", "")])
+    assert len(writes) == 1
+    assert (entry.data["access_token"], entry.data["refresh_token"]) == ("", "")
 
 
 def _uae_hass(keys):

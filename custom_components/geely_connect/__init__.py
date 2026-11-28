@@ -31,6 +31,7 @@ from homeassistant.helpers import (
     entity_registry as er,
     issue_registry as ir,
 )
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
@@ -48,6 +49,7 @@ from .const import (
     DEFAULT_ZEEKR_REGION,
     CLIENT_ID,
     VEHICLE_SERIES,
+    CONF_ACCESS_TOKEN,
     CONF_COUNTRY_CODE,
     CONF_CERT_PATH,
     CONF_CIDPSSO_TOKEN,
@@ -59,6 +61,7 @@ from .const import (
     CONF_KEY_PATH,
     CONF_PLATFORM,
     CONF_POLL_MODE,
+    CONF_REFRESH_TOKEN,
     CONF_REGION,
     CONF_USER_ID,
     CONF_VEHICLE_MODEL_CODE,
@@ -94,6 +97,10 @@ PLATFORMS: list[str] = [
     "sensor", "binary_sensor", "device_tracker",
     "lock", "climate", "switch", "select", "cover", "button", "time",
 ]
+
+# How often the session keepalive asks whether the JWT is due (#101). Due at
+# minute 60 of 120, a tick renews it by minute 110 at the latest (expiry 119).
+_SESSION_KEEPALIVE = timedelta(minutes=50)
 
 
 def _resolve_device_name(entry_data: dict) -> str:
@@ -710,6 +717,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             control_host=backend["control_host"],
             email=d.get(CONF_EMAIL),
             mint_host=backend.get("mint_host"),
+            access_token=d.get(CONF_ACCESS_TOKEN),
+            refresh_token=d.get(CONF_REFRESH_TOKEN),
         )
 
     _SUCCESS_CODES = {1000, "1000", 10000000, "10000000", None}
@@ -778,6 +787,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             coordinator.update_interval = _adaptive_interval(data, poll_state["idle"], profile)
         except Exception:  # noqa: BLE001
             pass
+
+    def _keep_jwt_pair() -> None:
+        """Write the original platform's renewed JWT and refresh token into
+        the entry (#101), so a restart renews with them instead of spending
+        the cidpsso token. Only a changed pair is written, and the write
+        flags itself so the update listener skips its reload."""
+        take_jwt = getattr(api, "take_renewed_jwt", None)
+        pair = take_jwt() if take_jwt is not None else None
+        kept = (entry.data.get(CONF_ACCESS_TOKEN, ""),
+                entry.data.get(CONF_REFRESH_TOKEN, ""))
+        if pair is not None and pair != kept:
+            new_data = dict(entry.data)
+            new_data[CONF_ACCESS_TOKEN], new_data[CONF_REFRESH_TOKEN] = pair
+            bucket = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+            if isinstance(bucket, dict):
+                bucket["_skip_reload_once"] = True
+            hass.config_entries.async_update_entry(entry, data=new_data)
+            _LOGGER.debug("session renewed; entry updated")
 
     async def _async_update():
         poll_state["cycle"] += 1
@@ -896,6 +923,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     bucket["_skip_reload_once"] = True
                 hass.config_entries.async_update_entry(entry, data=new_data)
                 _LOGGER.info("zeekr: session silently renewed; entry updated")
+
+        # The original platform's session pair, after any renewal this poll.
+        _keep_jwt_pair()
 
         # The verdict every reader of this snapshot follows - the flags below,
         # the interval, the Charger Connection label, Charge Complete and the
@@ -1158,6 +1188,37 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Reload when the options flow changes the polling mode / pressure unit /
     # language, so the new choice takes effect without a restart.
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
+
+    def _still_ours() -> bool:
+        bundle = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+        return (hass.config_entries.async_get_entry(entry.entry_id) is entry
+                and isinstance(bundle, dict) and bundle.get("api") is api)
+
+    async def _session_keepalive(_now) -> None:
+        """Renew the JWT with its refresh token if due, never the car nor the
+        coordinator; a failure is logged and the next poll surfaces it."""
+        try:
+            if not _still_ours():
+                return
+            await hass.async_add_executor_job(api.keep_session_alive)
+            # The entry may have been unloaded or removed meanwhile.
+            if _still_ours():
+                _keep_jwt_pair()
+        except GeelyTLSPinError as e:
+            _LOGGER.error("session keepalive: TLS pin check failed: %s",
+                          api.without_secrets(e))
+        except Exception as e:  # noqa: BLE001
+            _LOGGER.debug("session keepalive failed: %s",
+                          api.without_secrets(e))
+
+    # Super Eco's 2 h cap and Manual mode would renew only after the JWT has
+    # expired, which the refresh token's PUT refuses (#101). Each tick checks
+    # whether a refresh token is held; APAC and Geely EM get no timer.
+    applies = getattr(api, "session_keepalive_applies", None)
+    if applies is not None and applies():
+        entry.async_on_unload(async_track_time_interval(
+            hass, _session_keepalive, _SESSION_KEEPALIVE,
+            name="geely_connect session keepalive"))
     _register_debug_service(hass)
     return True
 

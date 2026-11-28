@@ -47,9 +47,9 @@ _REDACT = {
     # single point that has to be right. `zeekr_hf_expiry` is a timestamp and
     # stays visible on purpose.
     "zeekr_access_token", "zeekr_refresh_token", "zeekr_hf_token", "zeekr_password",
-    # The old platform's session exchange also returns a refresh token (#101).
-    # Nothing stores it yet; a build that does, under either spelling, must
-    # not find this list a step behind redact()'s normalised match.
+    # The old platform's session refresh token (#101), which the entry keeps
+    # as refresh_token beside its JWT as access_token (listed above). Both
+    # spellings, so this list is never a step behind redact()'s match.
     "refresh_token", "refreshToken",
     # The new platform's per-vehicle x-vin token - a capability secret that
     # addresses and controls the car. redact() (the first pass) already masks

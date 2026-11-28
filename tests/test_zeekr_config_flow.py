@@ -256,6 +256,8 @@ def test_zeekr_login_with_multiple_vehicles_picks_one():
 def test_zeekr_migration_restamps_and_purges_legacy_keys():
     cf, flow = _flow()
     entry = _legacy_entry()
+    # The original platform's session pair, as a poll keeps it (#101).
+    entry.data.update(access_token="old-jwt", refresh_token="old-rt")
     flow._reauth_entry = entry
     cf._zeekr_login_password = lambda e, p, c: _FakeClient()
     asyncio.run(flow.async_step_user({"platform": "zeekr"}))
@@ -267,7 +269,8 @@ def test_zeekr_migration_restamps_and_purges_legacy_keys():
     assert data["platform"] == "zeekr", "migration must stamp the platform"
     assert data["vin"] == FAKE_VIN, "VIN must be re-pointed at the new record"
     for legacy in ("cidpsso_token", "cert_path", "key_path",
-                   "device_id", "device_idfa", "device_idfv", "region"):
+                   "device_id", "device_idfa", "device_idfv", "region",
+                   "access_token", "refresh_token"):
         assert legacy not in data, f"legacy key {legacy} survived the purge"
     assert data["zeekr_access_token"] == "mock-at"
     assert data["user_id"] == "mock-uid"

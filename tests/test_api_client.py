@@ -1099,6 +1099,508 @@ def test_a_null_or_garbled_lifetime_falls_back_instead_of_refreshing_forever():
     assert before + 7199 <= k._jwt_exp <= int(time.time()) + 7200
 
 
+# ----------------------------------------- the session refresh token (#101) ---
+# The session/secure exchange returns a 30-day refreshToken beside the JWT.
+# Dropped, every 2 h renewal spent the cidpsso token, and the session died with
+# that token after 7 to 10 days. PUT session/secure renews with it instead.
+
+def _no_access_code(host="m-lcmsam-eu.geely.com"):
+    raise AssertionError("the cidpsso token must not be spent")
+
+
+def _kept_pair_client(**over):
+    """A client holding the pair a restart kept: a JWT and its refresh token."""
+    a = _client(access_token="old-jwt", refresh_token="RT-1", **over)
+    a._get_access_code = _no_access_code
+    return a
+
+
+def _renewal(token="JWT-2", rt="RT-1", life=7200):
+    return {"code": 1000, "data": {"accessToken": token, "expiresIn": str(life),
+                                   "refreshToken": rt,
+                                   "refreshFailureTime": "1795859653"}}
+
+
+def _exchange(token="JWT-X", rt="RT-new"):
+    return {"code": 1000, "data": {"accessToken": token, "userId": "uid-9",
+                                   "expiresIn": 7200, "refreshToken": rt}}
+
+
+class _Log:
+    """Every line the client logs at DEBUG and above, formatted."""
+
+    def __init__(self):
+        import logging
+        self.lines = []
+        self.handler = logging.Handler(logging.DEBUG)
+        self.handler.emit = lambda r: self.lines.append(
+            (r.levelname, r.getMessage()))
+
+    def __enter__(self):
+        import logging
+        self.level = api._LOGGER.level
+        api._LOGGER.setLevel(logging.DEBUG)
+        api._LOGGER.addHandler(self.handler)
+        return self
+
+    def __exit__(self, *exc):
+        api._LOGGER.removeHandler(self.handler)
+        api._LOGGER.setLevel(self.level)
+
+    def text(self):
+        return " | ".join(m for _, m in self.lines)
+
+
+def test_the_exchange_keeps_its_refresh_token():
+    a = _client()
+    a._get_access_code = lambda host="m-lcmsam-eu.geely.com": "AC-EU"
+    _scripted_mtls(a, [_exchange("JWT-1", "RT-1")])
+    a.refresh_jwt()
+    assert (a._jwt, a._rt) == ("JWT-1", "RT-1")
+    assert a.take_renewed_jwt() == ("JWT-1", "RT-1")
+    assert a.take_renewed_jwt() is None, "handed out once per renewal"
+
+
+def test_an_exchange_without_a_refresh_token_clears_the_kept_pair():
+    """Renewal stays at expiry, as before, and the entry is told to drop a
+    pair it may still hold, rather than restore a stale one."""
+    for rt in (None, "", 12345):
+        a = _client()
+        a._get_access_code = lambda host="m-lcmsam-eu.geely.com": "AC-EU"
+        _scripted_mtls(a, [_exchange("JWT-1", rt)])
+        a.refresh_jwt()
+        assert a._rt is None and a._jwt_renew_at is None, rt
+        assert not a._renew_due()
+        assert a.take_renewed_jwt() == ("", ""), rt
+
+
+def test_a_held_refresh_token_renews_with_put_and_never_spends_cidpsso():
+    a = _kept_pair_client()
+    calls = _scripted_mtls(a, [_renewal()])
+    with _Log() as log:
+        a.refresh_jwt()
+    assert a._jwt == "JWT-2"
+    c = calls[0]
+    assert c["host"] == "apis.ecloudeu.com"
+    assert (c["method"], c["path"]) == ("PUT", "/auth/account/session/secure")
+    assert json.loads(c["body"]) == {"refreshToken": "RT-1"}
+    h = c["headers"]
+    assert h["Authorization"] == "old-jwt", "the PUT carries the JWT it renews"
+    assert (h["X-CLIENT-ID"], h["X-VEHICLE-SERIES"], h["X-VEHICLE-MODEL"],
+            h["X-Vehicle-IDENTIFIER"]) == (
+        "CLIENT", "E245", "E245-J1", FAKE_VIN)
+    assert a.take_renewed_jwt() == ("JWT-2", "RT-1")
+    assert [lvl for lvl, _ in log.lines] == ["DEBUG"]
+    for secret in ("old-jwt", "JWT-2", "RT-1"):
+        assert secret not in log.text(), log.text()
+
+
+def test_a_renewal_that_hands_back_the_same_token_is_still_a_renewal():
+    """While the JWT lives the PUT may answer with the same accessToken; its
+    lifetime starts again, and the refresh token is kept when none comes."""
+    a = _kept_pair_client()
+    _scripted_mtls(a, [{"code": "1000", "data": {"accessToken": "old-jwt",
+                                                 "expiresIn": 7200}}])
+    before = int(time.time())
+    a.refresh_jwt()
+    assert (a._jwt, a._rt) == ("old-jwt", "RT-1")
+    assert a._jwt_exp >= before + 7200
+    assert a.take_renewed_jwt() == ("old-jwt", "RT-1")
+
+
+def test_a_refresh_token_session_renews_at_half_the_grant():
+    # An expired JWT on the PUT gets 1404 "Access and refresh token do not
+    # match", so renewal must happen while the token still lives.
+    a = _kept_pair_client()
+    _scripted_mtls(a, [_renewal(life=7200)])
+    before = int(time.time())
+    a.refresh_jwt()
+    assert before + 3600 <= a._jwt_renew_at <= int(time.time()) + 3600
+    assert a._jwt_exp >= before + 7200
+    assert not a._renew_due()
+    assert a._ensure_jwt() == "JWT-2", "a fresh JWT is used without a call"
+    a._jwt_renew_at = int(time.time()) - 1
+    assert a._renew_due(), "past half the grant the next call renews"
+    calls = _scripted_mtls(a, [_renewal("JWT-3")])
+    assert a._ensure_jwt() == "JWT-3"
+    assert calls[0]["method"] == "PUT"
+    assert calls[0]["headers"]["Authorization"] == "JWT-2"
+
+
+def _timeout(*args, **kwargs):
+    raise TimeoutError("The read operation timed out")
+
+
+def _half_way(a):
+    """A client past half its grant whose JWT still lives."""
+    _scripted_mtls(a, [_renewal()])
+    a.refresh_jwt()
+    a.take_renewed_jwt()
+    a._jwt_renew_at = int(time.time()) - 1
+    return a
+
+
+def test_an_early_renewal_lost_in_transit_keeps_the_live_jwt():
+    def garbled(*args, **kwargs):
+        return 502, b"<html>Bad Gateway</html>"
+
+    for fault in (_timeout, garbled):
+        a = _half_way(_kept_pair_client())
+        a._mtls_send = fault
+        with _Log() as log:
+            assert a._ensure_jwt() == "JWT-2", "a live JWT must survive"
+        assert a._rt == "RT-1", "a transport fault says nothing of the token"
+        assert a.take_renewed_jwt() is None
+        assert [lvl for lvl, _ in log.lines] == ["DEBUG"], log.lines
+        # ...and the next call tries again.
+        calls = _scripted_mtls(a, [_renewal("JWT-3")])
+        assert a._ensure_jwt() == "JWT-3" and calls[0]["method"] == "PUT"
+
+
+def test_a_renewal_lost_in_transit_after_expiry_still_fails_without_reauth():
+    a = _half_way(_kept_pair_client())
+    a._jwt_exp = int(time.time()) - 1
+    a._mtls_send = _timeout
+    try:
+        a._ensure_jwt()
+    except api.GeelyAuthError:
+        raise AssertionError("a network fault escalated to re-auth")
+    except OSError:
+        pass                    # _call_with_retry's transient kind, as before
+    else:
+        raise AssertionError("an expired JWT was handed out after a failure")
+    assert a._rt == "RT-1", "the refresh token is kept for the retry"
+
+
+def test_a_refused_refresh_token_falls_back_to_the_exchange():
+    refusals = (
+        {"code": 1403, "message": "refresh token invalid"},
+        {"code": "1404", "message": "Access and refresh token do not match"},
+        {"code": 1408, "message": "refresh token expired"},
+        {"code": 1402},
+        {"code": 1000, "data": {}},            # no token in a success
+        {"code": 1000, "data": "JWT"},
+        ["not", "an", "object"],
+    )
+    for refusal in refusals:
+        a = _kept_pair_client()
+        a._get_access_code = lambda host="m-lcmsam-eu.geely.com": "AC-EU"
+        calls = _scripted_mtls(a, [refusal, _exchange()])
+        with _Log() as log:
+            a.refresh_jwt()
+        assert [c["method"] for c in calls] == ["PUT", "POST"], refusal
+        assert (a._jwt, a._rt, a._jwt_uid) == ("JWT-X", "RT-new", "uid-9")
+        assert a.take_renewed_jwt() == ("JWT-X", "RT-new")
+        assert [lvl for lvl, _ in log.lines] == ["WARNING"], log.lines
+        assert "refused" in log.text()
+
+
+# Long enough to be taken out of text (api._HIDE_MIN_LEN), as real ones are.
+_KEPT_JWT, _KEPT_RT = "jwt-session-0101-kept", "rt-session-0101-kept"
+
+
+def test_a_refusal_that_echoes_the_tokens_logs_neither():
+    a = _client(access_token=_KEPT_JWT, refresh_token=_KEPT_RT)
+    a._get_access_code = lambda host="m-lcmsam-eu.geely.com": "AC-EU"
+    echo = {"code": 1403, "refreshToken": _KEPT_RT,
+            "message": f"token {_KEPT_RT} does not belong to {_KEPT_JWT}"}
+    _scripted_mtls(a, [echo, _exchange()])
+    with _Log() as log:
+        a.refresh_jwt()
+    assert "does not belong to" in log.text()
+    for secret in (_KEPT_JWT, _KEPT_RT):
+        assert secret not in log.text(), log.text()
+
+
+def test_a_dead_cidpsso_token_after_a_refusal_is_still_an_auth_error():
+    def dead(host="m-lcmsam-eu.geely.com"):
+        raise api.GeelyAuthError("cidpsso token rejected")
+
+    for exchange_fails in (dead, None):
+        a = _kept_pair_client()
+        a._get_access_code = exchange_fails or (
+            lambda host="m-lcmsam-eu.geely.com": "AC-EU")
+        replies = [{"code": 1404}] + ([] if exchange_fails else
+                                      [{"code": 60000001}])
+        _scripted_mtls(a, replies)
+        try:
+            a.refresh_jwt()
+        except api.GeelyAuthError:
+            pass
+        else:
+            raise AssertionError("dead credentials did not ask for re-auth")
+        assert a._rt is None
+
+
+def test_a_transient_exchange_fault_after_a_refusal_stays_retryable():
+    """Main's split holds: a server fault is RuntimeError, never re-auth; and
+    with the JWT still live it does not even fail the call."""
+    a = _half_way(_kept_pair_client())
+    a._get_access_code = lambda host="m-lcmsam-eu.geely.com": "AC-EU"
+    _scripted_mtls(a, [{"code": 1404}, {"code": 8500}])
+    assert a._ensure_jwt() == "JWT-2"
+    # With the refresh token gone, the retry cadence is expiry again.
+    assert a._rt is None and a._jwt_renew_at is None
+    assert not a._renew_due()
+    a._jwt_exp = int(time.time()) - 1
+    calls = _scripted_mtls(a, [{"code": 8500}])
+    try:
+        a._ensure_jwt()
+    except api.GeelyAuthError:
+        raise AssertionError("a server fault escalated to re-auth")
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("an expired JWT was handed out after a failure")
+    assert calls[0]["method"] == "POST", "a refused token is not offered again"
+
+
+def _garbled(*args, **kwargs):
+    return 502, b"<html>Bad Gateway</html>"
+
+
+def _dead_cidpsso(host="m-lcmsam-eu.geely.com"):
+    raise api.GeelyAuthError("cidpsso token rejected")
+
+
+def test_a_transient_put_answer_keeps_the_live_jwt_and_refresh_token():
+    """8500 is a plain transient on session/secure. Read as a refusal, one
+    of them after the cidpsso token died became a re-authentication."""
+    for answer in ({"code": 8500}, {"code": "9999"}, ["not", "an", "object"]):
+        a = _half_way(_kept_pair_client())
+        a._get_access_code = _dead_cidpsso
+        _scripted_mtls(a, [answer])
+        assert a._ensure_jwt() == "JWT-2", answer
+        assert a._rt == "RT-1", answer
+        assert a._renew_due(), "the next call tries the PUT again"
+    a = _half_way(_kept_pair_client())
+    a._mtls_send = _garbled
+    assert a._ensure_jwt() == "JWT-2" and a._rt == "RT-1"
+
+
+def test_an_odd_put_answer_after_expiry_falls_back_to_the_exchange():
+    """Once the JWT is dead the PUT cannot succeed later, so an answer that
+    is not a refusal, or no readable answer at all, falls back too."""
+    def expired(a):
+        a._jwt_exp = int(time.time()) - 1
+
+    def restarted(a):
+        a._jwt_exp = 0
+
+    for answer in ({"code": 8500}, None):
+        for age in (expired, restarted):
+            a = _half_way(_kept_pair_client())
+            age(a)
+            a._get_access_code = lambda host="m-lcmsam-eu.geely.com": "AC-EU"
+            calls = []
+
+            def put_then_post(host, method, path, body, extra_headers=None,
+                              answer=answer):
+                calls.append(method)
+                if method == "PUT":
+                    return (_garbled() if answer is None
+                            else (200, json.dumps(answer).encode()))
+                return 200, json.dumps(_exchange()).encode()
+
+            a._mtls_send = put_then_post
+            assert a._ensure_jwt() == "JWT-X", (answer, age)
+            assert calls == ["PUT", "POST"], calls
+            assert a._rt == "RT-new"
+
+
+def test_keep_session_alive_renews_when_due_and_with_a_refresh_token():
+    a = _half_way(_kept_pair_client())
+    assert a.holds_refresh_token() and a.session_keepalive_applies()
+    before = int(time.time())
+    calls = _scripted_mtls(a, [_renewal("JWT-3")])
+    a.keep_session_alive()
+    assert [c["method"] for c in calls] == ["PUT"]
+    assert a.take_renewed_jwt() == ("JWT-3", "RT-1")
+    assert a._jwt_exp >= before + 7200 and a._jwt_renew_at >= before + 3600
+    a.keep_session_alive()                       # fresh: nothing to do
+    assert len(calls) == 1
+
+    def no_call(*args, **kwargs):
+        raise AssertionError("no refresh token, no keepalive call")
+
+    apac = _client(control_host="apis.ecloudkr.com", access_token="old-jwt",
+                   refresh_token="RT-1")
+    assert not apac.session_keepalive_applies()
+    for idle in (_client(), apac):
+        idle._mtls_send = idle._get_access_code = no_call
+        idle._apac_session_exchange = no_call
+        assert not idle.holds_refresh_token()
+        idle.keep_session_alive()
+
+
+def _put_only(a, answer):
+    """Script the PUT's answer; any other call fails the test."""
+    calls = []
+
+    def send(host, method, path, body, extra_headers=None):
+        calls.append(method)
+        assert method == "PUT", "the keepalive must never exchange a code"
+        if isinstance(answer, BaseException):
+            raise answer
+        return 200, json.dumps(answer).encode()
+
+    a._mtls_send = send
+    a._get_access_code = _no_access_code
+    return calls
+
+
+def test_a_keepalive_whose_put_is_refused_never_exchanges_a_code():
+    """A new session signs the phone app out (one per account), and after a
+    phone sign-in every tick would do it again. The keepalive drops the
+    refused token and stops; the next poll or command exchanges a code."""
+    for live in (True, False):
+        a = _half_way(_kept_pair_client())
+        if not live:
+            a._jwt_exp = int(time.time()) - 1
+        calls = _put_only(a, {"code": 1404})
+        a.keep_session_alive()
+        assert calls == ["PUT"], (live, calls)
+        assert a._rt is None and a._jwt_renew_at is None
+        assert a.take_renewed_jwt() is None
+        a.keep_session_alive()                   # idle once the token is gone
+        assert calls == ["PUT"]
+
+
+def test_a_keepalive_that_fails_in_transit_keeps_the_session():
+    for answer in ({"code": 8500}, TimeoutError("timed out")):
+        a = _half_way(_kept_pair_client())
+        calls = _put_only(a, answer)
+        a.keep_session_alive()                   # never raises
+        assert calls == ["PUT"]
+        assert (a._jwt, a._rt) == ("JWT-2", "RT-1"), answer
+        assert a.take_renewed_jwt() is None
+
+
+def test_a_dropped_refresh_token_abandons_the_pair_not_yet_written():
+    """The 1402 guard's PUT published the refused token beside the refresh
+    token; with the exchange failing, that pair must never reach the entry."""
+    a = _client_with_jwt()
+    a._rt = "RT-1"
+    a._get_access_code = lambda host="m-lcmsam-eu.geely.com": "AC-EU"
+    _scripted_mtls(a, [{"code": 1402}, _renewal("jwt0"), {"code": 8500}])
+    try:
+        a._authed_apis_call("GET", "/path", b"")
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("a failed exchange was reported as success")
+    assert a._rt is None
+    assert a.take_renewed_jwt() is None, "the abandoned pair was kept"
+
+
+def test_every_refusal_against_a_live_jwt_falls_back_to_the_exchange():
+    """With the JWT live, an answer outside the refusal set is retried, not
+    a refusal: each code here must stay in it, or this fails."""
+    for refusal in ({"code": 1402}, {"code": "1403"}, {"code": 1404},
+                    {"code": 1408}, {"code": 60000001},
+                    {"code": 1000, "data": {"accessToken": ""}}):
+        a = _half_way(_kept_pair_client())
+        a._get_access_code = lambda host="m-lcmsam-eu.geely.com": "AC-EU"
+        calls = _scripted_mtls(a, [refusal, _exchange()])
+        assert a._ensure_jwt() == "JWT-X", refusal
+        assert [c["method"] for c in calls] == ["PUT", "POST"], refusal
+        assert a._rt == "RT-new"
+
+
+def test_a_renewed_pair_is_taken_whole_and_once():
+    a = _kept_pair_client()
+    assert a.take_renewed_jwt() is None, "nothing renewed yet"
+    _scripted_mtls(a, [_renewal("JWT-2"), _renewal("JWT-3", "RT-2")])
+    a.refresh_jwt()
+    a.refresh_jwt()
+    assert a.take_renewed_jwt() == ("JWT-3", "RT-2"), "the latest pair, whole"
+    assert a.take_renewed_jwt() is None
+
+
+def test_a_restart_renews_the_kept_pair_before_the_first_call():
+    """The JWT a restart restores has no known expiry, so it is renewed once
+    with the PUT, never with a fresh login code."""
+    a = _kept_pair_client()
+    calls = _scripted_mtls(a, [_renewal(), {"code": 1000, "data": {"x": 1}}])
+    assert a._authed_apis_call("GET", "/path", b"") == {"code": 1000,
+                                                        "data": {"x": 1}}
+    assert calls[0]["method"] == "PUT"
+    assert calls[0]["headers"]["Authorization"] == "old-jwt"
+    assert calls[1]["headers"]["Authorization"] == "JWT-2"
+
+
+def test_half_a_kept_pair_is_not_restored():
+    for kept in ({"access_token": "old-jwt"}, {"refresh_token": "RT-1"},
+                 {"access_token": "old-jwt", "refresh_token": ""}):
+        a = _client(**kept)
+        assert (a._jwt, a._rt) == (None, None), kept
+
+
+def test_the_refresh_token_is_hidden_from_error_text():
+    a = _client(access_token=_KEPT_JWT, refresh_token=_KEPT_RT)
+    assert _KEPT_RT in a.hidden()
+    said = a.without_secrets(f"refused {_KEPT_RT} for {_KEPT_JWT}")
+    assert _KEPT_RT not in said and _KEPT_JWT not in said, said
+
+
+def test_a_1402_renews_with_the_refresh_token_and_the_dead_jwt():
+    a = _client_with_jwt()
+    a._rt = "RT-1"
+    a._get_access_code = _no_access_code
+    calls = _scripted_mtls(a, [
+        {"code": 1402},
+        _renewal("jwt1"),
+        {"code": 1000, "data": {}},
+    ])
+    got = a._authed_apis_call("GET", "/path", b"")
+    assert got == {"code": 1000, "data": {}}
+    assert calls[1]["method"] == "PUT"
+    assert calls[1]["headers"]["Authorization"] == "jwt0"
+    assert calls[2]["headers"]["Authorization"] == "jwt1"
+
+
+def test_a_1402_whose_renewal_hands_back_the_refused_token_exchanges_a_code():
+    """A JWT the gateway has just refused is dead, whatever the PUT says;
+    retrying with it would read as a dead login and ask for re-auth."""
+    a = _client_with_jwt()
+    a._rt = "RT-1"
+    a._get_access_code = lambda host="m-lcmsam-eu.geely.com": "AC-EU"
+    calls = _scripted_mtls(a, [
+        {"code": 1402},
+        _renewal("jwt0"),
+        _exchange("jwt1"),
+        {"code": 1000, "data": {}},
+    ])
+    with _Log() as log:
+        got = a._authed_apis_call("GET", "/path", b"")
+    assert got == {"code": 1000, "data": {}}
+    assert [c["method"] for c in calls] == ["GET", "PUT", "POST", "GET"]
+    assert calls[3]["headers"]["Authorization"] == "jwt1"
+    assert ("INFO", "session refresh returned the refused token; exchanging "
+            "a login code") in log.lines, log.lines
+
+
+def test_the_apac_session_is_untouched_by_the_refresh_token():
+    """APAC exchanges at its own public host and returns no refresh token;
+    a pair kept by an entry is never offered there, and nothing is written."""
+    a = _client(control_host="apis.ecloudkr.com", access_token="old-jwt",
+                refresh_token="RT-1")
+
+    def no_mtls(*args, **kwargs):
+        raise AssertionError("APAC renewals never PUT on the mTLS host")
+
+    a._mtls_send = no_mtls
+    a._apac_session_exchange = lambda: {"accessToken": "JWT-KR",
+                                        "expiresIn": 7200}
+    assert a._ensure_jwt() == "JWT-KR"
+    assert a._jwt_renew_at is None
+    assert a.take_renewed_jwt() is None
+    k = _client(control_host="apis.ecloudkr.com")
+    k._apac_session_exchange = lambda: {"accessToken": "JWT-KR"}
+    k.refresh_jwt()
+    assert (k._rt, k._jwt_renew_at, k.take_renewed_jwt()) == (None, None, None)
+
+
 # -------------------------------------------------------- _authed_apis_call ---
 
 def test_a_live_jwt_is_attached_to_every_authed_call():

@@ -58,6 +58,8 @@ from .const import (
     POLL_MODES,
     PRESSURE_UNITS,
     COUNTRY_CHOICES,
+    CONF_ACCESS_TOKEN,
+    CONF_REFRESH_TOKEN,
     CONF_CERT_PATH,
     CONF_CIDPSSO_TOKEN,
     CONF_COUNTRY_CODE,
@@ -635,6 +637,10 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ):
                 new_data.pop(zeekr_key, None)
             new_data[CONF_CIDPSSO_TOKEN] = self._cidpsso_token
+            # The old token's session goes with it (#101); the new one starts
+            # its own at the first poll.
+            for session_key in (CONF_ACCESS_TOKEN, CONF_REFRESH_TOKEN):
+                new_data.pop(session_key, None)
             new_data[CONF_USER_ID] = self._user_id
             new_data[CONF_DEVICE_IDFA] = self._idfa
             new_data[CONF_DEVICE_IDFV] = self._idfv
@@ -1003,6 +1009,7 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             for legacy_key in (
                 CONF_CIDPSSO_TOKEN, CONF_CERT_PATH, CONF_KEY_PATH,
                 CONF_DEVICE_ID, CONF_DEVICE_IDFA, CONF_DEVICE_IDFV, CONF_REGION,
+                CONF_ACCESS_TOKEN, CONF_REFRESH_TOKEN,
             ):
                 new_data.pop(legacy_key, None)
             # Persist what the form offered (the user may have changed them).
