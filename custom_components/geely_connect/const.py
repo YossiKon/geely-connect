@@ -87,6 +87,10 @@ CONF_COUNTRY_CODE       = "country_code"
 CONF_REGION             = "region"
 CONF_CIDPSSO_TOKEN      = "cidpsso_token"
 CONF_USER_ID            = "user_id"
+# The original platform's session JWT and its 30-day refresh token (#101).
+# Bare names on purpose: both redaction passes already mask them whole.
+CONF_ACCESS_TOKEN       = "access_token"
+CONF_REFRESH_TOKEN      = "refresh_token"
 CONF_VIN                = "vin"
 CONF_DEVICE_ID          = "device_id"
 CONF_CERT_PATH          = "cert_path"

@@ -264,6 +264,7 @@ _A_REPORT_MAY_SHOW = {
 _A_REPORT_MUST_HIDE = {
     "email", "user_id", "vin", "device_id", "device_idfa", "device_idfv",
     "cert_path", "key_path", "legacy_cert_paths", "cidpsso_token",
+    "access_token", "refresh_token",          # the session pair (#101)
     "zeekr_access_token", "zeekr_refresh_token", "zeekr_hf_token",
     "zeekr_password", "zeekr_enc_vin",
 }

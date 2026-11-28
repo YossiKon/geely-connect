@@ -97,6 +97,11 @@ _AUTH_FAILURE_CODES: set = {
     1402, "1402",
 }
 
+# PUT session/secure answers that refuse the refresh token itself (#101):
+# invalid (1403), not matching the JWT carried (1404), expired (1408).
+_REFRESH_REFUSED_CODES: set = {1402, 1403, 1404, 1408,
+                               "1402", "1403", "1404", "1408"}
+
 # Codes we treat as "command accepted by the server".
 _CONTROL_SUCCESS_CODES: set = {1000, "1000"}
 
@@ -1024,6 +1029,12 @@ class GeelyApi(CommandTrail):
     """Holds the long-lived cidpsso token + per-vehicle cert/key, plus a
     rotating JWT for apis.ecloudeu.com calls."""
 
+    # The session's refresh token (#101), when to renew the JWT it renews
+    # (None: expiry minus a minute), and a renewed pair awaiting the entry.
+    _rt: str | None = None
+    _jwt_renew_at: int | None = None
+    _pending_pair: tuple[str, str] | None = None
+
     def __init__(
         self,
         *,
@@ -1041,6 +1052,8 @@ class GeelyApi(CommandTrail):
         control_host: str = "apis.ecloudeu.com",
         email: str | None = None,
         mint_host: str | None = None,
+        access_token: str | None = None,
+        refresh_token: str | None = None,
     ) -> None:
         self.app_id = app_id
         self.app_secret = app_secret
@@ -1071,23 +1084,29 @@ class GeelyApi(CommandTrail):
         self._jwt_uid: str | None = None
         self._jwt_exp: int = 0   # unix ms
         self._jwt_lock = threading.Lock()
+        # The pair a restart kept. The JWT's expiry is unknown, so the first
+        # call renews it; the refresh PUT must carry it even when expired.
+        if access_token and refresh_token:
+            self._jwt = access_token
+            self._rt = refresh_token
 
     # ---- what error text leaves out ----
 
     def hidden(self) -> tuple:
         """What error text built from a gateway's answer leaves out
-        (hide_values): the session token, the long-lived cidpsso token, the
-        user id - the account's and the one the session was issued to - the
-        e-mail address, and the app id its signed calls send, which for an
-        area signed with local keys is the owner's own (#105). The VIN is
-        shortened instead, to its last four characters, as the command trail
-        shows it (_shorten_vin). A user id shorter than six characters is
-        left, as everywhere hide_values runs: that short, it cannot be told
-        from a code or a count. Read with getattr, as the trail reads the
-        VIN: a client built without the constructor must not turn a working
-        command into an exception."""
+        (hide_values): the session token and its refresh token, the
+        long-lived cidpsso token, the user id - the account's and the one
+        the session was issued to - the e-mail address, and the app id its
+        signed calls send, which for an area signed with local keys is the
+        owner's own (#105). The VIN is shortened instead, to its last four
+        characters, as the command trail shows it (_shorten_vin). A user id
+        shorter than six characters is left, as everywhere hide_values runs:
+        that short, it cannot be told from a code or a count. Read with
+        getattr, as the trail reads the VIN: a client built without the
+        constructor must not turn a working command into an exception."""
         return tuple(getattr(self, name, None) for name in
-                     ("_jwt", "cidpsso_token", "user_id", "_jwt_uid", "email", "app_id"))
+                     ("_jwt", "_rt", "cidpsso_token", "user_id", "_jwt_uid",
+                      "email", "app_id"))
 
     def _said(self, j: dict, *sent: Any) -> str:
         """An answer as error text: redact() by key, then hide_values() by
@@ -1298,7 +1317,9 @@ class GeelyApi(CommandTrail):
         raise RuntimeError(f"APAC session exchange failed: {self._said(j, ac)}")
 
     def refresh_jwt(self) -> dict:
-        """Exchange a cidpsso accessCode for an apis.ecloudeu.com JWT.
+        """Renew the apis JWT: with the session's refresh token while one is
+        held (EU/NA, PUT session/secure, #101), else by exchanging a cidpsso
+        accessCode, which starts a session or replaces a refused refresh token.
 
         APAC uses a different exchange (public host, receiverId body); see
         _apac_session_exchange.
@@ -1309,6 +1330,12 @@ class GeelyApi(CommandTrail):
             self._jwt_uid = d.get("userId") or self.user_id
             self._jwt_exp = int(time.time()) + _lifetime(d.get("expiresIn"), 7200)
             return d
+        # A held refresh token renews without spending the cidpsso token; the
+        # login code exchange below is the fallback when the gateway refuses.
+        if self._rt and self._jwt:
+            d = self._renew_with_refresh_token()
+            if d is not None:
+                return d
         # The code must be minted by the SAME regional backend that will
         # exchange it - the rule the APAC path already documents. A Brazilian
         # account resolved to NA proved the EU-minted default fails the
@@ -1347,8 +1374,115 @@ class GeelyApi(CommandTrail):
         d = j["data"]
         self._jwt = d["accessToken"]
         self._jwt_uid = d["userId"]
-        self._jwt_exp = int(time.time()) + _lifetime(d.get("expiresIn"), 7200)
+        rt = d.get("refreshToken")
+        self._rt = rt if isinstance(rt, str) and rt else None
+        self._set_jwt_lifetime(d)
+        self._publish_pair()
         return d
+
+    def _set_jwt_lifetime(self, d: dict) -> None:
+        """Record the JWT's expiry; with a refresh token, renew at half of it,
+        as the PUT is refused (1404) once the JWT it carries has expired."""
+        life = _lifetime(d.get("expiresIn"), 7200)
+        now = int(time.time())
+        self._jwt_exp = now + life
+        self._jwt_renew_at = now + life // 2 if self._rt else None
+
+    def _renew_due(self) -> bool:
+        if not self._jwt:
+            return True
+        due = self._jwt_renew_at
+        return time.time() > (self._jwt_exp - 60 if due is None else due)
+
+    def _jwt_live(self) -> bool:
+        return bool(self._jwt) and time.time() <= self._jwt_exp - 60
+
+    def _drop_refresh_token(self) -> None:
+        """Forget a refused refresh token; renewal returns to expiry, and a
+        pair not yet written to the entry is abandoned with it."""
+        self._rt = None
+        self._jwt_renew_at = None
+        vars(self).pop("_pending_pair", None)
+
+    def _renew_with_refresh_token(self) -> dict | None:
+        """Renew the JWT with PUT session/secure, as the app does (#101).
+
+        None when the gateway refuses (1402, 1403, 1404, 1408, or no token in a
+        success): refresh_jwt then runs the login code exchange. Any other
+        answer is RuntimeError while the JWT lives, so it is kept and retried,
+        and a refusal once it has expired. A transport fault propagates."""
+        sent = (self._jwt, self._rt)
+        body = json.dumps({"refreshToken": self._rt}).encode()
+        status, resp = self._mtls_send(
+            self.control_host, "PUT", "/auth/account/session/secure", body,
+            extra_headers=self._jwt_headers(self._jwt),
+        )
+        try:
+            j = json.loads(resp)
+        except ValueError:
+            j = None
+        j = j if isinstance(j, dict) else {"answer": j}
+        d = j.get("data")
+        token = d.get("accessToken") if isinstance(d, dict) else None
+        code = j.get("code")
+        if code in (1000, "1000") and isinstance(token, str) and token:
+            self._jwt = token
+            rt = d.get("refreshToken")
+            if isinstance(rt, str) and rt:
+                self._rt = rt
+            self._set_jwt_lifetime(d)
+            self._publish_pair()
+            _LOGGER.debug("JWT renewed with the session refresh token "
+                          "(expiresIn=%s)", _lifetime(d.get("expiresIn"), 7200))
+            return d
+        refused = (code in _REFRESH_REFUSED_CODES or code in (1000, "1000")
+                   or _is_auth_failure(j))
+        if not refused and self._jwt_live():
+            raise RuntimeError(
+                f"session refresh failed: {self._said(j, *sent)}")
+        _LOGGER.warning("session refresh token refused; a login code exchange "
+                        "replaces it: %s", self._said(j, *sent))
+        self._drop_refresh_token()
+        return None
+
+    def _publish_pair(self) -> None:
+        # One assignment, so take_renewed_jwt on the event loop never reads
+        # a JWT from one renewal beside the refresh token of another.
+        self._pending_pair = (self._jwt, self._rt) if self._rt else ("", "")
+
+    def take_renewed_jwt(self) -> tuple[str, str] | None:
+        """The JWT and its refresh token once per renewal, for the entry; two
+        empty strings when the gateway gave no refresh token, so a stale pair
+        is cleared. Not take_renewed_session: that is the Geely EM adapter's."""
+        # dict.pop is one step under the GIL: a renewal landing meanwhile is
+        # either taken now or left for the next call, never lost.
+        return vars(self).pop("_pending_pair", None)
+
+    def holds_refresh_token(self) -> bool:
+        """Whether the session renews with a refresh token (EU/NA only)."""
+        return bool(self._rt) and self.control_host != "apis.ecloudkr.com"
+
+    def session_keepalive_applies(self) -> bool:
+        """Whether this backend's sessions carry a refresh token (EU/NA)."""
+        return self.control_host != "apis.ecloudkr.com"
+
+    def keep_session_alive(self) -> None:
+        """Renew a due JWT with the refresh token's PUT and nothing else, so a
+        poll interval past half the grant (Super Eco, Manual) finds it alive.
+        Never the login code exchange: a new session signs the phone app out.
+        A refusal drops the token; the next poll or command exchanges a code."""
+        if not self.holds_refresh_token():
+            return
+        with self._jwt_lock:
+            if not (self.holds_refresh_token() and self._jwt
+                    and self._renew_due()):
+                return
+            try:
+                self._renew_with_refresh_token()
+            except (OSError, ValueError, RuntimeError) as e:
+                # The JWT is untouched; a poll or the next tick tries again.
+                _LOGGER.debug("session keepalive renewal failed: %s",
+                              self.without_secrets(e))
 
     def _ensure_jwt(self) -> str:
         """Return a live JWT, refreshing it at most once across all threads.
@@ -1365,11 +1499,19 @@ class GeelyApi(CommandTrail):
         cached, and the second thread re-tests expiry inside the lock so it
         reuses what the first one just fetched.
         """
-        if self._jwt and time.time() <= self._jwt_exp - 60:
+        if not self._renew_due():
             return self._jwt
         with self._jwt_lock:
-            if not self._jwt or time.time() > self._jwt_exp - 60:
-                self.refresh_jwt()
+            if self._renew_due():
+                try:
+                    self.refresh_jwt()
+                except (OSError, ValueError, RuntimeError) as e:
+                    # An early renewal that failed in transit leaves the live
+                    # JWT usable; the next call tries again.
+                    if not self._jwt_live():
+                        raise
+                    _LOGGER.debug("early JWT renewal failed, keeping the live "
+                                  "token: %s", self.without_secrets(e))
             if not self._jwt:
                 # refresh_jwt returned without setting a token; better to fail
                 # here than to format None into an Authorization header.
@@ -1377,8 +1519,11 @@ class GeelyApi(CommandTrail):
             return self._jwt
 
     def _headers_with_jwt(self) -> dict:
+        return self._jwt_headers(self._ensure_jwt())
+
+    def _jwt_headers(self, token: str) -> dict:
         return {
-            "Authorization": self._ensure_jwt(),
+            "Authorization": token,
             "X-CLIENT-ID": self.client_id,
             "X-VEHICLE-SERIES": self.vehicle_series,
             "X-VEHICLE-MODEL": self.vehicle_model,
@@ -1410,10 +1555,23 @@ class GeelyApi(CommandTrail):
             # re-authentication on good credentials. A GeelyAuthError from the
             # refresh still means the cidpsso token is dead too.
             with self._jwt_lock:
-                if self._jwt == headers["Authorization"]:
-                    self._jwt = None
+                refused = headers["Authorization"]
+                if self._jwt == refused:
+                    # The refresh token's PUT has to carry the refused JWT.
+                    had_rt = bool(self._rt)
+                    if not had_rt:
+                        self._jwt = None
                     self._jwt_exp = 0
+                    self._jwt_renew_at = None
                     self.refresh_jwt()
+                    if had_rt and self._jwt == refused:
+                        # The PUT handed the refused token back: it cannot
+                        # renew this session, so exchange a login code.
+                        _LOGGER.info("session refresh returned the refused "
+                                     "token; exchanging a login code")
+                        self._drop_refresh_token()
+                        self._jwt = None
+                        self.refresh_jwt()
             retry = self._headers_with_jwt()
             sent.append(retry["Authorization"])
             status, resp = self._mtls_send(

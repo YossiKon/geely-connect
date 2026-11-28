@@ -394,12 +394,16 @@ def test_reauth_with_a_different_account_is_refused():
 def test_reauth_with_the_same_account_refreshes_the_token():
     cf, flow = _flow()
     entry = _Entry(email=EMAIL)
+    # The old token's session pair, as a poll keeps it (#101).
+    entry.data.update(access_token="old-jwt", refresh_token="old-rt")
     flow._reauth_entry = entry
     flow._email, flow._user_id, flow._cidpsso_token = EMAIL, USER_ID, "new-token"
     flow._idfa, flow._idfv = "A", "V"
     res = asyncio.run(flow._finish_with_vehicle(_vehicle()))
     assert res["type"] == "abort" and res["reason"] == "reauth_successful"
     assert entry.data["cidpsso_token"] == "new-token"
+    for kept in ("access_token", "refresh_token"):
+        assert kept not in entry.data, "the new login starts its own session"
 
 
 def test_reauth_email_comparison_ignores_case_and_whitespace():

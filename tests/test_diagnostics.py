@@ -605,6 +605,35 @@ def test_a_refusal_the_original_platform_hands_back_is_masked_in_the_report():
         assert value not in row["message"], f"the {label} survived: {row}"
 
 
+def test_the_kept_session_pair_and_the_live_one_never_reach_the_report():
+    """The entry keeps the original platform's JWT and refresh token as
+    access_token and refresh_token (#101), and the client holds a newer pair
+    once a renewal ran. Both passes mask the stored names, and a gateway's
+    sentence naming any of the four values is cleared as well."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    api = load("api")
+    kept_jwt, kept_rt = "jwt-session-0007-kept", "rt-session-0007-kept"
+    live_jwt, live_rt = "jwt-session-0008-live", "rt-session-0008-live"
+    a = api.GeelyApi(app_id="APPID", app_secret="0" * 32, user_id=USER_ID,
+                     vin=FAKE_VIN, cidpsso_token=TOKEN, client_id="CLIENT",
+                     vehicle_series="E245", vehicle_model="E245-J1",
+                     device_id="dev", cert_path="", key_path="", email=EMAIL,
+                     access_token=kept_jwt, refresh_token=kept_rt)
+    a._jwt, a._rt = live_jwt, live_rt
+    a._headers_with_jwt = lambda: {"Authorization": a._jwt}
+    words = f"sessions {kept_jwt} {kept_rt} {live_jwt} {live_rt} refused"
+    a._mtls_send = lambda host, method, path, body, extra_headers=None: (
+        200, json.dumps({"code": "8155", "message": words}).encode())
+    report = _swept(a, {"access_token": kept_jwt, "refresh_token": kept_rt})
+    assert report["entry_data"]["access_token"] == "**REDACTED**"
+    assert report["entry_data"]["refresh_token"] == "**REDACTED**"
+    assert "refused" in report["charge_server"]["1"]["message"], report
+    for text in _strings(report):
+        for value in (kept_jwt, kept_rt, live_jwt, live_rt):
+            assert value not in text, text
+
+
 def test_an_address_the_entry_keeps_as_typed_is_masked_in_any_case():
     """The original platform keeps the address as it was typed; a gateway
     may name it lower-cased, in a slot's sentence or anywhere else the
